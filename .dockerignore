@@ -1,0 +1,15 @@
+**/.git
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+backend/db.sqlite3
+backend/vac_cache
+backend/.env
+frontend/.env
+.node20
+*.md
+!deploy/DEPLOY.md
+terminals
+assets

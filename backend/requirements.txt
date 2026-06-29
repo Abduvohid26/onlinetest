@@ -1,0 +1,4 @@
+# Barcha muhit: requirements/prod.txt ni ko'ring
+# Dev: pip install -r requirements/dev.txt
+# Prod: pip install -r requirements/prod.txt  (yoki shu fayl Docker uchun)
+-r requirements/prod.txt

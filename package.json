@@ -1,0 +1,15 @@
+{
+  "name": "fjsti-online-exam-monorepo",
+  "private": true,
+  "version": "2.0.0",
+  "description": "Frontend: frontend/. Backend: backend/ (Django + Django Channels). Realtime: WebSocket via Django.",
+  "scripts": {
+    "build:front": "node scripts/check-node.mjs && cd frontend && npm run build",
+    "check:node": "node scripts/check-node.mjs",
+    "ci:backend": "cd backend && python manage.py check && python manage.py test apps.api.tests -v 1"
+  },
+  "engines": {
+    "node": ">=20.19 <23",
+    "npm": ">=10"
+  }
+}

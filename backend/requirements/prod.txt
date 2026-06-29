@@ -1,0 +1,5 @@
+-r base.txt
+
+# Production ASGI server
+gunicorn>=25.1,<26
+uvicorn[standard]>=0.30

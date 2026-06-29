@@ -1,0 +1,26 @@
+[Unit]
+Description=FJSTI Online Exam Celery Worker (proctor AI tasklari)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+PrivateTmp=yes
+NoNewPrivileges=yes
+RuntimeDirectory=onlinetest
+EnvironmentFile=/etc/onlinetest/api.env
+Environment=XDG_RUNTIME_DIR=/run/onlinetest
+Environment=HOME=/var/www/onlinetest/backend
+WorkingDirectory=/var/www/onlinetest/backend
+ExecStart=/var/www/onlinetest/backend/.venv/bin/celery \
+  -A exam_platform worker \
+  --loglevel=info \
+  --concurrency=2 \
+  --max-tasks-per-child=200
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

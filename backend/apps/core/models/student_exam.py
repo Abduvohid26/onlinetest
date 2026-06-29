@@ -1,0 +1,41 @@
+from django.db import models
+
+from .exam import Exam
+from .user import AppUser
+
+
+class StudentExam(models.Model):
+    student = models.ForeignKey(
+        AppUser, on_delete=models.CASCADE, db_column="student_id", to_field="id"
+    )
+    exam = models.ForeignKey(Exam, on_delete=models.CASCADE, db_column="exam_id")
+    status = models.CharField(max_length=20, default="Pending")
+    score = models.IntegerField(null=True, blank=True)
+    answers_json = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    flagged_questions_json = models.TextField(default="[]")
+    session_questions_json = models.TextField(blank=True, null=True)
+    draft_answers_json = models.TextField(default="{}")
+    draft_flagged_json = models.TextField(default="[]")
+    draft_updated_at = models.DateTimeField(null=True, blank=True)
+    result_public_id = models.CharField(max_length=100, blank=True, null=True, unique=True)
+    result_verify_secret = models.CharField(max_length=128, blank=True, null=True)
+    ai_summary_json = models.TextField(blank=True, null=True)
+    device_fingerprint = models.CharField(max_length=128, blank=True, default="")
+    device_bound_at = models.DateTimeField(null=True, blank=True)
+    session_signing_key = models.CharField(max_length=128, blank=True, default="")
+    session_request_seq = models.PositiveIntegerField(default=1)
+    session_challenge = models.CharField(max_length=64, blank=True, default="")
+    device_session_token = models.CharField(max_length=128, blank=True, default="")
+    identity_verified_at = models.DateTimeField(null=True, blank=True)
+    proctor_official_warnings = models.PositiveSmallIntegerField(default=0)
+    proctor_last_warning_at = models.DateTimeField(null=True, blank=True)
+    proctor_last_frame_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "core"
+        db_table = "student_exams"
+        indexes = [
+            models.Index(fields=["student", "exam"]),
+        ]

@@ -1,0 +1,79 @@
+# Ishga tushirish: docker compose up --build
+# Brauzer: http://127.0.0.1:8080  ·  Loglar: docker compose logs -f
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: onlinetest
+      POSTGRES_USER: onlinetest
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev-postgres-password}
+    ports:
+      # Host'dan ulanish (psql / testlar) uchun ochilgan.
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U onlinetest"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: onlinetest:local
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8080:8080"
+    env_file:
+      - backend/.env
+    environment:
+      DJANGO_DEBUG: "1"
+      IDENTITY_VERIFY_DEBUG_LOG: "1"
+      DATABASE_URL: postgres://onlinetest:${POSTGRES_PASSWORD:-dev-postgres-password}@db:5432/onlinetest
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-docker-dev-jwt-secret-min-24-chars}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
+
+  # Celery worker — proctor-frame AI tasklarini web jarayonidan tashqarida bajaradi.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: onlinetest:local
+    restart: unless-stopped
+    entrypoint: ["/app/docker-worker-entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - backend/.env
+    environment:
+      DJANGO_DEBUG: "1"
+      DATABASE_URL: postgres://onlinetest:${POSTGRES_PASSWORD:-dev-postgres-password}@db:5432/onlinetest
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-docker-dev-jwt-secret-min-24-chars}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
+
+volumes:
+  pg-data:
+  redis-data:

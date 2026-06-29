@@ -1,0 +1,37 @@
+export type Level = { id: number; name: string };
+
+export type Group = {
+  id: number;
+  name: string;
+  level_id: number;
+  level_name: string;
+  program_track?: string;
+  academic_year?: number | null;
+};
+
+export type StudentRow = {
+  id: string;
+  name: string;
+  role: string;
+  status: string;
+  group_id: number | null;
+  profile_image?: string | null;
+  has_photo?: boolean;
+  group_name?: string | null;
+};
+
+export type BanAppeal = {
+  id: number;
+  student_id: string;
+  student_name: string;
+  exam_title?: string;
+  reason: string;
+  created_at: string;
+};
+
+export type AdminStats = {
+  totalUsers: number;
+  totalExams: number;
+  totalViolations: number;
+  bannedUsers: number;
+};

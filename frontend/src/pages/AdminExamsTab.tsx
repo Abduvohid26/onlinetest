@@ -1,0 +1,470 @@
+import React, { useState, useEffect, useCallback } from 'react';
+import { apiUrl } from '../lib/apiUrl';
+import { readJsonSafe } from '../lib/http';
+import { translations, Language } from '../i18n';
+import { motion, AnimatePresence } from 'motion/react';
+import { ExamSettings } from '../components/ExamSettings';
+import { LiveMonitor } from '../components/LiveMonitor';
+import { ExamEditModal } from '../components/ExamEditModal';
+import { AdminBtn, AdminSelect, AdminEmpty } from './admin/ui';
+
+const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
+const item: any = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 26 } } };
+
+export function AdminExamsTab({
+  token,
+  lang,
+  hideExamSettings,
+  apiVariant = 'admin',
+}: {
+  token: string;
+  lang: Language;
+  hideExamSettings?: boolean;
+  apiVariant?: 'admin' | 'staff';
+}) {
+  const [exams, setExams] = useState<any[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
+  const [selectedExam, setSelectedExam] = useState<any>(null);
+  const [results, setResults] = useState<any>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('All');
+  const [examListFilter, setExamListFilter] = useState<string>('All');
+  const [recommendedOnly, setRecommendedOnly] = useState(false);
+  const [activeMonitorExamId, setActiveMonitorExamId] = useState<number | null>(null);
+  const [editingExamId, setEditingExamId] = useState<number | null>(null);
+  const t = translations[lang];
+  const examsListUrl = apiVariant === 'staff' ? '/api/staff/exams' : '/api/admin/exams';
+  const resultsUrl = (examId: number) => apiVariant === 'staff' ? `/api/staff/exams/${examId}/results` : `/api/admin/exams/${examId}/results`;
+  const isStaffPortal = apiVariant === 'staff';
+
+  const fetchExams = useCallback(async () => {
+    const res = await fetch(apiUrl(examsListUrl), { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) { const raw = await readJsonSafe<unknown>(res); setExams(Array.isArray(raw) ? raw : []); }
+  }, [token, examsListUrl]);
+
+  const fetchGroups = useCallback(async () => {
+    if (isStaffPortal) return;
+    const res = await fetch(apiUrl('/api/admin/groups'), { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) { const raw = await readJsonSafe<unknown>(res); setGroups(Array.isArray(raw) ? raw : []); }
+  }, [token, isStaffPortal]);
+
+  useEffect(() => { void fetchExams(); void fetchGroups(); }, [fetchExams, fetchGroups]);
+
+  const viewResults = async (examId: number) => {
+    const res = await fetch(apiUrl(resultsUrl(examId)), { headers: { Authorization: `Bearer ${token}` } });
+    if (res.ok) {
+      const raw = await readJsonSafe<unknown>(res);
+      setResults(raw && typeof raw === 'object' ? raw : null);
+      setSelectedExam(examId);
+      setSortConfig(null);
+      setFilterStatus('All');
+      setRecommendedOnly(false);
+    }
+  };
+
+  const allowRetake = async (studentExamId: number) => {
+    if (isStaffPortal) return;
+    await fetch(apiUrl(`/api/admin/student_exams/${studentExamId}/retake`), {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    });
+    if (selectedExam != null) viewResults(selectedExam);
+  };
+
+  const exportCSV = () => {
+    if (!results?.results) return;
+    const exam = exams.find((e: any) => e.id === selectedExam) as any;
+    const headers = ['Student ID', 'Student Name', 'Score', 'Status', 'Started At', 'Completed At', 'Violations'];
+    const rows = results.results.map((r: any) => {
+      const violations = results.violations.filter((v: any) => v.student_id === r.student_id);
+      const violText = violations.map((v: any) => `${v.violation_type} (${new Date(v.timestamp).toLocaleTimeString()})`).join('; ');
+      return [r.student_id, r.name, r.score ?? '-', r.status, r.started_at ? new Date(r.started_at).toLocaleString() : '-', r.completed_at ? new Date(r.completed_at).toLocaleString() : '-', `"${violText}"`];
+    });
+    const csv = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r: any[]) => r.join(','))].join('\n');
+    const link = document.createElement('a');
+    link.href = encodeURI(csv);
+    link.download = `exam_${exam?.title || selectedExam}_results.csv`;
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  };
+
+  const handleSort = (key: string) => {
+    setSortConfig((prev) => ({ key, direction: prev?.key === key && prev.direction === 'asc' ? 'desc' : 'asc' }));
+  };
+
+  const getSortedAndFilteredResults = () => {
+    if (!results?.results) return [];
+    let filtered = results.results;
+    if (filterStatus !== 'All') filtered = filtered.filter((r: any) => r.status === filterStatus);
+    if (recommendedOnly) filtered = filtered.filter((r: any) => Boolean(r.recommended_review));
+    if (sortConfig) {
+      filtered = [...filtered].sort((a: any, b: any) => {
+        if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+    return filtered;
+  };
+
+  const calculateTimeTaken = (start: string, end: string) => {
+    if (!start || !end) return '-';
+    const diff = new Date(end).getTime() - new Date(start).getTime();
+    return `${Math.floor(diff / 60000)}m ${Math.floor((diff % 60000) / 1000)}s`;
+  };
+
+  const getIncorrectAnswers = (answersJson: string, questionsJson: string) => {
+    if (!answersJson || !questionsJson) return [];
+    try {
+      const answers = JSON.parse(answersJson) as Record<string, string>;
+      const questions = JSON.parse(questionsJson) as Array<{ id: number | string; text?: string; correctAnswer?: string }>;
+      if (!answers || typeof answers !== 'object' || !Array.isArray(questions)) return [];
+      const incorrect: any[] = [];
+      questions.forEach((q: any) => {
+        const qid = String(q.id ?? '');
+        if (!qid) return;
+        const studentAnswer = answers[qid] ?? answers[String(Number(qid))];
+        if (studentAnswer !== q.correctAnswer) incorrect.push({ question: q.text, studentAnswer, correctAnswer: q.correctAnswer });
+      });
+      return incorrect;
+    } catch { return []; }
+  };
+
+  const getFlaggedCount = (flaggedJson: string) => {
+    if (!flaggedJson) return 0;
+    try { const p = JSON.parse(flaggedJson); return Array.isArray(p) ? p.length : 0; } catch { return 0; }
+  };
+
+  const ExamStatusBadge = ({ e }: { e: any }) => {
+    const status = getExamTimeStatus(e);
+    if (status === 'upcoming') return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Upcoming</span>;
+    if (status === 'ended') return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Ended</span>;
+    return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 animate-pulse">Live</span>;
+  };
+
+  const getExamTimeStatus = (e: any): 'upcoming' | 'live' | 'ended' => {
+    const now = Date.now();
+    const start = new Date(e.start_time).getTime();
+    const end = new Date(e.end_time).getTime();
+    if (now < start) return 'upcoming';
+    if (now > end) return 'ended';
+    return 'live';
+  };
+
+  const filteredExams = exams.filter((e) => {
+    if (examListFilter === 'All') return true;
+    const st = getExamTimeStatus(e);
+    if (examListFilter === 'Upcoming') return st === 'upcoming';
+    if (examListFilter === 'Live') return st === 'live';
+    if (examListFilter === 'Ended') return st === 'ended';
+    return true;
+  });
+
+  return (
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
+      {/* Exam settings (create form) */}
+      {!hideExamSettings && (
+        <motion.div variants={item}>
+          <ExamSettings token={token} lang={lang} groups={groups} onSuccess={fetchExams} />
+        </motion.div>
+      )}
+
+      {/* ── Exams list ── */}
+      <motion.div variants={item}>
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="px-5 py-4 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
+                <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-[15px] font-semibold text-gray-900">{isStaffPortal ? t.staffMyExamsTitle : t.exams}</h2>
+                <p className="text-[12px] text-gray-400 mt-0.5">
+                  {filteredExams.length}
+                  {examListFilter !== 'All' ? ` / ${exams.length}` : ''}{' '}
+                  {lang === 'ru' ? 'экзамен' : lang === 'en' ? 'exams' : 'imtihon'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-gray-500 shrink-0">{t.examFilterStatus}</span>
+              <AdminSelect
+                value={examListFilter}
+                onChange={(e) => setExamListFilter(e.target.value)}
+                className="h-9 w-auto min-w-[9rem] text-[13px]"
+              >
+                <option value="All">{t.examFilterAll}</option>
+                <option value="Upcoming">{t.examFilterUpcoming}</option>
+                <option value="Live">{t.examFilterLive}</option>
+                <option value="Ended">{t.examFilterEnded}</option>
+              </AdminSelect>
+            </div>
+          </div>
+
+          <div className="p-4">
+            {filteredExams.length === 0 ? (
+              <AdminEmpty
+                icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>}
+                title={isStaffPortal ? t.staffNoExamsHint : t.adminNoExamsYet}
+              />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredExams.map((e: any, i: number) => (
+                  <motion.div
+                    key={e.id}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.04 }}
+                    className={`border rounded-lg p-4 flex flex-col gap-3 transition-colors ${selectedExam === e.id ? 'border-indigo-300 bg-indigo-50/40' : 'border-gray-200 bg-white hover:border-gray-300'}`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900 text-[15px] leading-snug">{e.title}</p>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                          <ExamStatusBadge e={e} />
+                          {e.exam_mode === 'bank_mixed' && (
+                            <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{t.bankExamBadge}</span>
+                          )}
+                          <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium uppercase">{e.language}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
+                        <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">Start</p>
+                        <p className="text-[12px] text-gray-700 font-medium">{new Date(e.start_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
+                      </div>
+                      <div className="bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
+                        <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">End</p>
+                        <p className="text-[12px] text-gray-700 font-medium">{new Date(e.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 bg-gray-50 rounded-lg px-2.5 py-1.5 border border-gray-200">
+                        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        <span className="text-[12px] text-gray-600 font-semibold">{e.duration_minutes} min</span>
+                      </div>
+                      {e.exam_mode === 'bank_mixed' && e.bank_question_count && (
+                        <div className="bg-indigo-50 rounded-lg px-2.5 py-1.5 border border-indigo-100">
+                          <span className="text-[12px] text-indigo-700 font-semibold">{e.bank_question_count} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2 mt-auto pt-2 border-t border-gray-100">
+                      <AdminBtn variant="ghost" size="sm" onClick={() => setActiveMonitorExamId(e.id)} className="flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                        Monitor
+                      </AdminBtn>
+                      <AdminBtn variant={selectedExam === e.id ? 'violet' : 'ghost'} size="sm" onClick={() => viewResults(e.id)} className="flex-1">
+                        {t.results}
+                      </AdminBtn>
+                      {!isStaffPortal && (
+                        <AdminBtn variant="ghost" size="sm" onClick={() => setEditingExamId(e.id)} className="flex-1">
+                          {t.edit}
+                        </AdminBtn>
+                      )}
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* ── Results panel ── */}
+      <AnimatePresence mode="wait">
+        {results && (
+          <motion.div
+            key="results"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+          >
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 bg-gray-50/50">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <h2 className="text-[15px] font-semibold text-gray-900">{t.results}</h2>
+                    {results?.review_priority_counts && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className="text-[12px] px-2.5 py-1 rounded-full border border-red-200 bg-red-50 text-red-700 font-semibold">Critical: {results.review_priority_counts.critical || 0}</span>
+                        <span className="text-[12px] px-2.5 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-semibold">High: {results.review_priority_counts.high || 0}</span>
+                        <span className="text-[12px] px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700 font-semibold">Medium: {results.review_priority_counts.medium || 0}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <AdminSelect value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="h-9 text-[13px] !w-[150px] shrink-0">
+                      <option value="All">All Statuses</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Pending">Pending</option>
+                      <option value="Banned">Banned</option>
+                    </AdminSelect>
+                    <div className="flex gap-1 bg-white border border-gray-200 p-1 rounded-xl">
+                      {['score', 'name', 'risk_score'].map((key) => (
+                        <button key={key} type="button" onClick={() => handleSort(key)}
+                          className={`px-3 py-1 text-[12px] font-semibold rounded-lg transition-colors ${sortConfig?.key === key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100 text-gray-600'}`}>
+                          {key === 'risk_score' ? 'Risk' : key.charAt(0).toUpperCase() + key.slice(1)}
+                          {sortConfig?.key === key && (sortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
+                        </button>
+                      ))}
+                    </div>
+                    <AdminBtn variant={recommendedOnly ? 'violet' : 'ghost'} size="sm" onClick={() => setRecommendedOnly((v) => !v)}>
+                      Recommended
+                    </AdminBtn>
+                    {!isStaffPortal && <AdminBtn variant="ghost" size="sm" onClick={exportCSV}>{t.exportCsv}</AdminBtn>}
+                    <AdminBtn variant="ghost" size="sm" onClick={() => { setResults(null); setSelectedExam(null); }}>
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                    </AdminBtn>
+                  </div>
+                </div>
+              </div>
+
+              <div className="divide-y divide-gray-100 max-h-[70vh] overflow-y-auto">
+                {getSortedAndFilteredResults().map((r: any) => {
+                  const studentViolations = results.violations.filter((v: any) => v.student_id === r.student_id);
+                  const timeTaken = calculateTimeTaken(r.started_at, r.completed_at);
+                  const flaggedCount = getFlaggedCount(r.flagged_questions_json);
+                  const incorrectAnswers = getIncorrectAnswers(r.answers_json, r.questions_json || results.questions_json);
+
+                  return (
+                    <div key={r.id} className="px-5 py-4 hover:bg-gray-50/50 transition-colors">
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-gray-100 text-gray-600 font-semibold flex items-center justify-center text-[15px] shrink-0">
+                            {r.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-gray-900 text-[15px]">{r.name}</h3>
+                            <p className="text-[13px] text-gray-400 font-mono">{r.student_id}</p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                              {r.recommended_review && <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 font-semibold">Review</span>}
+                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Risk: {r.risk_score ?? 0}</span>
+                              <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium uppercase ${r.highest_priority === 'critical' ? 'bg-red-50 border-red-200 text-red-700' : r.highest_priority === 'high' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
+                                {r.highest_priority || 'medium'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-[12px] font-semibold shrink-0 border ${r.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : r.status === 'Banned' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
+                          {r.status}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                        {[
+                          { label: 'Score', value: r.score !== null ? r.score : '—', cls: 'text-2xl font-extrabold text-gray-900' },
+                          { label: 'Time', value: timeTaken, cls: 'text-[15px] font-semibold text-gray-700' },
+                          { label: 'Flagged', value: `${flaggedCount} qs`, cls: 'text-[15px] font-semibold text-amber-600' },
+                          { label: 'Incorrect', value: `${incorrectAnswers.length} qs`, cls: 'text-[15px] font-semibold text-red-600' },
+                        ].map((s) => (
+                          <div key={s.label} className="bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
+                            <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{s.label}</p>
+                            <p className={s.cls}>{s.value}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      {incorrectAnswers.length > 0 && r.status === 'Completed' && (
+                        <details className="group mb-3">
+                          <summary className="text-[13px] font-semibold text-gray-600 cursor-pointer hover:text-indigo-700 transition-colors flex items-center gap-2 select-none py-1.5">
+                            <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                            View Incorrect Answers ({incorrectAnswers.length})
+                          </summary>
+                          <div className="mt-2 space-y-2 pl-5 border-l-2 border-red-100">
+                            {incorrectAnswers.map((inc: any, idx: number) => (
+                              <div key={idx} className="text-[13px] bg-red-50 p-3 rounded-xl border border-red-100">
+                                <p className="font-medium text-gray-800 mb-1.5">{inc.question}</p>
+                                <div className="flex flex-wrap gap-3 text-[12px]">
+                                  <span className="text-red-600">Student: <span className="font-bold">{inc.studentAnswer || 'None'}</span></span>
+                                  <span className="text-emerald-600">Correct: <span className="font-bold">{inc.correctAnswer}</span></span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {Array.isArray(r.question_risk_timeline) && r.question_risk_timeline.length > 0 && (
+                        <details className="group mb-3">
+                          <summary className="text-[13px] font-semibold text-gray-600 cursor-pointer hover:text-red-600 transition-colors flex items-center gap-2 select-none py-1.5">
+                            <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                            Question Risk Timeline ({r.question_risk_timeline.length})
+                          </summary>
+                          <div className="mt-2 flex flex-wrap gap-2 pl-5">
+                            {r.question_risk_timeline.map((q: any) => (
+                              <div key={q.question_id} className="text-[12px] bg-orange-50 px-2.5 py-1.5 rounded-xl border border-orange-100 flex items-center gap-1.5">
+                                <span className="font-bold text-gray-800">Q{q.question_no}</span>
+                                <span className="text-gray-500">r:{q.risk_score}</span>
+                                {q.flagged && <span className="text-red-600 font-semibold">🚩</span>}
+                                {q.incorrect && <span className="text-amber-600 font-semibold">✗</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
+
+                      {studentViolations.length > 0 && (
+                        <div className="bg-red-50 rounded-xl border border-red-100 p-3 mb-3">
+                          <p className="text-[13px] font-semibold text-red-700 mb-2 flex items-center gap-1.5">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                            Violations ({studentViolations.length})
+                          </p>
+                          <ul className="space-y-1">
+                            {studentViolations.map((v: any, i: number) => (
+                              <li key={i} className="text-[13px] text-red-600 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                                {v.violation_type}
+                                <span className="text-red-400 text-[11px]">({new Date(v.timestamp).toLocaleTimeString()})</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {!isStaffPortal && (r.status === 'Banned' || r.status === 'Completed') && (
+                        <AdminBtn variant="ghost" size="sm" onClick={() => allowRetake(r.id)}>{t.allowRetake}</AdminBtn>
+                      )}
+                    </div>
+                  );
+                })}
+                {getSortedAndFilteredResults().length === 0 && (
+                  <AdminEmpty
+                    icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
+                    title="No results match your criteria"
+                  />
+                )}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {activeMonitorExamId && (
+          <LiveMonitor examId={activeMonitorExamId} token={token} onClose={() => setActiveMonitorExamId(null)} />
+        )}
+      </AnimatePresence>
+
+      {editingExamId != null && !isStaffPortal && (
+        <ExamEditModal
+          token={token}
+          lang={lang}
+          examId={editingExamId}
+          groups={groups}
+          onClose={() => setEditingExamId(null)}
+          onSaved={(ev) => {
+            fetchExams();
+            if (ev.deleted && selectedExam === ev.examId) { setResults(null); setSelectedExam(null); }
+            setEditingExamId(null);
+          }}
+        />
+      )}
+    </motion.div>
+  );
+}

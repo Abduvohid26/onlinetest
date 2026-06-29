@@ -1,0 +1,340 @@
+import React, { useState, useEffect } from 'react';
+import { motion } from 'motion/react';
+import { translations, Language } from '../i18n';
+import { readJsonSafe } from '../lib/http';
+import { apiUrl } from '../lib/apiUrl';
+import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, PlusIcon } from './admin/ui';
+
+type ImportProgressState = {
+  running: boolean;
+  progress: number;
+  stage: string;
+  startedAt: number;
+};
+
+const sharedImportState: ImportProgressState = {
+  running: false, progress: 0, stage: '', startedAt: 0,
+};
+
+const STAGE_LABELS: Record<string, Record<Language, string>> = {
+  uploading:   { uz: 'Fayl yuborilmoqda...',            ru: 'Загрузка файла...',         en: 'Uploading file...' },
+  extracting:  { uz: 'Matn ajratilmoqda...',            ru: 'Извлечение текста...',       en: 'Extracting text...' },
+  parsing:     { uz: 'Savollar tahlil qilinmoqda...',   ru: 'Анализ вопросов...',         en: 'Parsing questions...' },
+  translating: { uz: 'Tarjima qilinmoqda (UZ/RU/EN)...', ru: 'Перевод (UZ/RU/EN)...',   en: 'Translating (UZ/RU/EN)...' },
+  saving:      { uz: 'Bazaga saqlanmoqda...',           ru: 'Сохранение в базу...',       en: 'Saving to bank...' },
+  done:        { uz: 'Tugadi ✓',                        ru: 'Готово ✓',                   en: 'Done ✓' },
+};
+
+function getStageLabel(elapsed: number, lang: Language): string {
+  const key = elapsed < 8 ? 'uploading' : elapsed < 20 ? 'extracting' : elapsed < 50 ? 'parsing' : elapsed < 90 ? 'translating' : 'saving';
+  return STAGE_LABELS[key][lang];
+}
+
+const SOURCE_LANGUAGE_OPTIONS = [
+  { value: 'auto', labelUz: 'Avtomatik aniqlash', labelRu: 'Авто', labelEn: 'Auto-detect' },
+  { value: 'uz',   labelUz: "O'zbek (lotin)",     labelRu: 'Узбекский',      labelEn: 'Uzbek' },
+  { value: 'ru',   labelUz: 'Rus',                labelRu: 'Русский',        labelEn: 'Russian' },
+  { value: 'en',   labelUz: 'Ingliz',             labelRu: 'Английский',     labelEn: 'English' },
+];
+
+function getLangLabel(opt: (typeof SOURCE_LANGUAGE_OPTIONS)[0], lang: Language): string {
+  if (lang === 'ru') return opt.labelRu;
+  if (lang === 'en') return opt.labelEn;
+  return opt.labelUz;
+}
+
+export function TestBankTab({ token, lang }: { token: string; lang: Language }) {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [collectionName, setCollectionName] = useState('');
+  const [sourceLanguage, setSourceLanguage] = useState('auto');
+  const [smartFile, setSmartFile] = useState<File | null>(null);
+  const [fileKey, setFileKey] = useState(0);
+  const [smartBusy, setSmartBusy] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importStage, setImportStage] = useState('');
+  const [msg, setMsg] = useState<{ type: 'ok' | 'err' | ''; text: string }>({ type: '', text: '' });
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const t = translations[lang];
+
+  const load = async () => {
+    const h = { Authorization: `Bearer ${token}` };
+    const cRes = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: h });
+    const c = cRes.ok ? await readJsonSafe<any[]>(cRes) : null;
+    setCategories(Array.isArray(c) ? c : []);
+  };
+
+  useEffect(() => { load(); }, [token]);
+
+  useEffect(() => {
+    setSmartBusy(sharedImportState.running);
+    setImportProgress(sharedImportState.progress);
+    setImportStage(sharedImportState.stage);
+    const timer = window.setInterval(() => {
+      if (!sharedImportState.running) return;
+      const elapsed = Math.floor((Date.now() - sharedImportState.startedAt) / 1000);
+      const p = Math.min(95, Math.floor(elapsed * 1.2));
+      sharedImportState.progress = p;
+      sharedImportState.stage = getStageLabel(elapsed, lang);
+      setImportProgress(p);
+      setImportStage(sharedImportState.stage);
+      setSmartBusy(true);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [lang]);
+
+  const delCategory = async (id: number) => {
+    if (!confirm(t.testBankCatDeleteConfirm)) return;
+    setDeletingId(id);
+    try {
+      await fetch(apiUrl(`/api/admin/test-bank/categories/${id}`), {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      load();
+    } finally { setDeletingId(null); }
+  };
+
+  const importSmart = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMsg({ type: '', text: '' });
+    const name = collectionName.trim();
+    if (!name) { setMsg({ type: 'err', text: t.testCollectionNameEn }); return; }
+    if (!smartFile) { setMsg({ type: 'err', text: t.testBankAiNeedPdf }); return; }
+    if (sharedImportState.running) {
+      setMsg({ type: 'err', text: lang === 'ru' ? 'Предыдущий анализ ещё не завершён.' : lang === 'en' ? 'Previous import still running.' : 'Oldingi tahlil hali tugamagan.' });
+      return;
+    }
+    const fn = smartFile.name?.toLowerCase() || '';
+    if (!fn.endsWith('.pdf') && !fn.endsWith('.docx') && !fn.endsWith('.doc')) {
+      setMsg({ type: 'err', text: lang === 'ru' ? 'Допустимые форматы: PDF, DOC, DOCX' : lang === 'en' ? 'Allowed formats: PDF, DOC, DOCX' : 'Ruxsat etilgan formatlar: PDF, DOC, DOCX' });
+      return;
+    }
+    if (smartFile.size > 50 * 1024 * 1024) {
+      setMsg({ type: 'err', text: lang === 'ru' ? 'Файл слишком большой (макс. 50 МБ).' : lang === 'en' ? 'File too large (max 50 MB).' : 'Fayl juda katta (maks. 50 MB).' });
+      return;
+    }
+
+    setSmartBusy(true);
+    sharedImportState.running = true;
+    sharedImportState.progress = 3;
+    sharedImportState.stage = STAGE_LABELS.uploading[lang];
+    sharedImportState.startedAt = Date.now();
+    setImportProgress(3);
+    setImportStage(sharedImportState.stage);
+
+    try {
+      const fd = new FormData();
+      fd.append('file', smartFile);
+      fd.append('collection_name', name);
+      fd.append('language', sourceLanguage);
+      const res = await fetch(apiUrl('/api/admin/test-bank/import-smart'), {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+      });
+      const d = await readJsonSafe<{
+        error?: string; detail?: string; inserted?: number; detected?: number;
+        chunks?: number; source_language?: string; translation_limited?: boolean;
+        ai_skipped_for_size?: boolean; categories?: { name: string; questions_added: number }[];
+      }>(res);
+
+      if (res.ok && d && typeof d.inserted === 'number') {
+        sharedImportState.progress = 100;
+        sharedImportState.stage = STAGE_LABELS.done[lang];
+        setImportProgress(100);
+        setImportStage(STAGE_LABELS.done[lang]);
+        const catLines = Array.isArray(d.categories) && d.categories.length
+          ? d.categories.map((c) => `${c.name}: +${c.questions_added}`).join('; ') : '';
+        const detectedNote = typeof d.detected === 'number' ? ` · topildi: ${d.detected}` : '';
+        const srcLangNote = d.source_language ? ` · til: ${d.source_language}` : '';
+        const chunksNote = d.chunks && d.chunks > 1 ? ` · bo'laklari: ${d.chunks}` : '';
+        const localNote = d.ai_skipped_for_size ? ' · katta fayl: lokal parser' : '';
+        const trNote = d.translation_limited ? ' · tarjima qisman' : '';
+        setMsg({ type: 'ok', text: `${t.testBankAiResult.replace('{n}', String(d.inserted))}${detectedNote}${srcLangNote}${catLines ? ` — ${catLines}` : ''}${chunksNote}${localNote}${trNote}` });
+        setSmartFile(null);
+        setFileKey((k) => k + 1);
+        setCollectionName('');
+        load();
+      } else {
+        setMsg({ type: 'err', text: d?.error || d?.detail || (lang === 'ru' ? 'Ошибка импорта' : lang === 'en' ? 'Import error' : 'Import xatosi') });
+      }
+    } catch {
+      setMsg({ type: 'err', text: lang === 'ru' ? 'Ошибка сети или таймаут.' : lang === 'en' ? 'Network error or timeout.' : 'Tarmoq xatosi yoki timeout.' });
+    } finally {
+      sharedImportState.running = false;
+      setSmartBusy(false);
+    }
+  };
+
+  const totalQuestions = categories.reduce((s, c) => s + (c.question_count ?? 0), 0);
+
+  return (
+    <div className="space-y-5">
+      {/* Stats row */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        {[
+          { label: lang === 'ru' ? 'Коллекций' : lang === 'en' ? 'Collections' : 'Kolleksiyalar', value: categories.length },
+          { label: lang === 'ru' ? 'Всего вопросов' : lang === 'en' ? 'Total questions' : 'Jami savollar', value: totalQuestions },
+          { label: lang === 'ru' ? 'Языков' : lang === 'en' ? 'Languages' : 'Tillar', value: 3 },
+        ].map((s) => (
+          <div key={s.label} className="bg-white border border-gray-200 rounded-lg px-4 py-3.5">
+            <p className="text-[26px] font-semibold text-gray-900 leading-none tabular-nums">{s.value}</p>
+            <p className="text-[13px] text-gray-500 mt-1.5">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[420px_1fr] gap-5 items-start">
+
+        {/* ── Import form ── */}
+        <AdminCard
+          icon={<svg style={{width:18,height:18}} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+          title={t.testBankAiTitle}
+          subtitle={t.testBankAiHint}
+        >
+          <div className="px-5 py-4 space-y-4">
+            {msg.text && (
+              <AdminAlert type={msg.type === 'ok' ? 'success' : msg.type === 'err' ? 'error' : 'warning'}>
+                {msg.text}
+              </AdminAlert>
+            )}
+
+            <form onSubmit={importSmart} className="space-y-4">
+              <AdminField label={`${t.testCollectionNameEn} *`}>
+                <AdminInput
+                  value={collectionName}
+                  onChange={(e) => setCollectionName(e.target.value)}
+                  placeholder={lang === 'ru' ? 'Внутренняя медицина — 2025' : lang === 'en' ? 'Internal Medicine — 2025' : 'Ichki kasalliklar — 2025'}
+                  required
+                  disabled={smartBusy}
+                />
+              </AdminField>
+
+              <AdminField label={lang === 'ru' ? 'Язык документа' : lang === 'en' ? 'Document language' : 'Hujjat tili'}>
+                <AdminSelect value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={smartBusy}>
+                  {SOURCE_LANGUAGE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{getLangLabel(opt, lang)}</option>
+                  ))}
+                </AdminSelect>
+                <p className="text-[12px] text-gray-400 mt-1">
+                  {lang === 'ru' ? 'Авто: система определит язык сама' : lang === 'en' ? 'Auto: system detects language' : "Avtomatik: tizim o'zi aniqlaydi"}
+                </p>
+              </AdminField>
+
+              <AdminField label={`${t.testBankAiPdfLabel} *`}>
+                <AdminFileInput
+                  key={fileKey}
+                  accept=".pdf,.doc,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  onChange={(e) => setSmartFile(e.target.files?.[0] ?? null)}
+                  disabled={smartBusy}
+                />
+                <p className="text-[12px] text-gray-400 mt-1">
+                  PDF, DOCX, DOC · {lang === 'ru' ? 'Макс. 50 МБ' : lang === 'en' ? 'Max 50 MB' : 'Maks. 50 MB'}
+                </p>
+                {smartFile && (
+                  <p className="text-[12px] text-gray-600 mt-1 font-medium">
+                    📎 {smartFile.name} ({(smartFile.size / 1024).toFixed(0)} KB)
+                  </p>
+                )}
+              </AdminField>
+
+              <AdminBtn
+                type="submit"
+                variant="violet"
+                size="lg"
+                loading={smartBusy}
+                icon={<PlusIcon size={16} />}
+                className="w-full"
+              >
+                {smartBusy ? t.testBankAiRunning : t.testBankAiRun}
+              </AdminBtn>
+
+              {/* Progress */}
+              {smartBusy && (
+                <div className="space-y-2 pt-1">
+                  <div className="h-2.5 rounded-full bg-gray-100 overflow-hidden border border-gray-200">
+                    <motion.div
+                      className="h-full bg-indigo-600 rounded-full"
+                      animate={{ width: `${importProgress}%` }}
+                      transition={{ duration: 0.6 }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[13px] text-gray-600 font-medium">{importStage || t.testBankAiRunning}</p>
+                    <p className="text-[13px] text-indigo-600 font-bold tabular-nums">{importProgress}%</p>
+                  </div>
+                  <div className="flex items-center gap-2 text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    {lang === 'ru' ? 'Не закрывайте страницу' : lang === 'en' ? "Don't close this page" : "Sahifani yopmang"}
+                  </div>
+                </div>
+              )}
+            </form>
+          </div>
+        </AdminCard>
+
+        {/* ── Kategoriyalar ── */}
+        <AdminCard title={t.testCollectionsList} count={categories.length}>
+          <div className="divide-y divide-gray-100">
+            {categories.length === 0 ? (
+              <AdminEmpty
+                icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+                title={t.testBankNoQuestions}
+                subtitle={lang === 'ru' ? 'Загрузите PDF или DOCX файл слева' : lang === 'en' ? 'Upload a PDF or DOCX file on the left' : 'Chap tomonda PDF yoki DOCX fayl yuklang'}
+              />
+            ) : categories.map((c, i) => (
+              <motion.div
+                key={c.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="px-5 py-4 hover:bg-gray-50 transition-colors"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    {/* Name + badges */}
+                    <p className="font-semibold text-gray-900 text-[15px] leading-tight">{c.name}</p>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <span className="text-[12px] font-semibold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-md">
+                        {c.question_count ?? 0} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}
+                      </span>
+                      {c.source_language && (
+                        <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{c.source_language.toUpperCase()}</span>
+                      )}
+                      {c.program_track && c.program_track !== 'any' && (
+                        <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{c.program_track}</span>
+                      )}
+                      {c.academic_year && (
+                        <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                          {c.academic_year}{lang === 'ru' ? ' курс' : lang === 'en' ? 'y' : '-kurs'}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Preview */}
+                    {c.preview && (
+                      <div className="grid grid-cols-3 gap-2 mt-3">
+                        {[
+                          { key: 'text_uz', label: 'UZ', bg: 'bg-emerald-50 border-emerald-100', text: 'text-emerald-800' },
+                          { key: 'text_ru', label: 'RU', bg: 'bg-sky-50 border-sky-100', text: 'text-sky-800' },
+                          { key: 'text_en', label: 'EN', bg: 'bg-gray-50 border-gray-100', text: 'text-gray-700' },
+                        ].map(({ key, label, bg, text }) => (
+                          <div key={key} className={`p-2 rounded-xl border ${bg}`}>
+                            <span className={`text-[10px] font-bold uppercase tracking-wider ${text} block mb-1`}>{label}</span>
+                            <p className="text-[11px] text-gray-600 line-clamp-2">
+                              {c.preview[key] || <span className="text-gray-400 italic">—</span>}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <AdminBtn variant="red-ghost" size="sm" loading={deletingId === c.id} onClick={() => delCategory(c.id)} className="shrink-0">
+                    {t.testBankDelete}
+                  </AdminBtn>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </AdminCard>
+      </div>
+    </div>
+  );
+}

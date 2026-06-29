@@ -1,0 +1,60 @@
+import { useEffect } from 'react';
+import { RealtimeProctor, type RealtimeViolation, type FaceStatusLive } from './realtimeProctor';
+
+interface UseRealtimeProctoringOpts {
+  videoRef: React.RefObject<HTMLVideoElement | null>;
+  /** Real-time signal — odatda ExamRoom dagi logViolation ga ulanadi. */
+  onViolation: (type: RealtimeViolation) => void;
+  /** Person-swap shubhasi — darhol server identity-compare ishga tushiriladi. */
+  onRecheckIdentity?: () => void;
+  /** Har kadrda real-time yuz holati — kamera overlay uchun. */
+  onFaceStatus?: (status: FaceStatusLive) => void;
+  /** Stream tayyor bo'lgani: shu o'zgarganda engine qayta ishga tushadi. */
+  streamRevision?: number;
+  disabled?: boolean;
+  onReady?: (ok: boolean) => void;
+}
+
+/**
+ * MediaPipe asosidagi real-time proctoring (gaze/bosh burilishi, qimirlash,
+ * qo'l/imo-ishora, ko'p yuz, yuz yo'q). Server proctoring bilan birga (gibrid) ishlaydi.
+ * Model yuklanmasa jim o'chadi.
+ */
+export function useRealtimeProctoring({
+  videoRef,
+  onViolation,
+  onRecheckIdentity,
+  onFaceStatus,
+  streamRevision = 0,
+  disabled = false,
+  onReady,
+}: UseRealtimeProctoringOpts): void {
+  useEffect(() => {
+    if (disabled) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+    const proctor = new RealtimeProctor(video, {
+      onViolation,
+      onRecheckIdentity,
+      onFaceStatus,
+      onReady,
+      onStatus: (m) => console.info('[realtime-proctor]', m),
+    });
+
+    void proctor.init().then((ok) => {
+      if (cancelled) {
+        proctor.dispose();
+        return;
+      }
+      if (ok) proctor.start();
+    });
+
+    return () => {
+      cancelled = true;
+      proctor.dispose();
+    };
+    // streamRevision o'zgarsa (kamera qayta ishga tushsa) engine qayta yaratiladi.
+  }, [disabled, streamRevision]);
+}

@@ -1,0 +1,34 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+}
+
+@layer base {
+  body {
+    /* Tekis enterprise fon — admin bilan bir xil (gradient/mesh yo'q) */
+    @apply bg-gray-50 text-gray-900 font-sans antialiased overflow-x-hidden;
+  }
+}
+
+/* Custom scrollbar for webkit */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-black/10 rounded-full;
+}
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-black/20;
+}
+
+/* Quiet Enterprise card (avval glassy edi — endi tekis, admin bilan bir xil) */
+.glass-panel {
+  @apply bg-white border border-gray-200 rounded-xl;
+}
+

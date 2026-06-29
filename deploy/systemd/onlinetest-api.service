@@ -1,0 +1,32 @@
+[Unit]
+Description=FJSTI Online Exam API (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+PrivateTmp=yes
+NoNewPrivileges=yes
+RuntimeDirectory=onlinetest
+EnvironmentFile=/etc/onlinetest/api.env
+# Gunicorn 25+ va boshqa XDG dasturlar uchun (control socket yo‘q bo‘lsa ham zararsiz)
+Environment=XDG_RUNTIME_DIR=/run/onlinetest
+# www-data passwd HOME=/var/www — ba’zi kutubxonalar ~/.cache kabi yo‘llarni shu yerga yozadi
+Environment=HOME=/var/www/onlinetest/backend
+# gunicorn.conf.py bind ni shu yerdan oladi (config fayldagi default port bilan ziddiyat bo‘lmasin)
+Environment=GUNICORN_BIND=127.0.0.1:9081
+WorkingDirectory=/var/www/onlinetest/backend
+ExecStart=/var/www/onlinetest/backend/.venv/bin/gunicorn \
+  exam_platform.wsgi:application \
+  --config gunicorn.conf.py \
+  --forwarded-allow-ips=127.0.0.1 \
+  --workers 3 \
+  --timeout 900 \
+  --access-logfile - \
+  --error-logfile -
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
