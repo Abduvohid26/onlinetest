@@ -1,5 +1,5 @@
 -r base.txt
 
 # Development tools
-pytest-django>=4.8
+pytest-django>=4.12.0
 coverage>=7.0
