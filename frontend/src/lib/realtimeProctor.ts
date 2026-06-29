@@ -62,7 +62,7 @@ const STREAK = {
   multiFace: 3, // ~0.4s 2+ yuz (tez!)
   gaze: 6, // ~0.8s uzoq qaragan
   movement: 5,
-  hand: 5, // ~0.65s qo'l ko'rinib turibdi
+  hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
   mouth: 5, // ~0.65s gapirish naqshi
   tooFar: 10, // ~1.3s juda uzoq
   tooClose: 8, // ~1s juda yaqin

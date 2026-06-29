@@ -841,11 +841,11 @@ def student_violations(request):
     }
     reason_text = violation_reason_map.get(vtype, vtype)
 
-    WARN_SUPPRESS_SECONDS = max(15, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "30")))
-    EVENT_MIN_INTERVAL_SECONDS = max(1, int(os.environ.get("PROCTOR_EVENT_MIN_INTERVAL_SECONDS", "8")))
+    WARN_SUPPRESS_SECONDS = max(5, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "10")))
+    EVENT_MIN_INTERVAL_SECONDS = max(1, int(os.environ.get("PROCTOR_EVENT_MIN_INTERVAL_SECONDS", "5")))
     # Imtihon startida texnik tebranishlar (kamera/GPU) uchun grace — yozuvsiz.
     STARTUP_GRACE_SECONDS = max(0, int(os.environ.get("PROCTOR_STARTUP_GRACE_SECONDS", "40")))
-    MAX_WARNINGS_BEFORE_BAN = 3  # 3 ta modal; 4-chi rasmiy epizodda ban
+    MAX_WARNINGS_BEFORE_BAN = 3  # 3-chi rasmiy ogohlantirishda darhol ban
     HARDENED_MODE = str(os.environ.get("PROCTOR_HARDENED_MODE", "1")).strip() not in ("0", "false", "False")
     HARDENED_WINDOW_MIN = max(3, int(os.environ.get("PROCTOR_HARD_WINDOW_MIN", "10")))
     HARDENED_MAX_POINTS = max(8, int(os.environ.get("PROCTOR_HARD_MAX_POINTS", "22")))
@@ -1047,7 +1047,7 @@ def student_violations(request):
             se.proctor_official_warnings = int(se.proctor_official_warnings or 0) + 1
             se.proctor_last_warning_at = now
 
-            if se.proctor_official_warnings >= 4:
+            if se.proctor_official_warnings >= MAX_WARNINGS_BEFORE_BAN:
                 if not AUTO_BAN_NON_IDENTITY:
                     se.proctor_official_warnings = MAX_WARNINGS_BEFORE_BAN
                     se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at"])
@@ -1086,7 +1086,8 @@ def student_violations(request):
 
             se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at"])
             cnt_warn = se.proctor_official_warnings
-            is_final = cnt_warn == MAX_WARNINGS_BEFORE_BAN
+            # 3-chi ogohlantirishda darhol ban bo'lganligi uchun, 2-chi "oxirgi ogohlantirish"
+            is_final = cnt_warn >= MAX_WARNINGS_BEFORE_BAN - 1
             return _guard(
                 {
                     "banned": False,

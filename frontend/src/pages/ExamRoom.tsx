@@ -160,10 +160,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const [hardBlocked, setHardBlocked] = useState(false);
   const [banPdfBusy, setBanPdfBusy] = useState(false);
   const [appealReason, setAppealReason] = useState('');
-  const [appealFile, setAppealFile] = useState<File | null>(null);
   const [appealBusy, setAppealBusy] = useState(false);
   const [appealMsg, setAppealMsg] = useState('');
-  /** BAN paytida serverdagi jami violation yozuvlari (3 ta "!" o‘rniga) */
+  /** BAN paytida serverdagi jami violation yozuvlari (3 ta "!" o'rniga) */
   const [banViolationsCount, setBanViolationsCount] = useState<number | null>(null);
   // Ogohlantirish modal
   const [violationWarning, setViolationWarning] = useState<ViolationWarning | null>(null);
@@ -807,7 +806,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     }
     const dedupeKey = `viol_last_${type}`;
     const lastSent = parseInt(sessionStorage.getItem(dedupeKey) || '0', 10);
-    const MIN_INTERVAL = INSTANT_BAN_TYPES.has(type) ? 0 : 14_000;
+    const MIN_INTERVAL = INSTANT_BAN_TYPES.has(type) ? 0 : 5_000;
     if (MIN_INTERVAL > 0 && now - lastSent < MIN_INTERVAL) {
       return;
     }
@@ -1134,10 +1133,12 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   if (violationWarning && !banned && !hardBlocked) {
     const isFinal = violationWarning.isFinalWarning;
     const warnNum = violationWarning.warningNumber;
+    // MAX_WARNINGS_BEFORE_BAN = 3; 3-chida ban, shuning uchun circles 3 ta
+    const MAX_W = 3;
+    const remaining = Math.max(0, MAX_W - warnNum);
 
     const warnTitle = t.violationWarningTitle.replace('{n}', String(warnNum));
     const warnContinue = t.violationContinueExam;
-    const finalMsg = t.violationFinalNotice;
     const reasonLabel = t.violationReasonLabel;
 
     return createPortal(
@@ -1163,9 +1164,20 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               </svg>
             </div>
 
-            <h2 id="violation-warn-title" className={`text-lg sm:text-xl font-bold text-center mb-3 leading-snug ${isFinal ? 'text-red-700' : 'text-orange-700'}`}>
+            <h2 id="violation-warn-title" className={`text-lg sm:text-xl font-bold text-center mb-2 leading-snug ${isFinal ? 'text-red-700' : 'text-orange-700'}`}>
               {warnTitle}
             </h2>
+
+            {/* Countdown banner */}
+            <div className={`rounded-lg px-3 py-2 mb-4 text-center text-sm font-semibold ${
+              isFinal
+                ? 'bg-red-600 text-white'
+                : 'bg-orange-100 text-orange-800 border border-orange-300'
+            }`}>
+              {isFinal
+                ? '⛔ Keyingi qoidabuzarlikda BLOKLANSIZ!'
+                : `⚠ Yana ${remaining} ta ogohlantirish qoldi — bloklansiz!`}
+            </div>
 
             <div className="bg-white rounded-xl sm:rounded-lg px-4 py-3 sm:px-5 sm:py-4 mb-4 text-center border border-gray-200">
               <p className="text-[10px] sm:text-xs text-gray-500 mb-1 uppercase tracking-wide font-medium">{reasonLabel}</p>
@@ -1188,12 +1200,6 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 </div>
               ))}
             </div>
-
-            {isFinal && (
-              <div className="bg-red-100 border border-red-300 rounded-xl px-3 py-2.5 sm:px-4 sm:py-3 mb-4 text-center">
-                <p className="text-xs sm:text-sm font-semibold text-red-700 leading-snug">{finalMsg}</p>
-              </div>
-            )}
 
             <p className="text-[11px] sm:text-xs text-gray-500 text-center mb-4 sm:mb-5 leading-relaxed">{t.violationFooterHonest}</p>
           </div>
@@ -1284,20 +1290,18 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             </Button>
           </div>
           <div className="mt-5 border-t border-red-200/70 pt-5 text-left space-y-3">
-            <p className="text-sm font-semibold text-gray-800">BAN bo'yicha appeal yuborish</p>
+            <p className="text-sm font-semibold text-gray-800">BAN bo'yicha murojaat yuborish</p>
             <textarea
               value={appealReason}
               onChange={(e) => setAppealReason(e.target.value)}
-              placeholder="Vaziyatni batafsil yozing (kamida 12 belgi)"
-              className="w-full min-h-[90px] rounded-lg border border-red-200 bg-white px-3 py-2 text-sm"
+              placeholder="Vaziyatni batafsil yozing (kamida 12 belgi) — admin ko'rib chiqadi"
+              className="w-full min-h-[90px] rounded-lg border border-red-200 bg-white px-3 py-2 text-sm resize-none"
             />
-            <input
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(e) => setAppealFile(e.target.files?.[0] || null)}
-              className="w-full text-xs"
-            />
-            {appealMsg ? <p className="text-xs text-gray-600">{appealMsg}</p> : null}
+            {appealMsg ? (
+              <p className={appealMsg.startsWith('ok:') ? 'text-xs font-medium text-green-700' : 'text-xs font-medium text-red-600'}>
+                {appealMsg.startsWith('ok:') ? appealMsg.slice(3) : appealMsg}
+              </p>
+            ) : null}
             <Button
               className="w-full rounded-full"
               disabled={appealBusy || appealReason.trim().length < 12}
@@ -1305,18 +1309,6 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 try {
                   setAppealBusy(true);
                   setAppealMsg('');
-                  let evidence_base64 = '';
-                  let evidence_name = '';
-                  let evidence_mime = '';
-                  if (appealFile) {
-                    evidence_name = appealFile.name;
-                    evidence_mime = appealFile.type || '';
-                    evidence_base64 = await new Promise<string>((resolve) => {
-                      const r = new FileReader();
-                      r.onloadend = () => resolve(String(r.result || ''));
-                      r.readAsDataURL(appealFile);
-                    });
-                  }
                   const res = await fetch(apiUrl('/api/student/ban-appeals'), {
                     method: 'POST',
                     headers: {
@@ -1326,25 +1318,21 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                     body: JSON.stringify({
                       exam_id: exam.id,
                       reason: appealReason.trim(),
-                      evidence_base64,
-                      evidence_name,
-                      evidence_mime,
                     }),
                   });
                   const data = await readJsonSafe<{ error?: string }>(res);
                   if (!res.ok) {
-                    setAppealMsg(data?.error || 'Appeal yuborishda xatolik');
+                    setAppealMsg(data?.error || 'Murojaat yuborishda xatolik');
                     return;
                   }
-                  setAppealMsg('Appeal yuborildi. Admin ko‘rib chiqadi.');
+                  setAppealMsg('ok:Murojaat yuborildi. Admin ko\'rib chiqadi.');
                   setAppealReason('');
-                  setAppealFile(null);
                 } finally {
                   setAppealBusy(false);
                 }
               }}
             >
-              {appealBusy ? 'Yuborilmoqda...' : 'Appeal yuborish'}
+              {appealBusy ? 'Yuborilmoqda...' : 'Murojaat yuborish'}
             </Button>
           </div>
         </Card>
