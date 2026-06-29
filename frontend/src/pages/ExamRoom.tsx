@@ -166,6 +166,8 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const [banViolationsCount, setBanViolationsCount] = useState<number | null>(null);
   // Ogohlantirish modal
   const [violationWarning, setViolationWarning] = useState<ViolationWarning | null>(null);
+  // Modal ochiqligida yangi violationlar serverga yuborilmasin
+  const warningModalShowingRef = useRef(false);
   /** Kamera oqimi video elementga ulangach +1 (async setup va ref vaqti sinxroni). */
   const [proctorStreamRevision, setProctorStreamRevision] = useState(0);
   const [faceStatus, setFaceStatus] = useState<FaceStatusLive>('WAITING');
@@ -799,6 +801,10 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     // Server: strict VAC da faqat IDENTITY_SUBSTITUTION darhol ban; qolganlari ogohlantirish ketma-ketligi.
     const INSTANT_BAN_TYPES = new Set(['IDENTITY_SUBSTITUTION']);
 
+    // Modal ochiqligida yangi violationlar (IDENTITY_SUBSTITUTION dan tashqari) bloklansn —
+    // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.
+    if (warningModalShowingRef.current && !INSTANT_BAN_TYPES.has(type)) return;
+
     // Dedup: bir xil tur uchun qisqa interval (server 60s ichida bitta rasmiy ogohlantirishni birlashtiradi)
     const now = Date.now();
     if (FOCUS_BURST_TYPES.has(type) && now < focusBurstLockUntilRef.current) {
@@ -878,6 +884,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           ? data.warningNumber
           : Math.max(1, official);
       setStrikeLevel(official > 0 ? official : shownNumber);
+      warningModalShowingRef.current = true;
       setViolationWarning({
         reason: data.violationReason || type,
         warningNumber: shownNumber,
@@ -1208,6 +1215,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             <button
               type="button"
               onClick={() => {
+                warningModalShowingRef.current = false;
+                // Modal yopilgandan keyin 2 soniya blur ignore — yolg'on TAB_SWITCH oldini oladi
+                blurIgnoreUntilRef.current = Date.now() + 2000;
                 setViolationWarning(null);
                 recoverCameraPreview();
               }}
