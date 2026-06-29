@@ -4,6 +4,30 @@ from __future__ import annotations
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
+
+def _notify_banned(student_id: str, student_name: str, student_exam_id: int, exam_id: int, reason: str, violations_count: int) -> None:
+    """Ban bo'lganda WebSocket orqali exam group'ga xabar yuborish."""
+    try:
+        layer = get_channel_layer()
+        if layer:
+            async_to_sync(layer.group_send)(
+                f"exam_{exam_id}",
+                {
+                    "type": "exam.student_banned",
+                    "student_id": student_id,
+                    "student_name": student_name,
+                    "student_exam_id": student_exam_id,
+                    "exam_id": exam_id,
+                    "reason": reason,
+                    "violations_count": violations_count,
+                },
+            )
+    except Exception:
+        pass  # WS xatosi ban jarayonini to'xtatmasin
+
 
 @api_view(["POST"])
 @throttle_classes([FaceVerifyThrottle])
@@ -785,35 +809,35 @@ def student_violations(request):
 
     # Violation sababini matn sifatida qaytarish
     violation_reason_map = {
-        "SUSPICIOUS_AUDIO": "Shubhali ovoz aniqlandi (gapirish yoki shovqin)",
-        "FACE_NOT_VISIBLE": "Yuzingiz kamerada ko'rinmayapti",
-        "MULTIPLE_FACES": "Kadrda bir nechta shaxs aniqlandi",
-        "FORBIDDEN_OBJECT_CELL_PHONE": "Telefon aniqlandi",
-        "FORBIDDEN_OBJECT_LAPTOP": "Noutbuk aniqlandi",
-        "FORBIDDEN_OBJECT_BOOK": "Kitob aniqlandi",
-        "TAB_SWITCH_SOFT": "Boshqa oynaga o'tildi",
-        "TAB_SWITCH_HARD": "Imtihon oynasidan chiqib ketildi",
-        "CLIPBOARD_ATTEMPT": "Nusxa ko'chirish urinishi",
-        "PRINT_SCREEN": "Ekran surati urinishi",
-        "DEVTOOLS_OPEN": "Developer tools ochish urinishi",
-        "FULLSCREEN_EXIT_HARD": "To'liq ekrandan chiqildi",
-        "REMOTE_CONTROL_SUSPECTED": "Masofaviy boshqaruv aniqlandi",
-        "IDENTITY_SUBSTITUTION": "Boshqa shaxs aniqlandi",
-        "GAZE_AWAY_LEFT": "Kamera markazidan chapga uzoq qaraldi (nojo'ya harakat)",
-        "GAZE_AWAY_RIGHT": "Kamera markazidan o'ngga uzoq qaraldi (nojo'ya harakat)",
-        "GAZE_AWAY_UP": "Tepaga uzoq qaraldi (nojo'ya harakat)",
-        "GAZE_AWAY_DOWN": "Pastga uzoq qaraldi (nojo'ya harakat)",
-        "WHISPER_OR_CONVERSATION_SUSPECTED": "Past ovoz / gapirish yoki suhbat shubhasi",
-        "CAMERA_MIC_ACCESS_FAILED": "Kamera yoki mikrofonni ishga tushirib bo'lmadi",
-        "VIRTUAL_WEBCAM_SUSPECTED": "Virtual / dasturiy kamera ishlatilishi aniqlanishi mumkin (OBS va h.k.)",
-        "FACE_TURNED_AWAY": "Yuz kameradan uzoq vaqt burib turildi",
-        "EXCESSIVE_MOVEMENT": "Haddan tashqari qimirlash / harakat aniqlandi",
-        "HAND_GESTURE_SUSPECTED": "Qo'l ko'tarish / imo-ishora aniqlandi",
-        "MOUTH_MOVEMENT_TALKING": "Og'iz qimirlashi — gapirish aniqlandi",
-        "FACE_TOO_FAR": "Kameradan juda uzoqsiz — yaqinroq o'tiring",
-        "FACE_TOO_CLOSE": "Kameraga juda yaqinsiz — biroz uzoqroq o'tiring",
-        "FACE_OFF_CENTER": "Yuzingiz kadr markazida emas — o'rtaga o'ting",
-        "PROCTOR_FEED_LOST": "Kamera oqimi to'xtab qoldi (nazorat kadrlari kelmayapti)",
+        "SUSPICIOUS_AUDIO": "Shovqin aniqlandi! Jimlik saqlang, gapirmang.",
+        "FACE_NOT_VISIBLE": "Yuzingiz kamerada ko'rinmayapti! To'g'ri o'tiring va kameraga qarang.",
+        "MULTIPLE_FACES": "Kadrda bir nechta shaxs aniqlandi! Boshqalar kameradan uzoqlashsin.",
+        "FORBIDDEN_OBJECT_CELL_PHONE": "Telefon aniqlandi! Telefoni yashiring yoki stoldan olib qo'ying.",
+        "FORBIDDEN_OBJECT_LAPTOP": "Noutbuk aniqlandi! Ruxsatsiz qurilmani olib qo'ying.",
+        "FORBIDDEN_OBJECT_BOOK": "Kitob aniqlandi! Ruxsatsiz materiallarni olib qo'ying.",
+        "TAB_SWITCH_SOFT": "Boshqa oynaga o'tildi! Imtihon oynasini yopmang.",
+        "TAB_SWITCH_HARD": "Imtihon oynasidan chiqib ketildi! Qaytib keling.",
+        "CLIPBOARD_ATTEMPT": "Nusxa ko'chirish urinishi aniqlandi!",
+        "PRINT_SCREEN": "Ekran surati olish urinishi aniqlandi!",
+        "DEVTOOLS_OPEN": "Developer tools ochish urinishi aniqlandi!",
+        "FULLSCREEN_EXIT_HARD": "To'liq ekrandan chiqildi! Qaytib kirish uchun ekranga bosing.",
+        "REMOTE_CONTROL_SUSPECTED": "Masofaviy boshqaruv aniqlandi!",
+        "IDENTITY_SUBSTITUTION": "Boshqa shaxs aniqlandi! Imtihon xavfsizligi buzildi.",
+        "GAZE_AWAY_LEFT": "To'g'ri qarang! Chapga emas, ekranga qarang.",
+        "GAZE_AWAY_RIGHT": "To'g'ri qarang! O'ngga emas, ekranga qarang.",
+        "GAZE_AWAY_UP": "To'g'ri qarang! Tepaga emas, ekranga qarang.",
+        "GAZE_AWAY_DOWN": "To'g'ri qarang! Pastga emas, ekranga qarang.",
+        "WHISPER_OR_CONVERSATION_SUSPECTED": "Ovoz aniqlandi! Gapirmang, jimlik saqlang.",
+        "CAMERA_MIC_ACCESS_FAILED": "Kamera yoki mikrofon ishlamayapti! Ruxsat bering.",
+        "VIRTUAL_WEBCAM_SUSPECTED": "Virtual kamera aniqlandi! Haqiqiy kamerani ishlating.",
+        "FACE_TURNED_AWAY": "To'g'ri qarang! Yuzingizni kameradan burmang.",
+        "EXCESSIVE_MOVEMENT": "Haddan tashqari qimirlash aniqlandi! Tinchoq o'tiring.",
+        "HAND_GESTURE_SUSPECTED": "Qo'l ko'tarish aniqlandi! Qo'llaringizni stolda ushlab turing.",
+        "MOUTH_MOVEMENT_TALKING": "Gapirish aniqlandi! Ovoz chiqarmang.",
+        "FACE_TOO_FAR": "Kameradan juda uzoqsiz! Yaqinroq o'tiring.",
+        "FACE_TOO_CLOSE": "Kameraga juda yaqinsiz! Biroz uzoqroq o'tiring.",
+        "FACE_OFF_CENTER": "Yuzingiz kadr markazida emas! O'rtaga to'g'ri o'tiring.",
+        "PROCTOR_FEED_LOST": "Kamera oqimi to'xtab qoldi! Kamera ulanishini tekshiring.",
     }
     reason_text = violation_reason_map.get(vtype, vtype)
 
@@ -964,6 +988,10 @@ def student_violations(request):
                         AppUser.objects.filter(pk=u.id).update(status="Banned")
                     se.status = "Banned"
                     se.save(update_fields=["status"])
+                    _notify_banned(
+                        str(u.id), getattr(u, "name", str(u.id)), se.id,
+                        exam_id_int, f"{reason_text} (hardened)", cnt_all,
+                    )
                     return _guard(
                         {
                             "banned": True,
@@ -1000,6 +1028,10 @@ def student_violations(request):
                 if GLOBAL_ACCOUNT_BAN:
                     AppUser.objects.filter(pk=u.id).update(status="Banned")
                 StudentExam.objects.filter(pk=se.pk).update(status="Banned")
+                _notify_banned(
+                    str(u.id), getattr(u, "name", str(u.id)), se.id,
+                    exam_id_int, reason_text, cnt_all,
+                )
                 return _guard(
                     {
                         "banned": True,
@@ -1036,6 +1068,10 @@ def student_violations(request):
                     AppUser.objects.filter(pk=u.id).update(status="Banned")
                 se.status = "Banned"
                 se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at", "status"])
+                _notify_banned(
+                    str(u.id), getattr(u, "name", str(u.id)), se.id,
+                    exam_id_int, reason_text, cnt_all,
+                )
                 return _guard(
                     {
                         "banned": True,

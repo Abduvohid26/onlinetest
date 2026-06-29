@@ -36,6 +36,7 @@ urlpatterns = [
     path("admin/ban-appeals/<int:pk>/events", views.admin_ban_appeal_events),
     path("admin/ban-appeals/<int:pk>/resolve", views.admin_ban_appeal_resolve),
     path("admin/student_exams/<int:pk>/retake", views.admin_student_exams_retake),
+    path("admin/student_exams/<int:pk>/unblock", views.admin_student_exams_unblock),
     path("admin/stats", views.admin_stats),
     path("admin/levels", views.admin_levels),
     path("admin/groups", views.admin_groups),

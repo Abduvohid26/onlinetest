@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 
+from asgiref.sync import async_to_sync
+from channels.layers import get_channel_layer
+
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -226,6 +229,55 @@ def admin_student_exams_retake(request, pk: int):
     if not updated:
         return Response({"error": "Not found"}, status=404)
     return Response({"success": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def admin_student_exams_unblock(request, pk: int):
+    """Admin/staff talabani blokdan chiqaradi: topshira oladi yoki olmaydi."""
+    u = request.user
+    if u.role not in ("admin", "staff"):
+        return Response({"error": "Forbidden"}, status=403)
+
+    se = StudentExam.objects.select_related("student").filter(pk=pk).first()
+    if not se:
+        return Response({"error": "Not found"}, status=404)
+
+    # Staff faqat o'z imtihonini unblock qila oladi
+    if u.role == "staff":
+        if not Exam.objects.filter(pk=se.exam_id, teacher_id=u.id).exists():
+            return Response({"error": "Forbidden"}, status=403)
+
+    can_retake = bool(request.data.get("can_retake", True))
+    exam_id = se.exam_id
+    student_id = str(se.student_id)
+    student_name = getattr(se.student, "name", student_id)
+
+    if can_retake:
+        StudentExam.objects.filter(pk=pk).update(
+            status="In Progress",
+            proctor_official_warnings=0,
+            proctor_last_warning_at=None,
+        )
+
+    try:
+        layer = get_channel_layer()
+        if layer:
+            async_to_sync(layer.group_send)(
+                f"exam_{exam_id}",
+                {
+                    "type": "exam.student_unblocked",
+                    "student_id": student_id,
+                    "student_exam_id": pk,
+                    "exam_id": exam_id,
+                    "can_retake": can_retake,
+                    "unblocked_by": str(u.id),
+                },
+            )
+    except Exception:
+        pass
+
+    return Response({"success": True, "can_retake": can_retake, "student_name": student_name})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def admin_ban_appeals(request):

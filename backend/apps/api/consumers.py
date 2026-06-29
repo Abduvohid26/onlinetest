@@ -168,3 +168,28 @@ class ExamRealtimeConsumer(AsyncJsonWebsocketConsumer):
             "from": event["from_channel"],
             "candidate": event["candidate"],
         })
+
+    async def exam_student_banned(self, event: dict) -> None:
+        """Talaba ban bo'lganda barcha proktor/admin va talabaning o'ziga xabar."""
+        if event.get("exam_id") != self.exam_id:
+            return
+        await self.send_json({
+            "type": "student_banned",
+            "student_id": event["student_id"],
+            "student_name": event.get("student_name", ""),
+            "student_exam_id": event.get("student_exam_id"),
+            "exam_id": event["exam_id"],
+            "reason": event.get("reason", ""),
+            "violations_count": event.get("violations_count", 0),
+        })
+
+    async def exam_student_unblocked(self, event: dict) -> None:
+        """Admin/staff unblock qilganda talabaga va proktorlarga xabar."""
+        if event.get("exam_id") != self.exam_id:
+            return
+        await self.send_json({
+            "type": "student_unblocked",
+            "student_id": event["student_id"],
+            "student_exam_id": event.get("student_exam_id"),
+            "can_retake": event.get("can_retake", False),
+        })

@@ -661,6 +661,22 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             if (msg.type === 'connected') {
               wsInstance.send({ type: 'join_exam', exam_id: exam.id, role: 'student' });
               setRealtimeSyncOffline(false);
+            } else if (msg.type === 'student_unblocked') {
+              const md = msg as any;
+              if (String(md.student_id) === String(user.id)) {
+                if (md.can_retake) {
+                  setBanned(false);
+                  setStrikeLevel(0);
+                  setViolationWarning(null);
+                  setBanViolationsCount(null);
+                  setProctorRetryNonce((n) => n + 1);
+                  setWarningMsg(translations[langRef.current].unblockAllowedMsg || 'Admin imtihonni davom ettirishingizga ruxsat berdi!');
+                  setTimeout(() => setWarningMsg(''), 6000);
+                } else {
+                  setWarningMsg(translations[langRef.current].unblockDeniedMsg || 'Admin imtihonni tugatdi. Topshira olmaysiz.');
+                  setTimeout(() => setWarningMsg(''), 8000);
+                }
+              }
             } else if (msg.type === 'offer') {
               const fromId = msg.from as string;
               const offer = msg.offer as RTCSessionDescriptionInit;
