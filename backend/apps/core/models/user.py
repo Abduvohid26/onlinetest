@@ -34,3 +34,23 @@ class AppUser(models.Model):
     class Meta:
         app_label = "core"
         db_table = "users"
+
+
+class AuditLog(models.Model):
+    actor_id = models.CharField(max_length=64)
+    actor_name = models.CharField(max_length=200, blank=True)
+    action = models.CharField(max_length=64)
+    target_type = models.CharField(max_length=40, blank=True)
+    target_id = models.CharField(max_length=128, blank=True)
+    target_name = models.CharField(max_length=200, blank=True)
+    detail = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        app_label = "core"
+        db_table = "audit_logs"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["-created_at"]),
+            models.Index(fields=["actor_id"]),
+        ]

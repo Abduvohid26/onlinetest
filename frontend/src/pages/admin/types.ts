@@ -7,6 +7,7 @@ export type Group = {
   level_name: string;
   program_track?: string;
   academic_year?: number | null;
+  student_count?: number;
 };
 
 export type StudentRow = {

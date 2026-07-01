@@ -130,7 +130,7 @@ const PRIMARY = 'bg-indigo-600 hover:bg-indigo-700 text-white';
 const VARIANT_CLS: Record<BtnVariant, string> = {
   blue:       PRIMARY,
   violet:     PRIMARY,
-  amber:      PRIMARY,
+  amber:      'bg-amber-500 hover:bg-amber-600 text-white',
   emerald:    'bg-emerald-600 hover:bg-emerald-700 text-white',
   red:        'bg-red-600 hover:bg-red-700 text-white',
   ghost:      'border border-gray-200 text-gray-700 hover:bg-gray-50 bg-white',
@@ -265,8 +265,8 @@ export const AdminCard = ({
 );
 
 /* ── Arrow icon (chap→o'ng) ──────────────────────────────────────────────── */
-export const ChevronRight = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+export const ChevronRight = ({ className = 'w-4 h-4' }: { className?: string }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
   </svg>
 );

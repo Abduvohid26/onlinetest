@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
 import { readJsonSafe } from '../../lib/http';
 import {
-  AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
+  AdminInput, AdminField, AdminBtn, AdminCard,
   AdminEmpty, AdminAlert, ChevronRight, PlusIcon,
 } from './ui';
 import type { Level, Group } from './types';
@@ -15,7 +15,6 @@ interface Props {
   onViewGroups: (level: Level) => void;
 }
 
-
 export function LevelsPage({ token, lang, onViewGroups }: Props) {
   const t = translations[lang];
   const h = { Authorization: `Bearer ${token}` };
@@ -24,17 +23,24 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [newName, setNewName] = useState('');
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
+
+  // Inline edit state
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+
+  // Inline delete confirm state
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [adminForm, setAdminForm] = useState({ id: '', name: '', password: '' });
-  const [adminMsg, setAdminMsg] = useState('');
-  const [adminSaving, setAdminSaving] = useState(false);
 
   const reload = useCallback(async () => {
     const [rL, rG] = await Promise.all([
       fetch(apiUrl('/api/admin/levels'), { headers: h }),
       fetch(apiUrl('/api/admin/groups'), { headers: h }),
     ]);
+    if (rL.status === 401 || rL.status === 403) { window.dispatchEvent(new Event('auth:error')); return; }
     const jL = await readJsonSafe<Level[]>(rL);
     const jG = await readJsonSafe<Group[]>(rG);
     setLevels(Array.isArray(jL) ? jL : []);
@@ -47,78 +53,109 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
     e.preventDefault();
     if (!newName.trim()) return;
     setSaving(true);
+    setMsg(null);
     const res = await fetch(apiUrl('/api/admin/levels'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...h },
       body: JSON.stringify({ name: newName.trim() }),
     });
     setSaving(false);
-    if (res.ok) { setNewName(''); setMsg(''); reload(); }
-    else { const d = await readJsonSafe<{ error?: string }>(res); setMsg(d?.error || t.errorGeneric); }
+    if (res.ok) {
+      setNewName('');
+      setMsg({ type: 'success', text: t.levelAddedOk });
+      reload();
+    } else {
+      const d = await readJsonSafe<{ error?: string }>(res);
+      setMsg({ type: 'error', text: d?.error || t.errorGeneric });
+    }
+  };
+
+  const startEdit = (lv: Level) => {
+    setEditingId(lv.id);
+    setEditName(lv.name);
+    setEditError('');
+    setDeleteConfirmId(null);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditName('');
+    setEditError('');
+  };
+
+  const saveEdit = async (id: number) => {
+    if (!editName.trim()) return;
+    setEditSaving(true);
+    setEditError('');
+    const res = await fetch(apiUrl(`/api/admin/levels/${id}`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...h },
+      body: JSON.stringify({ name: editName.trim() }),
+    });
+    setEditSaving(false);
+    if (res.ok) {
+      setEditingId(null);
+      reload();
+    } else {
+      const d = await readJsonSafe<{ error?: string }>(res);
+      setEditError(d?.error || t.errorGeneric);
+    }
+  };
+
+  const requestDelete = (id: number) => {
+    setDeleteConfirmId(id);
+    setEditingId(null);
   };
 
   const deleteLevel = async (id: number) => {
-    if (!confirm(lang === 'ru' ? 'Удалить уровень?' : lang === 'en' ? 'Delete level?' : 'Darajani o\'chirish?')) return;
     setDeletingId(id);
-    await fetch(apiUrl(`/api/admin/levels/${id}`), { method: 'DELETE', headers: h });
-    setDeletingId(null);
-    reload();
-  };
-
-  const addAdmin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAdminMsg('');
-    setAdminSaving(true);
-    const res = await fetch(apiUrl('/api/admin/users'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...h },
-      body: JSON.stringify({
-        id: adminForm.id, password: adminForm.password, role: 'admin',
-        name: adminForm.name, group_id: null,
-        profile_image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-      }),
+    const res = await fetch(apiUrl(`/api/admin/levels/${id}`), {
+      method: 'DELETE',
+      headers: h,
     });
-    setAdminSaving(false);
-    const d = await readJsonSafe<{ error?: string }>(res);
-    if (res.ok) { setAdminForm({ id: '', name: '', password: '' }); setAdminMsg('ok'); }
-    else setAdminMsg(d?.error || t.errorGeneric);
+    setDeletingId(null);
+    setDeleteConfirmId(null);
+    if (!res.ok) {
+      const d = await readJsonSafe<{ error?: string }>(res);
+      setMsg({ type: 'error', text: d?.error || t.errorGeneric });
+    } else {
+      reload();
+    }
   };
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-1 xl:grid-cols-[380px_1fr] gap-5 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 items-start">
 
         {/* ── Daraja qo'shish ── */}
         <AdminCard
           icon={<PlusIcon />}
-          iconBg="bg-blue-600"
           title={t.kontingentAddLevel}
-          subtitle={lang === 'ru' ? 'Курсы и ступени обучения' : lang === 'en' ? 'Academic courses / years' : 'O\'quv kurslari va bosqichlari'}
+          subtitle={t.levelSubtitle}
         >
           <div className="px-5 py-4 space-y-4">
-            {msg && <AdminAlert type="error">{msg}</AdminAlert>}
+            <AnimatePresence mode="wait">
+              {msg && (
+                <motion.div key={msg.type + msg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <AdminAlert type={msg.type}>{msg.text}</AdminAlert>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <form onSubmit={addLevel} className="space-y-4">
               <AdminField label={t.levelLabel} required>
                 <AdminInput
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder={lang === 'ru' ? '1-й курс' : lang === 'en' ? '1st year' : '1-kurs'}
+                  placeholder={t.levelPlaceholder}
                   required
                 />
               </AdminField>
-              <AdminBtn
-                type="submit"
-                variant="blue"
-                size="lg"
-                loading={saving}
-                icon={<PlusIcon size={16} />}
-                className="w-full"
-              >
-                {lang === 'ru' ? 'Добавить уровень' : lang === 'en' ? 'Add Level' : 'Daraja qo\'shish'}
+              <AdminBtn type="submit" variant="blue" size="lg" loading={saving} icon={<PlusIcon size={16} />} className="w-full">
+                {t.kontingentAddLevel}
               </AdminBtn>
             </form>
             <p className="text-[12px] text-gray-400 leading-relaxed border-t border-gray-100 pt-3">
-              {lang === 'ru' ? 'К каждому уровню можно добавить несколько групп.' : lang === 'en' ? 'Each level can have multiple groups.' : 'Har bir darajaga bir nechta guruh qo\'shish mumkin.'}
+              {t.levelHint}
             </p>
           </div>
         </AdminCard>
@@ -130,84 +167,112 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
               <AdminEmpty
                 icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>}
                 title={t.emptyLevels}
-                subtitle={lang === 'ru' ? 'Добавьте первый уровень слева' : lang === 'en' ? 'Add your first level on the left' : 'Chap tomonda birinchi darajani qo\'shing'}
+                subtitle={t.levelEmptyHint}
               />
             ) : levels.map((lv, i) => {
               const gCount = groups.filter((g) => g.level_id === lv.id).length;
+              const isEditing = editingId === lv.id;
+              const isDeleteConfirm = deleteConfirmId === lv.id;
+
               return (
-                <motion.div key={lv.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-                  className="flex items-center gap-4 px-5 py-4 hover:bg-gray-50 transition-colors">
-                  <div className="w-9 h-9 rounded-lg bg-gray-100 text-gray-600 font-semibold flex items-center justify-center text-[15px] shrink-0 tabular-nums">
-                    {i + 1}
+                <motion.div key={lv.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
+                  <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 sm:px-5 py-3 sm:py-4 transition-colors ${isEditing || isDeleteConfirm ? 'bg-gray-50/80' : 'hover:bg-gray-50'}`}>
+                    <div className="w-9 h-9 rounded-lg bg-gray-100 text-gray-600 font-semibold flex items-center justify-center text-[15px] shrink-0 tabular-nums">
+                      {i + 1}
+                    </div>
+
+                    {isEditing ? (
+                      /* ── Inline edit ── */
+                      <div className="flex-1 min-w-0 flex items-center gap-2">
+                        <AdminInput
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="flex-1"
+                          autoFocus
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveEdit(lv.id);
+                            if (e.key === 'Escape') cancelEdit();
+                          }}
+                        />
+                        <AdminBtn variant="blue" size="sm" loading={editSaving} onClick={() => saveEdit(lv.id)}>
+                          {t.save}
+                        </AdminBtn>
+                        <AdminBtn variant="ghost" size="sm" onClick={cancelEdit}>
+                          {t.cancel}
+                        </AdminBtn>
+                        {editError && <span className="text-[12px] text-red-600">{editError}</span>}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex-1 min-w-[130px] min-w-0">
+                          <p className="font-semibold text-gray-900 text-[14px] sm:text-[15px] truncate">{lv.name}</p>
+                          <p className="text-[12px] sm:text-[13px] text-gray-400 mt-0.5">{gCount} {t.kontingentGroups}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <AdminBtn variant="violet" size="sm" onClick={() => onViewGroups(lv)}
+                            icon={<ChevronRight className="w-3.5 h-3.5 sm:hidden" />}>
+                            <span className="hidden sm:inline">{t.kontingentGroups}</span>
+                          </AdminBtn>
+                          <AdminBtn variant="ghost" size="sm" onClick={() => startEdit(lv)}
+                            icon={<svg className="w-3.5 h-3.5 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>}>
+                            <span className="hidden sm:inline">{t.edit}</span>
+                          </AdminBtn>
+                          <AdminBtn variant="red-ghost" size="sm" onClick={() => requestDelete(lv.id)}
+                            icon={<svg className="w-3.5 h-3.5 sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>}>
+                            <span className="hidden sm:inline">{t.delete}</span>
+                          </AdminBtn>
+                        </div>
+                      </>
+                    )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-gray-900 text-[15px] truncate">{lv.name}</p>
-                    <p className="text-[13px] text-gray-400 mt-0.5">{gCount} {t.kontingentGroups}</p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <AdminBtn variant="violet" size="sm" onClick={() => onViewGroups(lv)} iconRight={<ChevronRight />}>
-                      {t.kontingentGroups}
-                    </AdminBtn>
-                    <AdminBtn variant="red-ghost" size="sm" loading={deletingId === lv.id} onClick={() => deleteLevel(lv.id)}>
-                      {t.delete}
-                    </AdminBtn>
-                  </div>
+
+                  {/* ── Delete confirmation inline ── */}
+                  <AnimatePresence>
+                    {isDeleteConfirm && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="mx-5 mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                          {gCount > 0 ? (
+                            <>
+                              <p className="text-[13px] font-semibold text-red-700 flex items-center gap-2 mb-1">
+                                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                {t.levelHasGroups.replace('{n}', String(gCount))}
+                              </p>
+                              <AdminBtn variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)}>
+                                {t.cancel}
+                              </AdminBtn>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-[13px] font-semibold text-red-700 mb-3">
+                                {t.levelDeleteConfirm.replace('{name}', lv.name)}
+                              </p>
+                              <div className="flex gap-2">
+                                <AdminBtn variant="red" size="sm" loading={deletingId === lv.id} onClick={() => deleteLevel(lv.id)}>
+                                {t.adminDeleteBtn}
+                              </AdminBtn>
+                              <AdminBtn variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)}>
+                                {t.cancel}
+                              </AdminBtn>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </motion.div>
               );
             })}
           </div>
         </AdminCard>
       </div>
-
-      {/* ── Admin yaratish ── */}
-      <AdminCard
-        icon={<svg style={{width:18,height:18}} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>}
-        title={t.adminAddUserTitle}
-        subtitle={lang === 'ru' ? 'Новый администратор получит полный доступ к системе' : lang === 'en' ? 'New admin will have full system access' : 'Yangi admin tizimga to\'liq kirish huquqiga ega bo\'ladi'}
-      >
-        <div className="px-5 py-5">
-          {adminMsg && (
-            <AdminAlert type={adminMsg === 'ok' ? 'success' : 'error'}>
-              {adminMsg === 'ok'
-                ? (lang === 'ru' ? '✓ Администратор успешно создан' : lang === 'en' ? '✓ Admin created successfully' : '✓ Admin muvaffaqiyatli yaratildi')
-                : adminMsg}
-            </AdminAlert>
-          )}
-          <form onSubmit={addAdmin} className="grid grid-cols-1 sm:grid-cols-3 gap-4 items-end">
-            <AdminField label="ID" required>
-              <AdminInput value={adminForm.id} onChange={(e) => setAdminForm((f) => ({ ...f, id: e.target.value }))} placeholder="admin001" required />
-            </AdminField>
-            <AdminField label={t.userFullName} required>
-              <AdminInput
-                value={adminForm.name}
-                onChange={(e) => setAdminForm((f) => ({ ...f, name: e.target.value }))}
-                placeholder={lang === 'ru' ? 'Иван Иванов' : lang === 'en' ? 'John Doe' : 'To\'liq ism'}
-                required
-              />
-            </AdminField>
-            <AdminField label={t.password} required>
-              <AdminInput
-                type="password"
-                value={adminForm.password}
-                onChange={(e) => setAdminForm((f) => ({ ...f, password: e.target.value }))}
-                placeholder={lang === 'ru' ? 'мин. 10 символов' : lang === 'en' ? 'min. 10 chars' : 'kamida 10 belgi'}
-                required
-                minLength={10}
-                autoComplete="new-password"
-              />
-            </AdminField>
-            <AdminBtn
-              type="submit"
-              variant="amber"
-              size="lg"
-              loading={adminSaving}
-              className="sm:col-span-3 sm:w-fit"
-            >
-              {lang === 'ru' ? 'Admin yaratish' : lang === 'en' ? 'Create Admin' : 'Admin yaratish'}
-            </AdminBtn>
-          </form>
-        </div>
-      </AdminCard>
     </div>
   );
 }

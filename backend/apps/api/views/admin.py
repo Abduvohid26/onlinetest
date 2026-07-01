@@ -85,6 +85,7 @@ def admin_users(request):
         group_id=gid,
         profile_image=profile_image or "",
     )
+    audit(request, "create_user", "user", uid, name, f"role={role}")
     return Response({"success": True})
 @api_view(["GET", "PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
@@ -115,6 +116,7 @@ def admin_user_detail(request, user_id: str):
             return Response({"error": "User not found"}, status=404)
         if row.role == "admin" and AppUser.objects.filter(role="admin").count() <= 1:
             return Response({"error": "Cannot delete the last admin"}, status=400)
+        audit(request, "delete_user", "user", row.id, row.name, f"role={row.role}")
         row.delete()
         return Response({"success": True})
     row = AppUser.objects.filter(pk=user_id).first()
@@ -158,7 +160,10 @@ def admin_user_detail(request, user_id: str):
     )
     if not touched:
         return Response({"error": "No fields to update"}, status=400)
+    changed = [k for k in ("name", "role", "group_id", "status", "profile_image", "password") if k in d]
     row.save()
+    detail = "changed: " + ", ".join(changed)
+    audit(request, "update_user", "user", row.id, row.name, detail)
     return Response({"success": True})
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -205,6 +210,7 @@ def admin_users_unban(request, user_id: str):
             file_mime=mime,
             file_base64=base64.b64encode(raw).decode("ascii"),
         )
+    audit(request, "unban_user", "user", user_id, row.name, f"reason={reason[:100]}")
     return Response({"success": True})
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
@@ -228,6 +234,11 @@ def admin_student_exams_retake(request, pk: int):
     )
     if not updated:
         return Response({"error": "Not found"}, status=404)
+    se_obj = StudentExam.objects.select_related("student", "exam").filter(pk=pk).first()
+    if se_obj:
+        audit(request, "retake_exam", "student_exam", pk,
+              getattr(se_obj.student, "name", str(pk)),
+              f"exam={getattr(se_obj.exam, 'title', '')}")
     return Response({"success": True})
 
 
@@ -277,6 +288,8 @@ def admin_student_exams_unblock(request, pk: int):
     except Exception:
         pass
 
+    audit(request, "unblock_student", "student_exam", pk, student_name,
+          f"exam_id={exam_id}, can_retake={can_retake}")
     return Response({"success": True, "can_retake": can_retake, "student_name": student_name})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -349,6 +362,8 @@ def admin_ban_appeal_resolve(request, pk: int):
             note=note[:1000],
             meta_json=json.dumps({"status": row.status}),
         )
+    action_key = "approve_appeal" if decision == "approve" else "reject_appeal"
+    audit(request, action_key, "appeal", row.id, row.student.name, f"decision={decision}, note={note[:80]}")
     return Response({"success": True, "status": row.status})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -414,13 +429,58 @@ def admin_levels(request):
     if Level.objects.filter(name__iexact=name).exists():
         return Response({"error": "Bu nomdagi level allaqachon bor"}, status=400)
     lv = Level.objects.create(name=name)
+    audit(request, "create_level", "level", lv.id, lv.name)
     return Response({"id": lv.id, "name": lv.name})
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def admin_level_detail(request, pk: int):
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    lv = Level.objects.filter(pk=pk).first()
+    if not lv:
+        return Response({"error": "Level topilmadi"}, status=404)
+    if request.method == "GET":
+        group_count = Group.objects.filter(level_id=pk).count()
+        return Response({"id": lv.id, "name": lv.name, "group_count": group_count})
+    if request.method == "PATCH":
+        name = (request.data or {}).get("name")
+        if not name or not str(name).strip():
+            return Response({"error": "Name required"}, status=400)
+        old_name = lv.name
+        name = str(name).strip()[:200]
+        if Level.objects.filter(name__iexact=name).exclude(pk=pk).exists():
+            return Response({"error": "Bu nomdagi daraja allaqachon bor"}, status=400)
+        lv.name = name
+        lv.save()
+        audit(request, "rename_level", "level", lv.id, lv.name, f"{old_name!r} → {lv.name!r}")
+        return Response({"id": lv.id, "name": lv.name})
+    if request.method == "DELETE":
+        group_count = Group.objects.filter(level_id=pk).count()
+        if group_count > 0:
+            return Response(
+                {"error": f"Bu darajada {group_count} ta guruh bor. Avval guruhlarni o'chirib yuboring."},
+                status=400,
+            )
+        audit(request, "delete_level", "level", lv.id, lv.name)
+        lv.delete()
+        return Response({"success": True})
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def admin_groups(request):
     if request.user.role != "admin":
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "GET":
+        from django.db.models import Count
+        student_counts = {
+            row["group_id"]: row["cnt"]
+            for row in AppUser.objects.filter(role="student", group_id__isnull=False)
+            .values("group_id")
+            .annotate(cnt=Count("id"))
+        }
         out = []
         for g in Group.objects.select_related("level").all():
             out.append(
@@ -431,6 +491,7 @@ def admin_groups(request):
                     "level_name": g.level.name,
                     "program_track": getattr(g, "program_track", "bachelor") or "bachelor",
                     "academic_year": getattr(g, "academic_year", None),
+                    "student_count": student_counts.get(g.id, 0),
                 }
             )
         return Response(out)
@@ -447,6 +508,7 @@ def admin_groups(request):
         except (TypeError, ValueError):
             ay_val = None
     g = Group.objects.create(name=name, level_id=level_id, program_track=pt, academic_year=ay_val)
+    audit(request, "create_group", "group", g.id, g.name, f"level_id={level_id}")
     return Response({"success": True, "id": g.id})
 @api_view(["PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
@@ -454,9 +516,19 @@ def admin_group_detail(request, pk: int):
     if request.user.role != "admin":
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "DELETE":
+        force = (request.data or {}).get("force", False)
+        student_count = AppUser.objects.filter(group_id=pk, role="student").count()
+        if student_count > 0 and not force:
+            return Response(
+                {"error": f"Bu guruhda {student_count} ta talaba bor.", "student_count": student_count, "requires_force": True},
+                status=409,
+            )
+        grp = Group.objects.filter(pk=pk).first()
+        grp_name = grp.name if grp else str(pk)
         n, _ = Group.objects.filter(pk=pk).delete()
         if not n:
             return Response({"error": "Group not found"}, status=404)
+        audit(request, "delete_group", "group", pk, grp_name, f"force={force}, students_moved={student_count}")
         return Response({"success": True})
     g = Group.objects.filter(pk=pk).first()
     if not g:
@@ -491,7 +563,81 @@ def admin_group_detail(request, pk: int):
     if not uf:
         return Response({"error": "No fields to update"}, status=400)
     g.save(update_fields=list(dict.fromkeys(uf)))
+    audit(request, "update_group", "group", g.id, g.name, "changed: " + ", ".join(uf))
     return Response({"success": True})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_audit_log(request):
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+
+    from apps.core.models import AuditLog
+    from django.utils import timezone
+    import datetime, csv
+    from django.http import HttpResponse
+
+    limit = min(int(request.query_params.get("limit", 100)), 500)
+    offset = int(request.query_params.get("offset", 0))
+    actor = request.query_params.get("actor", "")
+    action = request.query_params.get("action", "")
+    period = request.query_params.get("period", "")   # today/week/month/year
+    date_from = request.query_params.get("date_from", "")
+    date_to = request.query_params.get("date_to", "")
+    export = request.query_params.get("export", "")   # "csv"
+
+    qs = AuditLog.objects.all()
+    if actor:
+        qs = qs.filter(actor_id__icontains=actor)
+    if action:
+        qs = qs.filter(action=action)
+
+    now = timezone.now()
+    if period == "today":
+        qs = qs.filter(created_at__date=now.date())
+    elif period == "week":
+        qs = qs.filter(created_at__gte=now - datetime.timedelta(days=7))
+    elif period == "month":
+        qs = qs.filter(created_at__year=now.year, created_at__month=now.month)
+    elif period == "year":
+        qs = qs.filter(created_at__year=now.year)
+    elif date_from:
+        try:
+            qs = qs.filter(created_at__date__gte=datetime.date.fromisoformat(date_from))
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            qs = qs.filter(created_at__date__lte=datetime.date.fromisoformat(date_to))
+        except ValueError:
+            pass
+
+    if export == "csv":
+        all_rows = list(qs.values(
+            "id", "actor_id", "actor_name", "action",
+            "target_type", "target_id", "target_name", "detail", "created_at"
+        ))
+        resp = HttpResponse(content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="audit_log.csv"'
+        resp.write("﻿")  # BOM for Excel UTF-8
+        w = csv.writer(resp)
+        w.writerow(["ID", "Admin ID", "Admin nomi", "Amal", "Maqsad turi", "Maqsad ID", "Maqsad nomi", "Tafsilot", "Sana"])
+        for r in all_rows:
+            w.writerow([r["id"], r["actor_id"], r["actor_name"], r["action"],
+                        r["target_type"], r["target_id"], r["target_name"],
+                        r["detail"], r["created_at"].strftime("%Y-%m-%d %H:%M") if r["created_at"] else ""])
+        return resp
+
+    total = qs.count()
+    rows = list(qs.values(
+        "id", "actor_id", "actor_name", "action",
+        "target_type", "target_id", "target_name", "detail", "created_at"
+    )[offset: offset + limit])
+    for row in rows:
+        if row["created_at"]:
+            row["created_at"] = row["created_at"].isoformat()
+    return Response({"total": total, "rows": rows})
 
 
 # --- Test bank ---
@@ -730,6 +876,7 @@ def admin_test_bank_import_smart(request):
             inserted += 1
             categories_touched[cat.name] = categories_touched.get(cat.name, 0) + 1
 
+    audit(request, "import_testbank", "testbank", "", collection_name or "auto", f"inserted={inserted}, cats={len(categories_touched)}")
     return Response(
         {
             "success": True,
@@ -785,13 +932,17 @@ def admin_test_bank_categories(request):
         description=d.get("description") or "",
         sort_order=d.get("sort_order") or 0,
     )
+    audit(request, "create_category", "category", c.id, c.name)
     return Response({"id": c.id})
 @api_view(["DELETE"])
 @permission_classes([IsAuthenticated])
 def admin_test_bank_categories_delete(request, pk: int):
     if request.user.role != "admin":
         return Response({"error": "Forbidden"}, status=403)
+    cat = TestBankCategory.objects.filter(pk=pk).first()
+    cat_name = cat.name if cat else str(pk)
     TestBankCategory.objects.filter(pk=pk).delete()
+    audit(request, "delete_category", "category", pk, cat_name)
     return Response({"success": True})
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
@@ -808,8 +959,14 @@ def admin_test_bank_questions(request):
                         "id": q.id,
                         "category_id": q.category_id,
                         "text": q.text,
+                        "text_uz": q.text_uz,
+                        "text_ru": q.text_ru,
                         "options_json": q.options_json,
+                        "options_uz_json": q.options_uz_json,
+                        "options_ru_json": q.options_ru_json,
                         "correct_answer": q.correct_answer,
+                        "correct_answer_uz": q.correct_answer_uz,
+                        "correct_answer_ru": q.correct_answer_ru,
                         "language": q.language,
                         "created_at": q.created_at.isoformat() if q.created_at else None,
                     }
@@ -863,6 +1020,7 @@ def admin_test_bank_questions(request):
             language=language,
         )
         n += 1
+    audit(request, "add_questions", "testbank", category_id, "", f"inserted={n}")
     return Response({"success": True, "inserted": n})
 
 
@@ -910,9 +1068,11 @@ def admin_exam_detail(request, pk: int):
         ]
         return Response(d)
     if request.method == "DELETE":
-        n, _ = Exam.objects.filter(pk=pk).delete()
-        if not n:
+        e = Exam.objects.filter(pk=pk).first()
+        if not e:
             return Response({"error": "Exam not found"}, status=404)
+        audit(request, "delete_exam", "exam", pk, e.title)
+        e.delete()
         return Response({"success": True})
     e = Exam.objects.filter(pk=pk).first()
     if not e:
@@ -995,6 +1155,7 @@ def admin_exam_detail(request, pk: int):
                 )
     except ValueError:
         return Response({"error": "Select at least one group"}, status=400)
+    audit(request, "update_exam", "exam", pk, e.title)
     return Response({"success": True})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])

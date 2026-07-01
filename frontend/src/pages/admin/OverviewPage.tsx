@@ -112,6 +112,10 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
     (async () => {
       setLoading(true);
       const res = await fetch(apiUrl('/api/admin/stats'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.status === 401 || res.status === 403) {
+        window.dispatchEvent(new Event('auth:error'));
+        return;
+      }
       const j = await readJsonSafe<AdminStats>(res);
       if (j) setStats(j);
       setLoading(false);

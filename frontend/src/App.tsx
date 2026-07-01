@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Login } from './pages/Login';
@@ -13,8 +13,12 @@ import { Button } from './components/ui';
 import { translations, Language } from './i18n';
 import { InstituteLogo } from './components/InstituteLogo';
 import { clearDeviceSessionToken } from './lib/deviceFingerprint';
+import { apiUrl } from './lib/apiUrl';
 
 const SUPPORTED_LANGS: Language[] = ['uz', 'ru', 'en'];
+
+/** Admin fetch-larida 401/403 kelsa bu eventni dispatch qiling → App avtomatik logout qiladi */
+export const AUTH_ERROR_EVENT = 'auth:error';
 
 const SESSION_KEYS = new Set(['token', 'user']);
 
@@ -106,7 +110,7 @@ function AppContent() {
     navigate('/');
   };
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setToken('');
     setUser(null);
     setActiveExam(null);
@@ -115,7 +119,24 @@ function AppContent() {
     safeStorageRemove('token');
     safeStorageRemove('user');
     navigate('/login');
-  };
+  }, [navigate]);
+
+  // Global: har qanday admin fetch 401/403 qaytarsa → avtomatik logout
+  useEffect(() => {
+    const onAuthError = () => handleLogout();
+    window.addEventListener(AUTH_ERROR_EVENT, onAuthError);
+    return () => window.removeEventListener(AUTH_ERROR_EVENT, onAuthError);
+  }, [handleLogout]);
+
+  // Admin tokenini mount da bir marta backend bilan tekshirish
+  const tokenCheckedRef = useRef(false);
+  useEffect(() => {
+    if (tokenCheckedRef.current || !token || user?.role !== 'admin') return;
+    tokenCheckedRef.current = true;
+    fetch(apiUrl('/api/admin/groups'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => { if (r.status === 401 || r.status === 403) handleLogout(); })
+      .catch(() => {});
+  }, [token, user?.role, handleLogout]);
 
   const startExamCheck = (exam: any, seId: number) => {
     setActiveExam(exam);

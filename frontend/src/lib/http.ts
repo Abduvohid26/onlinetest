@@ -1,3 +1,8 @@
+/** Admin fetch 401 yoki 403 qaytarsa chaqiring — App avtomatik logout qiladi. */
+export function signalAuthError() {
+  window.dispatchEvent(new Event('auth:error'));
+}
+
 /** Avoid SyntaxError when the server returns HTML (e.g. SPA fallback) instead of JSON. */
 export async function readJsonSafe<T = unknown>(res: Response): Promise<T | null> {
   const ct = res.headers.get('content-type') || '';

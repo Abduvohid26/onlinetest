@@ -32,14 +32,17 @@ export function AdminExamsTab({
   const [recommendedOnly, setRecommendedOnly] = useState(false);
   const [activeMonitorExamId, setActiveMonitorExamId] = useState<number | null>(null);
   const [editingExamId, setEditingExamId] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const t = translations[lang];
   const examsListUrl = apiVariant === 'staff' ? '/api/staff/exams' : '/api/admin/exams';
   const resultsUrl = (examId: number) => apiVariant === 'staff' ? `/api/staff/exams/${examId}/results` : `/api/admin/exams/${examId}/results`;
   const isStaffPortal = apiVariant === 'staff';
 
-  const fetchExams = useCallback(async () => {
+  const fetchExams = useCallback(async (manual = false) => {
+    if (manual) setRefreshing(true);
     const res = await fetch(apiUrl(examsListUrl), { headers: { Authorization: `Bearer ${token}` } });
     if (res.ok) { const raw = await readJsonSafe<unknown>(res); setExams(Array.isArray(raw) ? raw : []); }
+    if (manual) setRefreshing(false);
   }, [token, examsListUrl]);
 
   const fetchGroups = useCallback(async () => {
@@ -135,9 +138,9 @@ export function AdminExamsTab({
 
   const ExamStatusBadge = ({ e }: { e: any }) => {
     const status = getExamTimeStatus(e);
-    if (status === 'upcoming') return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">Upcoming</span>;
-    if (status === 'ended') return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Ended</span>;
-    return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 animate-pulse">Live</span>;
+    if (status === 'upcoming') return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{t.examListUpcoming}</span>;
+    if (status === 'ended') return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">{t.examListEnded}</span>;
+    return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 animate-pulse">{t.examListLive}</span>;
   };
 
   const getExamTimeStatus = (e: any): 'upcoming' | 'live' | 'ended' => {
@@ -186,18 +189,30 @@ export function AdminExamsTab({
                 </p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[12px] text-gray-500 shrink-0">{t.examFilterStatus}</span>
+            <div className="flex items-center gap-2 flex-wrap">
               <AdminSelect
                 value={examListFilter}
                 onChange={(e) => setExamListFilter(e.target.value)}
-                className="h-9 w-auto min-w-[9rem] text-[13px]"
+                className="h-9 w-full sm:w-auto min-w-[9rem] text-[13px]"
               >
                 <option value="All">{t.examFilterAll}</option>
                 <option value="Upcoming">{t.examFilterUpcoming}</option>
                 <option value="Live">{t.examFilterLive}</option>
                 <option value="Ended">{t.examFilterEnded}</option>
               </AdminSelect>
+              <AdminBtn
+                variant="ghost"
+                size="sm"
+                loading={refreshing}
+                onClick={() => fetchExams(true)}
+                icon={
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                }
+              >
+                <span className="hidden sm:inline">{t.reload}</span>
+              </AdminBtn>
             </div>
           </div>
 
@@ -232,11 +247,11 @@ export function AdminExamsTab({
 
                     <div className="grid grid-cols-2 gap-2">
                       <div className="bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
-                        <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">Start</p>
+                        <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">{t.startTime}</p>
                         <p className="text-[12px] text-gray-700 font-medium">{new Date(e.start_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
                       </div>
                       <div className="bg-gray-50 rounded-xl px-3 py-2 border border-gray-100">
-                        <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">End</p>
+                        <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide mb-0.5">{t.endTime}</p>
                         <p className="text-[12px] text-gray-700 font-medium">{new Date(e.end_time).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
                       </div>
                     </div>
@@ -256,7 +271,7 @@ export function AdminExamsTab({
                     <div className="flex gap-2 mt-auto pt-2 border-t border-gray-100">
                       <AdminBtn variant="ghost" size="sm" onClick={() => setActiveMonitorExamId(e.id)} className="flex-1 text-indigo-600 border-indigo-200 hover:bg-indigo-50">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                        Monitor
+                        {t.monitorBtn}
                       </AdminBtn>
                       <AdminBtn variant={selectedExam === e.id ? 'violet' : 'ghost'} size="sm" onClick={() => viewResults(e.id)} className="flex-1">
                         {t.results}
@@ -299,23 +314,23 @@ export function AdminExamsTab({
                     )}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <AdminSelect value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="h-9 text-[13px] !w-[150px] shrink-0">
-                      <option value="All">All Statuses</option>
-                      <option value="Completed">Completed</option>
-                      <option value="Pending">Pending</option>
-                      <option value="Banned">Banned</option>
+                    <AdminSelect value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="h-9 text-[13px] w-full sm:w-[150px]">
+                      <option value="All">{t.examStatusAll}</option>
+                      <option value="Completed">{t.examStatusCompleted}</option>
+                      <option value="Pending">{t.examStatusPending}</option>
+                      <option value="Banned">{t.examStatusBanned}</option>
                     </AdminSelect>
-                    <div className="flex gap-1 bg-white border border-gray-200 p-1 rounded-xl">
+                    <div className="flex flex-wrap gap-1 bg-white border border-gray-200 p-1 rounded-xl">
                       {['score', 'name', 'risk_score'].map((key) => (
                         <button key={key} type="button" onClick={() => handleSort(key)}
-                          className={`px-3 py-1 text-[12px] font-semibold rounded-lg transition-colors ${sortConfig?.key === key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100 text-gray-600'}`}>
-                          {key === 'risk_score' ? 'Risk' : key.charAt(0).toUpperCase() + key.slice(1)}
+                          className={`px-2.5 py-1 text-[12px] font-semibold rounded-lg transition-colors ${sortConfig?.key === key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100 text-gray-600'}`}>
+                          {key === 'risk_score' ? t.examResultRisk : key === 'score' ? t.examResultScore : lang === 'ru' ? 'Имя' : lang === 'en' ? 'Name' : 'Ism'}
                           {sortConfig?.key === key && (sortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
                         </button>
                       ))}
                     </div>
                     <AdminBtn variant={recommendedOnly ? 'violet' : 'ghost'} size="sm" onClick={() => setRecommendedOnly((v) => !v)}>
-                      Recommended
+                      {t.examResultReview}
                     </AdminBtn>
                     {!isStaffPortal && <AdminBtn variant="ghost" size="sm" onClick={exportCSV}>{t.exportCsv}</AdminBtn>}
                     <AdminBtn variant="ghost" size="sm" onClick={() => { setResults(null); setSelectedExam(null); }}>
@@ -358,10 +373,10 @@ export function AdminExamsTab({
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
                         {[
-                          { label: 'Score', value: r.score !== null ? r.score : '—', cls: 'text-2xl font-extrabold text-gray-900' },
-                          { label: 'Time', value: timeTaken, cls: 'text-[15px] font-semibold text-gray-700' },
-                          { label: 'Flagged', value: `${flaggedCount} qs`, cls: 'text-[15px] font-semibold text-amber-600' },
-                          { label: 'Incorrect', value: `${incorrectAnswers.length} qs`, cls: 'text-[15px] font-semibold text-red-600' },
+                          { label: t.examResultScore, value: r.score !== null ? r.score : '—', cls: 'text-2xl font-extrabold text-gray-900' },
+                          { label: t.examResultTime, value: timeTaken, cls: 'text-[15px] font-semibold text-gray-700' },
+                          { label: t.examResultFlagged, value: flaggedCount, cls: 'text-[15px] font-semibold text-amber-600' },
+                          { label: t.examResultIncorrect, value: incorrectAnswers.length, cls: 'text-[15px] font-semibold text-red-600' },
                         ].map((s) => (
                           <div key={s.label} className="bg-gray-50 rounded-xl px-3 py-2.5 border border-gray-100">
                             <p className="text-[11px] text-gray-400 font-semibold uppercase tracking-wide mb-1">{s.label}</p>
@@ -374,15 +389,15 @@ export function AdminExamsTab({
                         <details className="group mb-3">
                           <summary className="text-[13px] font-semibold text-gray-600 cursor-pointer hover:text-indigo-700 transition-colors flex items-center gap-2 select-none py-1.5">
                             <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                            View Incorrect Answers ({incorrectAnswers.length})
+                            {t.examIncorrectAnswers} ({incorrectAnswers.length})
                           </summary>
                           <div className="mt-2 space-y-2 pl-5 border-l-2 border-red-100">
                             {incorrectAnswers.map((inc: any, idx: number) => (
                               <div key={idx} className="text-[13px] bg-red-50 p-3 rounded-xl border border-red-100">
                                 <p className="font-medium text-gray-800 mb-1.5">{inc.question}</p>
                                 <div className="flex flex-wrap gap-3 text-[12px]">
-                                  <span className="text-red-600">Student: <span className="font-bold">{inc.studentAnswer || 'None'}</span></span>
-                                  <span className="text-emerald-600">Correct: <span className="font-bold">{inc.correctAnswer}</span></span>
+                                  <span className="text-red-600">{t.examStudentAnswer}: <span className="font-bold">{inc.studentAnswer || '—'}</span></span>
+                                  <span className="text-emerald-600">{t.examCorrectAnswer}: <span className="font-bold">{inc.correctAnswer}</span></span>
                                 </div>
                               </div>
                             ))}
@@ -394,7 +409,7 @@ export function AdminExamsTab({
                         <details className="group mb-3">
                           <summary className="text-[13px] font-semibold text-gray-600 cursor-pointer hover:text-red-600 transition-colors flex items-center gap-2 select-none py-1.5">
                             <svg className="w-4 h-4 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                            Question Risk Timeline ({r.question_risk_timeline.length})
+                            {t.examResultRisk} Timeline ({r.question_risk_timeline.length})
                           </summary>
                           <div className="mt-2 flex flex-wrap gap-2 pl-5">
                             {r.question_risk_timeline.map((q: any) => (
@@ -413,7 +428,7 @@ export function AdminExamsTab({
                         <div className="bg-red-50 rounded-xl border border-red-100 p-3 mb-3">
                           <p className="text-[13px] font-semibold text-red-700 mb-2 flex items-center gap-1.5">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                            Violations ({studentViolations.length})
+                            {t.examViolations} ({studentViolations.length})
                           </p>
                           <ul className="space-y-1">
                             {studentViolations.map((v: any, i: number) => (
@@ -436,7 +451,7 @@ export function AdminExamsTab({
                 {getSortedAndFilteredResults().length === 0 && (
                   <AdminEmpty
                     icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>}
-                    title="No results match your criteria"
+                    title={t.examNoResultsFilter}
                   />
                 )}
               </div>
@@ -447,7 +462,7 @@ export function AdminExamsTab({
 
       <AnimatePresence>
         {activeMonitorExamId && (
-          <LiveMonitor examId={activeMonitorExamId} token={token} onClose={() => setActiveMonitorExamId(null)} />
+          <LiveMonitor examId={activeMonitorExamId} token={token} lang={lang} onClose={() => setActiveMonitorExamId(null)} />
         )}
       </AnimatePresence>
 

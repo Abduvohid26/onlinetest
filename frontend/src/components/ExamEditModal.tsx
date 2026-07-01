@@ -5,7 +5,6 @@ import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { fromIsoToDatetimeLocal } from '../lib/datetimeLocal';
 import { DateTimeField } from './DateTimeField';
-import { GroupMultiSelect } from './GroupMultiSelect';
 import {
   AdminInput,
   AdminSelect,
@@ -59,6 +58,8 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
   const [rtEnd, setRtEnd] = useState('');
   const [rtNote, setRtNote] = useState('');
   const [exBusy, setExBusy] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState<'main' | 'advanced'>('main');
 
   useEffect(() => {
     let cancelled = false;
@@ -248,7 +249,6 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
   };
 
   const handleDelete = async () => {
-    if (!window.confirm(t.confirmDeleteExam)) return;
     setSaving(true);
     setError('');
     try {
@@ -264,7 +264,13 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
       setError(e.message || t.errorGeneric);
     } finally {
       setSaving(false);
+      setDeleteConfirm(false);
     }
+  };
+
+  const TAB_LABELS = {
+    main:     lang === 'ru' ? 'Основное' : lang === 'en' ? 'Main' : 'Asosiy',
+    advanced: lang === 'ru' ? 'Дополнительно' : lang === 'en' ? 'Advanced' : 'Qo\'shimcha',
   };
 
   return (
@@ -273,76 +279,89 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) onClose();
-        }}
+        transition={{ duration: 0.15 }}
+        className="fixed inset-0 z-50 bg-gray-900/50 flex items-center justify-center p-4"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       >
         <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-white rounded-3xl shadow-2xl"
+          initial={{ scale: 0.97, opacity: 0, y: 10 }}
+          animate={{ scale: 1, opacity: 1, y: 0 }}
+          exit={{ scale: 0.97, opacity: 0, y: 10 }}
+          transition={{ duration: 0.15 }}
+          className="w-full max-w-lg bg-white rounded-2xl border border-gray-200 shadow-2xl flex flex-col max-h-[88vh]"
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100 px-6 py-4 flex items-center justify-between gap-3">
+          {/* Header */}
+          <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-gray-100 shrink-0">
             <div className="min-w-0">
-              <h3 className="text-[17px] font-bold text-gray-900 truncate">{t.editExam}</h3>
-              {exam?.title && (
-                <p className="text-[13px] text-gray-400 mt-0.5 truncate">{exam.title}</p>
-              )}
+              <h3 className="text-[15px] font-semibold text-gray-900">{t.editExam}</h3>
+              {exam?.title && <p className="text-[12px] text-gray-400 mt-0.5 truncate">{exam.title}</p>}
             </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors shrink-0"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button type="button" onClick={onClose}
+              className="w-8 h-8 rounded-lg bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors shrink-0">
+              <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
 
-          <div className="px-6 py-5 space-y-5">
+          {/* Tabs */}
+          {!loading && exam && (
+            <div className="flex border-b border-gray-100 shrink-0 px-5">
+              {(['main', 'advanced'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`py-2.5 px-1 mr-5 text-[13px] font-semibold border-b-2 transition-colors ${
+                    activeTab === tab
+                      ? 'border-indigo-600 text-indigo-700'
+                      : 'border-transparent text-gray-400 hover:text-gray-600'
+                  }`}
+                >
+                  {TAB_LABELS[tab]}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Scrollable body */}
+          <div className="overflow-y-auto flex-1 px-5 py-4">
             {loading && (
-              <p className="text-[14px] text-gray-400 text-center py-10">{t.loading}</p>
+              <div className="flex items-center justify-center py-12">
+                <svg className="w-6 h-6 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                </svg>
+              </div>
             )}
+
             {error && <AdminAlert type="error">{error}</AdminAlert>}
 
-            {!loading && exam && (
-              <>
+            {!loading && exam && activeTab === 'main' && (
+              <div className="space-y-4">
+                {/* Title */}
                 <AdminField label={t.title} required>
                   <AdminInput value={title} onChange={(e) => setTitle(e.target.value)} />
                 </AdminField>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Start + End */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <AdminField label={t.startTime} required>
-                    <DateTimeField
-                      value={startLocal}
-                      onChange={setStartLocal}
-                      dateLabel={t.examDateLabel}
-                      timeLabel={t.examTimeLabel}
-                    />
+                    <DateTimeField value={startLocal} onChange={setStartLocal}
+                      dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
                   </AdminField>
                   <AdminField label={t.endTime} required>
-                    <DateTimeField
-                      value={endLocal}
-                      onChange={setEndLocal}
-                      min={startLocal || undefined}
-                      dateLabel={t.examDateLabel}
-                      timeLabel={t.examTimeLabel}
-                    />
+                    <DateTimeField value={endLocal} onChange={setEndLocal}
+                      min={startLocal || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
                   </AdminField>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {/* Duration + Lang + PIN */}
+                <div className="grid grid-cols-3 sm:grid-cols-3 gap-3">
                   <AdminField label={`${t.duration} (min)`} required>
-                    <AdminInput
-                      type="number"
-                      min={5}
-                      value={duration}
-                      onChange={(e) => setDuration(Number(e.target.value))}
-                    />
+                    <AdminInput type="number" min={5} value={duration}
+                      onChange={(e) => setDuration(Number(e.target.value))} />
                   </AdminField>
                   <AdminField label={t.language}>
                     <AdminSelect value={language} onChange={(e) => setLanguage(e.target.value)}>
@@ -351,125 +370,114 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
                       <option value="en">{t.langEnglish}</option>
                     </AdminSelect>
                   </AdminField>
-                  <AdminField label={`${t.pin} (opt.)`}>
+                  <AdminField label="PIN (opt.)">
                     <AdminInput value={pin} onChange={(e) => setPin(e.target.value)} placeholder="—" />
                   </AdminField>
                 </div>
 
-                <AdminField label={`${t.customRules} (opt.)`}>
-                  <textarea
-                    value={customRules}
-                    onChange={(e) => setCustomRules(e.target.value)}
-                    className="w-full min-h-[72px] rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-[15px] text-gray-900 placeholder:text-gray-400 shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400 transition-all resize-y"
-                  />
-                </AdminField>
-
+                {/* Groups */}
                 <div>
                   <label className="text-[13px] font-medium text-gray-600 block mb-2">
                     {t.selectGroups} <span className="text-red-500">*</span>
                   </label>
-                  <GroupMultiSelect
-                    groups={groups}
-                    value={selectedGroups}
-                    onChange={setSelectedGroups}
-                    lang={lang}
-                  />
+                  <div className="border border-gray-200 rounded-xl overflow-hidden max-h-[180px] overflow-y-auto">
+                    {groups.length === 0 ? (
+                      <p className="text-[13px] text-gray-400 text-center py-4">{t.adminNoExamsYet}</p>
+                    ) : groups.map((g) => (
+                      <label key={g.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer transition-colors border-b border-gray-50 last:border-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedGroups.includes(g.id)}
+                          onChange={() => setSelectedGroups((prev) =>
+                            prev.includes(g.id) ? prev.filter((x) => x !== g.id) : [...prev, g.id]
+                          )}
+                          className="w-4 h-4 rounded border-gray-300 accent-indigo-600"
+                        />
+                        <span className="text-[13px] text-gray-800 font-medium flex-1 truncate">{g.name}</span>
+                        {g.level_name && (
+                          <span className="text-[11px] text-gray-400 shrink-0">{g.level_name}</span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                  {selectedGroups.length > 0 && (
+                    <p className="text-[12px] text-indigo-600 font-semibold mt-1.5">{selectedGroups.length} ta tanlandi</p>
+                  )}
                 </div>
 
+                {/* Bank mode */}
+                {exam.exam_mode === 'bank_mixed' && (
+                  <div className="space-y-3 pt-1">
+                    <label className="text-[13px] font-medium text-gray-600 block">{t.bankCategoriesEdit}</label>
+                    <div className="border border-gray-200 rounded-xl overflow-hidden max-h-[140px] overflow-y-auto">
+                      {bankCats.length === 0 ? (
+                        <div className="p-3 text-center text-[13px] text-amber-700 bg-amber-50">{t.testBankNeedFirst}</div>
+                      ) : bankCats.map((c: any) => (
+                        <label key={c.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0">
+                          <input type="checkbox" checked={selectedBankCats.includes(c.id)}
+                            onChange={() => toggleBankCat(c.id)}
+                            className="w-4 h-4 rounded border-gray-300 accent-violet-600" />
+                          <span className="text-[13px] text-gray-800 font-medium flex-1 truncate">{c.name}</span>
+                          <span className="text-[11px] font-semibold text-violet-700 bg-violet-100 px-1.5 py-0.5 rounded-full shrink-0">{c.question_count ?? 0}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <AdminField label={t.examBankQuestionCount} required>
+                      <AdminInput type="number" min={1} max={200} value={bankCount}
+                        onChange={(e) => setBankCount(Number(e.target.value))} className="max-w-[140px]" />
+                    </AdminField>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!loading && exam && activeTab === 'advanced' && (
+              <div className="space-y-5">
+                {/* Custom rules */}
+                <AdminField label={`${t.customRules} (opt.)`}>
+                  <textarea value={customRules} onChange={(e) => setCustomRules(e.target.value)}
+                    rows={3}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 transition-colors resize-none"
+                  />
+                </AdminField>
+
+                {/* Static questions JSON */}
                 {exam.exam_mode === 'static' && (
                   <AdminField label={t.examQuestionsJsonHint}>
-                    <textarea
-                      value={questionsJson}
-                      onChange={(e) => setQuestionsJson(e.target.value)}
-                      className="w-full min-h-[160px] font-mono text-[12px] rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400 transition-all resize-y"
+                    <textarea value={questionsJson} onChange={(e) => setQuestionsJson(e.target.value)}
+                      rows={6}
+                      className="w-full font-mono text-[11px] rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-gray-800 focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 transition-colors resize-none"
                     />
                   </AdminField>
                 )}
 
-                {exam.exam_mode === 'bank_mixed' && (
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-[13px] font-medium text-gray-600 block mb-2">
-                        {t.bankCategoriesEdit}
-                      </label>
-                      <div className="border border-gray-200 rounded-2xl overflow-hidden">
-                        {bankCats.length === 0 ? (
-                          <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50">
-                            {t.testBankNeedFirst}
-                          </div>
-                        ) : (
-                          <div className="divide-y divide-gray-100 max-h-40 overflow-y-auto">
-                            {bankCats.map((c: any) => (
-                              <label
-                                key={c.id}
-                                className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={selectedBankCats.includes(c.id)}
-                                  onChange={() => toggleBankCat(c.id)}
-                                  className="w-4 h-4 rounded border-gray-300 text-violet-600 accent-violet-600"
-                                />
-                                <span className="text-[14px] text-gray-800 font-medium flex-1 truncate">{c.name}</span>
-                                <span className="text-[12px] font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full shrink-0">
-                                  {c.question_count ?? 0}
-                                </span>
-                              </label>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <AdminField label={t.examBankQuestionCount} required>
-                      <AdminInput
-                        type="number"
-                        min={1}
-                        max={200}
-                        value={bankCount}
-                        onChange={(e) => setBankCount(Number(e.target.value))}
-                        className="max-w-[180px]"
-                      />
-                    </AdminField>
-                  </div>
-                )}
-
-                <div className="space-y-3 pt-2 border-t border-gray-100">
+                {/* Exceptions */}
+                <div className="space-y-3">
                   <div>
-                    <p className="text-[14px] font-semibold text-gray-800">{t.exceptionsTitle}</p>
-                    <p className="text-[12px] text-gray-500 mt-0.5">{t.exceptionsHint}</p>
+                    <p className="text-[13px] font-semibold text-gray-700">{t.exceptionsTitle}</p>
+                    <p className="text-[11px] text-gray-400 mt-0.5">{t.exceptionsHint}</p>
                   </div>
                   {exceptions.map((row, i) => (
-                    <div key={i} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <AdminInput
-                        placeholder="student_id"
-                        value={row.student_id}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setExceptions((p) => p.map((x, j) => (j === i ? { ...x, student_id: v } : x)));
-                        }}
-                      />
-                      <AdminInput
-                        placeholder={t.exceptionReason}
-                        value={row.reason}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          setExceptions((p) => p.map((x, j) => (j === i ? { ...x, reason: v } : x)));
-                        }}
-                      />
+                    <div key={i} className="grid grid-cols-2 gap-2">
+                      <AdminInput placeholder="student_id" value={row.student_id}
+                        onChange={(e) => { const v = e.target.value; setExceptions((p) => p.map((x, j) => j === i ? { ...x, student_id: v } : x)); }} />
+                      <AdminInput placeholder={t.exceptionReason} value={row.reason}
+                        onChange={(e) => { const v = e.target.value; setExceptions((p) => p.map((x, j) => j === i ? { ...x, reason: v } : x)); }} />
                     </div>
                   ))}
-                  <div className="flex flex-wrap gap-2">
-                    <AdminBtn type="button" variant="ghost" size="sm" icon={<PlusIcon size={14} />} onClick={addExceptionRow}>
-                      + istisno
+                  <div className="flex gap-2">
+                    <AdminBtn type="button" variant="ghost" size="sm" icon={<PlusIcon size={13} />} onClick={addExceptionRow}>
+                      {t.examAddException}
                     </AdminBtn>
                     <AdminBtn type="button" variant="violet" size="sm" loading={exBusy} onClick={saveExceptions}>
-                      {t.save} (istisnolar)
+                      {t.examSaveExceptions}
                     </AdminBtn>
                   </div>
                 </div>
 
-                <div className="space-y-3 pt-2 border-t border-gray-100">
-                  <p className="text-[14px] font-semibold text-gray-800">{t.retakeSectionTitle}</p>
+                {/* Retake windows */}
+                <div className="space-y-3 pt-3 border-t border-gray-100">
+                  <p className="text-[13px] font-semibold text-gray-700">{t.retakeSectionTitle}</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <AdminField label={t.retakeStudent}>
                       <AdminInput value={rtStudent} onChange={(e) => setRtStudent(e.target.value)} />
@@ -478,70 +486,76 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
                       <AdminInput value={rtNote} onChange={(e) => setRtNote(e.target.value)} />
                     </AdminField>
                     <AdminField label={t.startTime}>
-                      <DateTimeField
-                        value={rtStart}
-                        onChange={setRtStart}
-                        dateLabel={t.examDateLabel}
-                        timeLabel={t.examTimeLabel}
-                      />
+                      <DateTimeField value={rtStart} onChange={setRtStart}
+                        dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
                     </AdminField>
                     <AdminField label={t.endTime}>
-                      <DateTimeField
-                        value={rtEnd}
-                        onChange={setRtEnd}
-                        min={rtStart || undefined}
-                        dateLabel={t.examDateLabel}
-                        timeLabel={t.examTimeLabel}
-                      />
+                      <DateTimeField value={rtEnd} onChange={setRtEnd}
+                        min={rtStart || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
                     </AdminField>
                   </div>
                   <AdminBtn type="button" variant="ghost" size="sm" loading={exBusy} onClick={addRetake}>
                     {t.retakeAddBtn}
                   </AdminBtn>
                   {retakeList.length > 0 && (
-                    <ul className="space-y-2 max-h-36 overflow-y-auto">
+                    <ul className="space-y-1.5 max-h-32 overflow-y-auto">
                       {retakeList.map((rw) => (
-                        <li
-                          key={rw.id}
-                          className="flex items-center justify-between gap-2 p-3 rounded-xl bg-gray-50 border border-gray-200 text-[12px]"
-                        >
-                          <span className="font-mono font-medium text-gray-800 shrink-0">{rw.student_id}</span>
-                          <span className="text-gray-500 truncate text-center flex-1">
+                        <li key={rw.id}
+                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-gray-50 border border-gray-200 text-[12px]">
+                          <span className="font-mono font-medium text-gray-700 shrink-0">{rw.student_id}</span>
+                          <span className="text-gray-400 truncate flex-1 text-center text-[11px]">
                             {new Date(rw.window_start).toLocaleString()} — {new Date(rw.window_end).toLocaleString()}
                           </span>
-                          <button
-                            type="button"
-                            className="text-red-500 hover:text-red-700 font-bold shrink-0 w-7 h-7 rounded-lg hover:bg-red-50 transition-colors"
-                            onClick={() => delRetake(rw.id)}
-                          >
-                            ×
-                          </button>
+                          <button type="button" onClick={() => delRetake(rw.id)}
+                            className="w-6 h-6 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors font-bold shrink-0 flex items-center justify-center">×</button>
                         </li>
                       ))}
                     </ul>
                   )}
                 </div>
-
-                <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
-                  <AdminBtn type="button" variant="blue" loading={saving} onClick={handleSave}>
-                    {t.save}
-                  </AdminBtn>
-                  <AdminBtn type="button" variant="ghost" onClick={onClose}>
-                    {t.cancel}
-                  </AdminBtn>
-                  <AdminBtn
-                    type="button"
-                    variant="red-ghost"
-                    className="ml-auto"
-                    loading={saving}
-                    onClick={handleDelete}
-                  >
-                    {t.delete}
-                  </AdminBtn>
-                </div>
-              </>
+              </div>
             )}
           </div>
+
+          {/* Footer */}
+          {!loading && exam && (
+            <div className="px-5 py-3.5 border-t border-gray-100 shrink-0">
+              <AnimatePresence>
+                {deleteConfirm && (
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                    <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-[13px] text-red-700 font-medium">
+                      {t.confirmDeleteExam}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <div className="flex items-center gap-2">
+                {deleteConfirm ? (
+                  <>
+                    <AdminBtn type="button" variant="red" size="sm" loading={saving} onClick={handleDelete}>
+                      {t.adminDeleteBtn}
+                    </AdminBtn>
+                    <AdminBtn type="button" variant="ghost" size="sm" onClick={() => setDeleteConfirm(false)}>
+                      {t.cancel}
+                    </AdminBtn>
+                  </>
+                ) : (
+                  <>
+                    <AdminBtn type="button" variant="blue" size="sm" loading={saving} onClick={handleSave}>
+                      {t.save}
+                    </AdminBtn>
+                    <AdminBtn type="button" variant="ghost" size="sm" onClick={onClose}>
+                      {t.cancel}
+                    </AdminBtn>
+                    <AdminBtn type="button" variant="red-ghost" size="sm" className="ml-auto" onClick={() => setDeleteConfirm(true)}>
+                      {t.delete}
+                    </AdminBtn>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>

@@ -7,18 +7,18 @@ export function StaffDashboard({ token, lang }: { token: string; lang: Language 
   const t = translations[lang];
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
+    <div className="px-3 sm:px-6 pt-4 sm:pt-6 pb-6 max-w-7xl mx-auto space-y-5">
       <motion.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
-        className="flex items-start justify-between gap-4"
+        className="flex items-center justify-between gap-3"
       >
         <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 leading-tight">{t.staffPortalTitle}</h1>
-          <p className="text-[13px] text-gray-500 mt-1 max-w-2xl leading-relaxed">{t.staffPortalSubtitle}</p>
+          <h1 className="text-[18px] sm:text-[22px] font-bold tracking-tight text-gray-900 leading-tight">{t.staffPortalTitle}</h1>
+          <p className="text-[13px] text-gray-500 mt-0.5 leading-relaxed">{t.staffPortalSubtitle}</p>
         </div>
         <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-md">
-          staff
+          Staff
         </span>
       </motion.div>
 

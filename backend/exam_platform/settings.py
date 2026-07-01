@@ -73,6 +73,8 @@ if not DEBUG:
         SECURE_PROXY_SSL_HEADER = (name.strip(), value.strip())
 
 _csrf = [o.strip() for o in os.environ.get("CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()]
+if DEBUG and "http://localhost:8080" not in _csrf:
+    _csrf.append("http://localhost:8080")
 CSRF_TRUSTED_ORIGINS = _csrf
 if not DEBUG and _csrf and any(o.startswith("https://") for o in _csrf):
     SESSION_COOKIE_SECURE = True
@@ -201,10 +203,27 @@ else:
 
 # Django Channels WebSocket: Redis channel layer (Redis yo'q bo'lsa InMemory — multi-worker da ishlamaydi)
 if _redis_url:
+    import urllib.parse as _urlparse
+    _rp = _urlparse.urlparse(_redis_url)
+    _redis_conn: dict = {
+        "host": _rp.hostname or "redis",
+        "port": _rp.port or 6379,
+        "db": int((_rp.path or "/0").lstrip("/") or 0),
+        # socket_timeout=None → pub/sub idle-da TimeoutError chiqmaydi
+        "socket_timeout": None,
+        "socket_connect_timeout": 10,
+        "socket_keepalive": True,
+    }
+    if _rp.password:
+        _redis_conn["password"] = _rp.password
     CHANNEL_LAYERS = {
         "default": {
             "BACKEND": "channels_redis.core.RedisChannelLayer",
-            "CONFIG": {"hosts": [_redis_url]},
+            "CONFIG": {
+                "hosts": [_redis_conn],
+                "capacity": 1500,
+                "expiry": 60,
+            },
         }
     }
 else:

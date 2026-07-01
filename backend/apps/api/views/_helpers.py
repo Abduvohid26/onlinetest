@@ -99,6 +99,7 @@ from apps.api.view_utils import (
 )
 from apps.core.models import (
     AppUser,
+    AuditLog,
     BanAppeal,
     BanAppealEvent,
     Exam,
@@ -113,6 +114,23 @@ from apps.core.models import (
     UnbanEvidence,
     ViolationLog,
 )
+
+
+def audit(request, action: str, target_type: str = "", target_id: str = "", target_name: str = "", detail: str = "") -> None:
+    """Fire-and-forget audit log entry. Silently swallows errors."""
+    try:
+        actor = request.user
+        AuditLog.objects.create(
+            actor_id=str(actor.id),
+            actor_name=str(actor.name or actor.id),
+            action=action,
+            target_type=target_type,
+            target_id=str(target_id),
+            target_name=str(target_name),
+            detail=str(detail)[:500],
+        )
+    except Exception:
+        pass
 
 logger = logging.getLogger("apps.api")
 
@@ -702,6 +720,7 @@ def _admin_exams_create_impl(request):
             ExamStudentException.objects.update_or_create(
                 exam_id=eid, student_id=sid, defaults={"reason": reason}
             )
+    audit(request, "create_exam", "exam", eid, title, f"mode={mode}, groups={len(gids)}")
     return Response({"id": eid})
 
 def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False):

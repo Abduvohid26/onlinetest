@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { useNavigate as useRRNavigate, useLocation } from 'react-router-dom';
 import { translations, Language } from '../i18n';
 import { TestBankTab } from './TestBankTab';
 import { ImtixonTab } from './ImtixonTab';
@@ -10,6 +11,7 @@ import { GroupsPage } from './admin/GroupsPage';
 import { StudentsPage } from './admin/StudentsPage';
 import { BannedPage } from './admin/BannedPage';
 import { StaffPage } from './admin/StaffPage';
+import { AuditPage } from './admin/AuditPage';
 import type { Level, Group } from './admin/types';
 
 type AdminPage =
@@ -19,6 +21,7 @@ type AdminPage =
   | 'students'
   | 'banned'
   | 'staff'
+  | 'audit'
   | 'testbank'
   | 'exam_create'
   | 'exam_list';
@@ -75,7 +78,33 @@ const IC = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
     </svg>
   ),
+  audit: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+    </svg>
+  ),
 };
+
+const PAGE_PATHS: Record<AdminPage, string> = {
+  overview:     '/admin',
+  levels:       '/admin/levels',
+  groups:       '/admin/groups',
+  students:     '/admin/students',
+  banned:       '/admin/banned',
+  staff:        '/admin/staff',
+  audit:        '/admin/audit',
+  testbank:     '/admin/testbank',
+  exam_create:  '/admin/exam/create',
+  exam_list:    '/admin/exam/list',
+};
+
+function pathToPage(pathname: string): AdminPage {
+  // Longest path first so /admin/exam/create doesn't accidentally match /admin
+  const sorted = (Object.entries(PAGE_PATHS) as [AdminPage, string][])
+    .sort((a, b) => b[1].length - a[1].length);
+  const found = sorted.find(([, path]) => pathname === path);
+  return found ? found[0] : 'overview';
+}
 
 export function AdminDashboard({
   token,
@@ -87,15 +116,18 @@ export function AdminDashboard({
   adminUserId?: string;
 }) {
   const t = translations[lang];
-  const [page, setPage] = useState<AdminPage>('overview');
+  const rrNavigate = useRRNavigate();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const page = pathToPage(location.pathname);
 
   // Cross-page navigation state
   const [filterLevelId, setFilterLevelId] = useState<number | null>(null);
   const [filterGroupId, setFilterGroupId] = useState<number | null>(null);
 
   const navigate = (p: AdminPage) => {
-    setPage(p);
+    rrNavigate(PAGE_PATHS[p]);
     setSidebarOpen(false);
   };
 
@@ -111,7 +143,13 @@ export function AdminDashboard({
         { id: 'groups', label: t.sidebarGroupsSub },
         { id: 'students', label: t.sidebarStudentsSub },
         { id: 'banned', label: t.sidebarBannedSub, color: 'red' },
+      ],
+    },
+    {
+      label: t.sidebarStaffAuditSection,
+      items: [
         { id: 'staff', label: t.sidebarStaffSub },
+        { id: 'audit', label: t.sidebarAuditSub },
       ],
     },
     {
@@ -270,6 +308,9 @@ export function AdminDashboard({
           )}
           {page === 'staff' && (
             <StaffPage token={token} lang={lang} />
+          )}
+          {page === 'audit' && (
+            <AuditPage token={token} lang={lang} />
           )}
           {page === 'testbank' && (
             <TestBankTab token={token} lang={lang} />

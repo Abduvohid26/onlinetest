@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Button, Card, CardContent, CardHeader, CardTitle } from '../components/ui';
+import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive } from '../lib/realtimeProctor';
@@ -1080,6 +1080,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         }
         safeLocalRemove(`exam_answers_${exam.id}`);
         safeLocalRemove(`exam_answers_ts_${exam.id}`);
+        streamRef.current?.getTracks().forEach((t) => t.stop());
         const payload: ExamResultPayload = {
           exam_id: json.exam_id,
           result_public_id: json.result_public_id,
@@ -1253,7 +1254,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           animate={{ opacity: 1, scale: 1 }}
           className="w-full max-w-lg my-auto"
         >
-          <Card className="w-full text-center p-6 sm:p-8 md:p-10 max-h-[min(92dvh,100dvh-1rem)] overflow-y-auto overscroll-y-contain border-red-500/30 bg-red-50/95 shadow-2xl shadow-red-500/10">
+          <div className="w-full text-center p-6 sm:p-8 max-h-[min(92dvh,100dvh-1rem)] overflow-y-auto overscroll-y-contain rounded-lg border border-red-200 bg-red-50/95 shadow-2xl shadow-red-500/10">
           <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -1268,10 +1269,12 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             </p>
           )}
 
-          <div className="space-y-3">
-            <Button
-              className="w-full rounded-full bg-red-600 hover:bg-red-700 text-white"
-              disabled={banPdfBusy}
+          <div className="space-y-2.5">
+            <AdminBtn
+              variant="red"
+              size="lg"
+              className="w-full"
+              loading={banPdfBusy}
               onClick={async () => {
                 try {
                   setBanPdfBusy(true);
@@ -1294,27 +1297,30 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               }}
             >
               {banPdfBusy ? t.downloading : banPdfLabel}
-            </Button>
-            <Button className="w-full rounded-full" variant="outline" onClick={() => onFinish(null)}>
+            </AdminBtn>
+            <AdminBtn variant="ghost" size="lg" className="w-full" onClick={() => onFinish(null)}>
               {backLabel}
-            </Button>
+            </AdminBtn>
           </div>
           <div className="mt-5 border-t border-red-200/70 pt-5 text-left space-y-3">
-            <p className="text-sm font-semibold text-gray-800">BAN bo'yicha murojaat yuborish</p>
+            <p className="text-[13px] font-semibold text-gray-800">{lang === 'ru' ? 'Обжалование бана' : lang === 'en' ? 'Appeal BAN' : "BAN bo'yicha murojaat"}</p>
             <textarea
               value={appealReason}
               onChange={(e) => setAppealReason(e.target.value)}
-              placeholder="Vaziyatni batafsil yozing (kamida 12 belgi) — admin ko'rib chiqadi"
-              className="w-full min-h-[90px] rounded-lg border border-red-200 bg-white px-3 py-2 text-sm resize-none"
+              placeholder={lang === 'ru' ? 'Опишите ситуацию подробно (мин. 12 симв.) — admin рассмотрит' : lang === 'en' ? 'Describe the situation in detail (min 12 chars) — admin will review' : "Vaziyatni batafsil yozing (kamida 12 belgi) — admin ko'rib chiqadi"}
+              className="w-full min-h-[80px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 transition-colors"
             />
             {appealMsg ? (
-              <p className={appealMsg.startsWith('ok:') ? 'text-xs font-medium text-green-700' : 'text-xs font-medium text-red-600'}>
+              <AdminAlert type={appealMsg.startsWith('ok:') ? 'success' : 'error'}>
                 {appealMsg.startsWith('ok:') ? appealMsg.slice(3) : appealMsg}
-              </p>
+              </AdminAlert>
             ) : null}
-            <Button
-              className="w-full rounded-full"
-              disabled={appealBusy || appealReason.trim().length < 12}
+            <AdminBtn
+              variant="ghost"
+              size="lg"
+              className="w-full"
+              loading={appealBusy}
+              disabled={appealReason.trim().length < 12}
               onClick={async () => {
                 try {
                   setAppealBusy(true);
@@ -1342,10 +1348,10 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 }
               }}
             >
-              {appealBusy ? 'Yuborilmoqda...' : 'Murojaat yuborish'}
-            </Button>
+              {appealBusy ? (lang === 'ru' ? 'Отправка...' : lang === 'en' ? 'Sending...' : 'Yuborilmoqda...') : (lang === 'ru' ? 'Отправить обжалование' : lang === 'en' ? 'Submit appeal' : 'Murojaat yuborish')}
+            </AdminBtn>
           </div>
-        </Card>
+        </div>
         </motion.div>
       </div>,
       document.body,
@@ -1408,9 +1414,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 {formatTime(timeLeft)}
               </span>
             </div>
-            <Button onClick={handleSubmit} disabled={submitting} className="rounded-full px-8 shadow-lg shadow-black/5">
+            <AdminBtn variant="blue" size="lg" loading={submitting} onClick={handleSubmit} className="px-6 shrink-0">
               {submitting ? t.submitting : t.submitExam}
-            </Button>
+            </AdminBtn>
           </div>
         </motion.div>
 
@@ -1505,22 +1511,22 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         <div className="space-y-6 pb-20">
           {currentQ && (
             <motion.div variants={item} key={currentQ.id} id={`question-${currentQ.id}`}>
-              <Card className={`overflow-hidden border border-slate-200/80 bg-white shadow-[0_8px_30px_-12px_rgba(15,23,42,0.12)] transition-all ${flaggedQuestions.includes(currentQ.id) ? 'ring-2 ring-amber-400' : ''}`}>
-                <CardHeader className="bg-slate-50/80 border-b border-slate-100 pb-4 flex flex-row items-start justify-between gap-3">
-                  <CardTitle className="text-base sm:text-lg font-medium leading-relaxed text-slate-900 flex-1">
+              <div className={`rounded-lg border bg-white overflow-hidden transition-all ${flaggedQuestions.includes(currentQ.id) ? 'border-amber-300 ring-2 ring-amber-200' : 'border-gray-200'}`}>
+                <div className="bg-gray-50/80 border-b border-gray-100 px-5 py-4 flex items-start justify-between gap-3">
+                  <p className="text-[15px] font-medium leading-relaxed text-gray-900 flex-1">
                     <span className="text-indigo-600 font-bold mr-2">{qIndex + 1}.</span>
                     {currentQParsed.cleanText || currentQ.text}
-                  </CardTitle>
+                  </p>
                   <button
                     type="button"
                     onClick={() => toggleFlag(currentQ.id)}
-                    className={`ml-4 p-2 rounded-full transition-colors ${flaggedQuestions.includes(currentQ.id) ? 'bg-yellow-100 text-yellow-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                    className={`shrink-0 ml-3 p-2 rounded-lg transition-colors ${flaggedQuestions.includes(currentQ.id) ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
                     title={t.flagQuestion}
                   >
-                    <svg className="w-5 h-5" fill={flaggedQuestions.includes(currentQ.id) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" /></svg>
+                    <svg className="w-4.5 h-4.5" fill={flaggedQuestions.includes(currentQ.id) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" /></svg>
                   </button>
-                </CardHeader>
-                <CardContent className="p-5 sm:p-6 space-y-3">
+                </div>
+                <div className="p-4 sm:p-5 space-y-2.5">
                   {currentQParsed.images.map((img, idx) => (
                     <div key={`${currentQ.id}-img-${idx}`} className="mb-3">
                       <img
@@ -1566,32 +1572,31 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                     </label>
                   ))}
                   {currentOptions.length === 0 && (
-                    <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-4 py-3">
-                      {t.examOptionsMissing}
-                    </p>
+                    <AdminAlert type="error">{t.examOptionsMissing}</AdminAlert>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             </motion.div>
           )}
-          <div className="flex flex-wrap gap-3 justify-between items-center">
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-full"
+          <div className="flex gap-3 justify-between items-center">
+            <AdminBtn
+              variant="ghost"
+              size="lg"
               disabled={qIndex <= 0}
               onClick={() => setQIndex((i) => Math.max(0, i - 1))}
+              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>}
             >
               {t.examNavPrev}
-            </Button>
-            <Button
-              type="button"
-              className="rounded-full"
+            </AdminBtn>
+            <AdminBtn
+              variant="blue"
+              size="lg"
               disabled={qIndex >= totalQuestions - 1}
               onClick={() => setQIndex((i) => Math.min(totalQuestions - 1, i + 1))}
+              iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
             >
               {t.examNavNext}
-            </Button>
+            </AdminBtn>
           </div>
         </div>
       </motion.div>
@@ -1608,14 +1613,12 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           const isOk = faceStatus === 'OK';
           const isWaiting = faceStatus === 'WAITING';
           return (
-            <Card className="overflow-hidden bg-white" style={{ borderColor: 'transparent' }}>
-              <CardHeader className="py-4 bg-white border-b border-gray-200">
-                <CardTitle className="text-sm font-semibold tracking-wide uppercase text-gray-500 flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></span>
-                  {t.examPanelCamera}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-2">
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelCamera}</span>
+              </div>
+              <div className="p-2">
                 <div className={`rounded-lg overflow-hidden bg-black/5 border-2 shadow-inner relative aspect-video transition-colors duration-300 ${fsCfg.border}`}>
                   <video
                     ref={videoRef}
@@ -1672,9 +1675,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                       {cameraErrorHint ? (
                         <>
                           <span className="font-semibold text-red-700 leading-snug">{cameraErrorHint}</span>
-                          <button
-                            type="button"
-                            className="rounded-full border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+                          <AdminBtn
+                            variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setCameraErrorHint('');
                               setCameraPreviewOk(false);
@@ -1682,7 +1685,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                             }}
                           >
                             {t.examCameraReload}
-                          </button>
+                          </AdminBtn>
                         </>
                       ) : (
                         <span className="font-medium text-gray-600">{t.examCameraLoadingPreview}</span>
@@ -1690,18 +1693,16 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                     </div>
                   )}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           );
         })()}
 
-        <Card className="border-gray-200 bg-white ">
-          <CardHeader className="py-4 bg-white border-b border-gray-200">
-            <CardTitle className="text-sm font-semibold tracking-wide uppercase text-gray-500">
-              {t.examPanelQuestions}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4">
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelQuestions}</span>
+          </div>
+          <div className="p-4">
             <div className="grid grid-cols-5 gap-2">
               {exam.questions.map((q: any, i: number) => {
                 const isAnswered = !!answers[q.id];
@@ -1725,26 +1726,24 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 );
               })}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        <Card className="border-gray-200 bg-white ">
-          <CardContent className="p-6">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-sm font-semibold text-gray-700">{t.examPanelWarnings}</span>
-              <div className="flex items-center gap-2">
-                {[1, 2, 3].map(num => (
-                  <div 
-                    key={num} 
-                    className={`w-3 h-3 rounded-full transition-colors ${
-                      strikeLevel >= num ? 'bg-red-500 shadow-sm shadow-red-500/50' : 'bg-gray-200'
-                    }`}
-                  />
-                ))}
-              </div>
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <div className="px-4 py-3 flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelWarnings}</span>
+            <div className="flex items-center gap-1.5">
+              {[1, 2, 3].map(num => (
+                <div
+                  key={num}
+                  className={`w-3 h-3 rounded-full transition-colors ${
+                    strikeLevel >= num ? 'bg-red-500 shadow-sm shadow-red-500/50' : 'bg-gray-200'
+                  }`}
+                />
+              ))}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </motion.div>
       <Calculator />
     </div>

@@ -1,28 +1,49 @@
-import React, { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, PlusIcon } from './admin/ui';
 
-type ImportProgressState = {
-  running: boolean;
-  progress: number;
-  stage: string;
-  startedAt: number;
+/* ── Types ── */
+type Category = {
+  id: number;
+  name: string;
+  description?: string;
+  sort_order?: number;
+  question_count?: number;
+  source_language?: string;
+  program_track?: string;
+  academic_year?: number;
+  preview?: { text_en: string; text_uz: string; text_ru: string } | null;
 };
 
-const sharedImportState: ImportProgressState = {
-  running: false, progress: 0, stage: '', startedAt: 0,
+type Question = {
+  id: number;
+  category_id: number;
+  text: string;
+  text_uz: string;
+  text_ru: string;
+  options_json: string;
+  options_uz_json: string;
+  options_ru_json: string;
+  correct_answer: string;
+  correct_answer_uz: string;
+  correct_answer_ru: string;
+  language: string;
 };
+
+/* ── Import progress (singleton across remounts) ── */
+type ImportProgressState = { running: boolean; progress: number; stage: string; startedAt: number };
+const sharedImportState: ImportProgressState = { running: false, progress: 0, stage: '', startedAt: 0 };
 
 const STAGE_LABELS: Record<string, Record<Language, string>> = {
-  uploading:   { uz: 'Fayl yuborilmoqda...',            ru: 'Загрузка файла...',         en: 'Uploading file...' },
-  extracting:  { uz: 'Matn ajratilmoqda...',            ru: 'Извлечение текста...',       en: 'Extracting text...' },
-  parsing:     { uz: 'Savollar tahlil qilinmoqda...',   ru: 'Анализ вопросов...',         en: 'Parsing questions...' },
-  translating: { uz: 'Tarjima qilinmoqda (UZ/RU/EN)...', ru: 'Перевод (UZ/RU/EN)...',   en: 'Translating (UZ/RU/EN)...' },
-  saving:      { uz: 'Bazaga saqlanmoqda...',           ru: 'Сохранение в базу...',       en: 'Saving to bank...' },
-  done:        { uz: 'Tugadi ✓',                        ru: 'Готово ✓',                   en: 'Done ✓' },
+  uploading:   { uz: 'Fayl yuborilmoqda…',             ru: 'Загрузка файла…',          en: 'Uploading file…' },
+  extracting:  { uz: 'Matn ajratilmoqda…',             ru: 'Извлечение текста…',        en: 'Extracting text…' },
+  parsing:     { uz: 'Savollar tahlil qilinmoqda…',    ru: 'Анализ вопросов…',          en: 'Parsing questions…' },
+  translating: { uz: 'Tarjima qilinmoqda (UZ/RU/EN)…', ru: 'Перевод (UZ/RU/EN)…',     en: 'Translating (UZ/RU/EN)…' },
+  saving:      { uz: 'Bazaga saqlanmoqda…',            ru: 'Сохранение в базу…',        en: 'Saving to bank…' },
+  done:        { uz: 'Tugadi ✓',                       ru: 'Готово ✓',                  en: 'Done ✓' },
 };
 
 function getStageLabel(elapsed: number, lang: Language): string {
@@ -31,10 +52,10 @@ function getStageLabel(elapsed: number, lang: Language): string {
 }
 
 const SOURCE_LANGUAGE_OPTIONS = [
-  { value: 'auto', labelUz: 'Avtomatik aniqlash', labelRu: 'Авто', labelEn: 'Auto-detect' },
-  { value: 'uz',   labelUz: "O'zbek (lotin)",     labelRu: 'Узбекский',      labelEn: 'Uzbek' },
-  { value: 'ru',   labelUz: 'Rus',                labelRu: 'Русский',        labelEn: 'Russian' },
-  { value: 'en',   labelUz: 'Ingliz',             labelRu: 'Английский',     labelEn: 'English' },
+  { value: 'auto', labelUz: 'Avtomatik aniqlash', labelRu: 'Авто',        labelEn: 'Auto-detect' },
+  { value: 'uz',   labelUz: "O'zbek (lotin)",      labelRu: 'Узбекский',  labelEn: 'Uzbek' },
+  { value: 'ru',   labelUz: 'Rus',                 labelRu: 'Русский',    labelEn: 'Russian' },
+  { value: 'en',   labelUz: 'Ingliz',              labelRu: 'Английский', labelEn: 'English' },
 ];
 
 function getLangLabel(opt: (typeof SOURCE_LANGUAGE_OPTIONS)[0], lang: Language): string {
@@ -43,27 +64,164 @@ function getLangLabel(opt: (typeof SOURCE_LANGUAGE_OPTIONS)[0], lang: Language):
   return opt.labelUz;
 }
 
+/* ── Questions panel for a single category ── */
+function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language; token: string }) {
+  const t = translations[lang];
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQ, setSearchQ] = useState('');
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(apiUrl(`/api/admin/test-bank/questions?category_id=${catId}`), {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => readJsonSafe<Question[]>(r))
+      .then((data) => { setQuestions(Array.isArray(data) ? data : []); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [catId, token]);
+
+  const getText = (q: Question) => {
+    if (lang === 'uz' && q.text_uz) return q.text_uz;
+    if (lang === 'ru' && q.text_ru) return q.text_ru;
+    return q.text || q.text_uz || q.text_ru;
+  };
+
+  const getOptions = (q: Question): string[] => {
+    try {
+      if (lang === 'uz' && q.options_uz_json) return JSON.parse(q.options_uz_json);
+      if (lang === 'ru' && q.options_ru_json) return JSON.parse(q.options_ru_json);
+      return JSON.parse(q.options_json);
+    } catch { return []; }
+  };
+
+  const getCorrect = (q: Question) => {
+    if (lang === 'uz' && q.correct_answer_uz) return q.correct_answer_uz;
+    if (lang === 'ru' && q.correct_answer_ru) return q.correct_answer_ru;
+    return q.correct_answer;
+  };
+
+  const filtered = searchQ.trim()
+    ? questions.filter((q) => getText(q).toLowerCase().includes(searchQ.toLowerCase()))
+    : questions;
+
+  if (loading) {
+    return (
+      <div className="px-5 py-6 flex justify-center">
+        <svg className="w-5 h-5 animate-spin text-indigo-500" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+        </svg>
+      </div>
+    );
+  }
+
+  if (questions.length === 0) {
+    return (
+      <div className="px-5 py-4 text-[13px] text-gray-400 italic">{t.testBankNoQuestionsLoaded}</div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50/60">
+      {/* Search bar */}
+      <div className="px-5 py-3 border-b border-gray-100">
+        <AdminInput
+          value={searchQ}
+          onChange={(e) => setSearchQ(e.target.value)}
+          placeholder={lang === 'ru' ? 'Поиск по тексту…' : lang === 'en' ? 'Search questions…' : 'Savol bo\'yicha qidirish…'}
+          className="h-8 text-[12px] max-w-sm"
+        />
+        <span className="ml-3 text-[12px] text-gray-400 tabular-nums">
+          {filtered.length} / {questions.length}
+        </span>
+      </div>
+
+      {/* Questions list */}
+      <div className="divide-y divide-gray-100 max-h-[520px] overflow-y-auto">
+        {filtered.map((q, i) => {
+          const opts = getOptions(q);
+          const correct = getCorrect(q);
+          return (
+            <motion.div
+              key={q.id}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: i * 0.01 }}
+              className="px-5 py-3.5"
+            >
+              <div className="flex items-start gap-3">
+                <span className="shrink-0 w-6 h-6 rounded-md bg-indigo-100 text-indigo-700 text-[11px] font-bold flex items-center justify-center tabular-nums mt-0.5">
+                  {i + 1}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-medium text-gray-800 leading-snug">{getText(q)}</p>
+                  {opts.length > 0 && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 mt-2">
+                      {opts.map((opt, oi) => {
+                        const letter = String.fromCharCode(65 + oi);
+                        const isCorrect = opt === correct || letter === correct || String(oi + 1) === correct;
+                        return (
+                          <div
+                            key={oi}
+                            className={`flex items-start gap-1.5 text-[12px] px-2 py-1 rounded-lg ${
+                              isCorrect ? 'bg-emerald-50 text-emerald-800 font-semibold' : 'text-gray-600'
+                            }`}
+                          >
+                            <span className={`shrink-0 font-bold ${isCorrect ? 'text-emerald-600' : 'text-gray-400'}`}>{letter})</span>
+                            <span className="leading-snug">{opt}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {correct && opts.length === 0 && (
+                    <p className="mt-1.5 text-[12px] text-emerald-700 font-semibold">
+                      ✓ {t.testBankCorrectAnswer}: {correct}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ── Main component ── */
 export function TestBankTab({ token, lang }: { token: string; lang: Language }) {
-  const [categories, setCategories] = useState<any[]>([]);
+  const t = translations[lang];
+  const h = { Authorization: `Bearer ${token}` };
+
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [pageMsg, setPageMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Import form state
   const [collectionName, setCollectionName] = useState('');
   const [sourceLanguage, setSourceLanguage] = useState('auto');
   const [smartFile, setSmartFile] = useState<File | null>(null);
-  const [fileKey, setFileKey] = useState(0);
+  const [formKey, setFormKey] = useState(0);
   const [smartBusy, setSmartBusy] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importStage, setImportStage] = useState('');
-  const [msg, setMsg] = useState<{ type: 'ok' | 'err' | ''; text: string }>({ type: '', text: '' });
+  const [importMsg, setImportMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Category delete confirm
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const t = translations[lang];
 
-  const load = async () => {
-    const h = { Authorization: `Bearer ${token}` };
-    const cRes = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: h });
-    const c = cRes.ok ? await readJsonSafe<any[]>(cRes) : null;
-    setCategories(Array.isArray(c) ? c : []);
-  };
+  // Expanded questions panel
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  useEffect(() => { load(); }, [token]);
+  const load = useCallback(async () => {
+    const res = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: h });
+    const data = await readJsonSafe<Category[]>(res);
+    setCategories(Array.isArray(data) ? data : []);
+  }, [token]);
+
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     setSmartBusy(sharedImportState.running);
@@ -83,33 +241,40 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
   }, [lang]);
 
   const delCategory = async (id: number) => {
-    if (!confirm(t.testBankCatDeleteConfirm)) return;
     setDeletingId(id);
-    try {
-      await fetch(apiUrl(`/api/admin/test-bank/categories/${id}`), {
-        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-      });
+    const res = await fetch(apiUrl(`/api/admin/test-bank/categories/${id}`), {
+      method: 'DELETE', headers: h,
+    });
+    setDeletingId(null);
+    setDeleteConfirmId(null);
+    if (res.ok) {
+      setPageMsg({ type: 'ok', text: t.testBankDeletedOk });
+      setTimeout(() => setPageMsg(null), 3000);
+      if (expandedId === id) setExpandedId(null);
       load();
-    } finally { setDeletingId(null); }
+    } else {
+      const d = await readJsonSafe<{ error?: string }>(res);
+      setPageMsg({ type: 'err', text: d?.error || t.errorGeneric });
+    }
   };
 
   const importSmart = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMsg({ type: '', text: '' });
+    setImportMsg(null);
     const name = collectionName.trim();
-    if (!name) { setMsg({ type: 'err', text: t.testCollectionNameEn }); return; }
-    if (!smartFile) { setMsg({ type: 'err', text: t.testBankAiNeedPdf }); return; }
+    if (!name) { setImportMsg({ type: 'err', text: t.testCollectionNameEn }); return; }
+    if (!smartFile) { setImportMsg({ type: 'err', text: t.testBankAiNeedPdf }); return; }
     if (sharedImportState.running) {
-      setMsg({ type: 'err', text: lang === 'ru' ? 'Предыдущий анализ ещё не завершён.' : lang === 'en' ? 'Previous import still running.' : 'Oldingi tahlil hali tugamagan.' });
+      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Предыдущий анализ ещё не завершён.' : lang === 'en' ? 'Previous import still running.' : 'Oldingi tahlil hali tugamagan.' });
       return;
     }
     const fn = smartFile.name?.toLowerCase() || '';
     if (!fn.endsWith('.pdf') && !fn.endsWith('.docx') && !fn.endsWith('.doc')) {
-      setMsg({ type: 'err', text: lang === 'ru' ? 'Допустимые форматы: PDF, DOC, DOCX' : lang === 'en' ? 'Allowed formats: PDF, DOC, DOCX' : 'Ruxsat etilgan formatlar: PDF, DOC, DOCX' });
+      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Допустимые форматы: PDF, DOC, DOCX' : lang === 'en' ? 'Allowed formats: PDF, DOC, DOCX' : 'Ruxsat etilgan formatlar: PDF, DOC, DOCX' });
       return;
     }
     if (smartFile.size > 50 * 1024 * 1024) {
-      setMsg({ type: 'err', text: lang === 'ru' ? 'Файл слишком большой (макс. 50 МБ).' : lang === 'en' ? 'File too large (max 50 MB).' : 'Fayl juda katta (maks. 50 MB).' });
+      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Файл слишком большой (макс. 50 МБ).' : lang === 'en' ? 'File too large (max 50 MB).' : 'Fayl juda katta (maks. 50 MB).' });
       return;
     }
 
@@ -127,7 +292,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
       fd.append('collection_name', name);
       fd.append('language', sourceLanguage);
       const res = await fetch(apiUrl('/api/admin/test-bank/import-smart'), {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd,
+        method: 'POST', headers: h, body: fd,
       });
       const d = await readJsonSafe<{
         error?: string; detail?: string; inserted?: number; detected?: number;
@@ -147,16 +312,17 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
         const chunksNote = d.chunks && d.chunks > 1 ? ` · bo'laklari: ${d.chunks}` : '';
         const localNote = d.ai_skipped_for_size ? ' · katta fayl: lokal parser' : '';
         const trNote = d.translation_limited ? ' · tarjima qisman' : '';
-        setMsg({ type: 'ok', text: `${t.testBankAiResult.replace('{n}', String(d.inserted))}${detectedNote}${srcLangNote}${catLines ? ` — ${catLines}` : ''}${chunksNote}${localNote}${trNote}` });
-        setSmartFile(null);
-        setFileKey((k) => k + 1);
+        setImportMsg({ type: 'ok', text: `${t.testBankAiResult.replace('{n}', String(d.inserted))}${detectedNote}${srcLangNote}${catLines ? ` — ${catLines}` : ''}${chunksNote}${localNote}${trNote}` });
+        // Clear form
         setCollectionName('');
+        setSmartFile(null);
+        setFormKey((k) => k + 1);
         load();
       } else {
-        setMsg({ type: 'err', text: d?.error || d?.detail || (lang === 'ru' ? 'Ошибка импорта' : lang === 'en' ? 'Import error' : 'Import xatosi') });
+        setImportMsg({ type: 'err', text: d?.error || d?.detail || (lang === 'ru' ? 'Ошибка импорта' : lang === 'en' ? 'Import error' : 'Import xatosi') });
       }
     } catch {
-      setMsg({ type: 'err', text: lang === 'ru' ? 'Ошибка сети или таймаут.' : lang === 'en' ? 'Network error or timeout.' : 'Tarmoq xatosi yoki timeout.' });
+      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Ошибка сети или таймаут.' : lang === 'en' ? 'Network error or timeout.' : 'Tarmoq xatosi yoki timeout.' });
     } finally {
       sharedImportState.running = false;
       setSmartBusy(false);
@@ -167,6 +333,15 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
 
   return (
     <div className="space-y-5">
+      {/* Page-level alert */}
+      <AnimatePresence>
+        {pageMsg && (
+          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <AdminAlert type={pageMsg.type === 'ok' ? 'success' : 'error'}>{pageMsg.text}</AdminAlert>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {[
@@ -185,18 +360,20 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
 
         {/* ── Import form ── */}
         <AdminCard
-          icon={<svg style={{width:18,height:18}} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
+          icon={<svg style={{ width: 18, height: 18 }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
           title={t.testBankAiTitle}
           subtitle={t.testBankAiHint}
         >
           <div className="px-5 py-4 space-y-4">
-            {msg.text && (
-              <AdminAlert type={msg.type === 'ok' ? 'success' : msg.type === 'err' ? 'error' : 'warning'}>
-                {msg.text}
-              </AdminAlert>
-            )}
+            <AnimatePresence mode="wait">
+              {importMsg && (
+                <motion.div key={importMsg.type + importMsg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+                  <AdminAlert type={importMsg.type === 'ok' ? 'success' : 'error'}>{importMsg.text}</AdminAlert>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-            <form onSubmit={importSmart} className="space-y-4">
+            <form key={formKey} onSubmit={importSmart} className="space-y-4">
               <AdminField label={`${t.testCollectionNameEn} *`}>
                 <AdminInput
                   value={collectionName}
@@ -220,7 +397,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
 
               <AdminField label={`${t.testBankAiPdfLabel} *`}>
                 <AdminFileInput
-                  key={fileKey}
+                  key={`file-${formKey}`}
                   accept=".pdf,.doc,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={(e) => setSmartFile(e.target.files?.[0] ?? null)}
                   disabled={smartBusy}
@@ -228,11 +405,6 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                 <p className="text-[12px] text-gray-400 mt-1">
                   PDF, DOCX, DOC · {lang === 'ru' ? 'Макс. 50 МБ' : lang === 'en' ? 'Max 50 MB' : 'Maks. 50 MB'}
                 </p>
-                {smartFile && (
-                  <p className="text-[12px] text-gray-600 mt-1 font-medium">
-                    📎 {smartFile.name} ({(smartFile.size / 1024).toFixed(0)} KB)
-                  </p>
-                )}
               </AdminField>
 
               <AdminBtn
@@ -279,59 +451,108 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                 title={t.testBankNoQuestions}
                 subtitle={lang === 'ru' ? 'Загрузите PDF или DOCX файл слева' : lang === 'en' ? 'Upload a PDF or DOCX file on the left' : 'Chap tomonda PDF yoki DOCX fayl yuklang'}
               />
-            ) : categories.map((c, i) => (
-              <motion.div
-                key={c.id}
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.05 }}
-                className="px-5 py-4 hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1 min-w-0">
-                    {/* Name + badges */}
-                    <p className="font-semibold text-gray-900 text-[15px] leading-tight">{c.name}</p>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                      <span className="text-[12px] font-semibold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-md">
-                        {c.question_count ?? 0} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}
-                      </span>
-                      {c.source_language && (
-                        <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{c.source_language.toUpperCase()}</span>
-                      )}
-                      {c.program_track && c.program_track !== 'any' && (
-                        <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{c.program_track}</span>
-                      )}
-                      {c.academic_year && (
-                        <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
-                          {c.academic_year}{lang === 'ru' ? ' курс' : lang === 'en' ? 'y' : '-kurs'}
-                        </span>
-                      )}
+            ) : categories.map((c, i) => {
+              const isDeleteConfirm = deleteConfirmId === c.id;
+              const isExpanded = expandedId === c.id;
+              return (
+                <motion.div key={c.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
+                  {/* Category row */}
+                  <div className={`px-5 py-4 transition-colors ${isDeleteConfirm ? 'bg-red-50/40' : isExpanded ? 'bg-indigo-50/30' : 'hover:bg-gray-50'}`}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-gray-900 text-[15px] leading-tight">{c.name}</p>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          <span className="text-[12px] font-semibold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-md">
+                            {c.question_count ?? 0} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}
+                          </span>
+                          {c.source_language && (
+                            <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{c.source_language.toUpperCase()}</span>
+                          )}
+                          {c.program_track && c.program_track !== 'any' && (
+                            <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{c.program_track}</span>
+                          )}
+                          {c.academic_year && (
+                            <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                              {c.academic_year}{lang === 'ru' ? ' курс' : lang === 'en' ? 'y' : '-kurs'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Sample question preview */}
+                        {c.preview && !isExpanded && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3">
+                            {[
+                              { key: 'text_uz', label: 'UZ', bg: 'bg-emerald-50 border-emerald-100', text: 'text-emerald-800' },
+                              { key: 'text_ru', label: 'RU', bg: 'bg-sky-50 border-sky-100', text: 'text-sky-800' },
+                              { key: 'text_en', label: 'EN', bg: 'bg-gray-50 border-gray-100', text: 'text-gray-700' },
+                            ].map(({ key, label, bg, text }) => (
+                              <div key={key} className={`p-2 rounded-xl border ${bg}`}>
+                                <span className={`text-[10px] font-bold uppercase tracking-wider ${text} block mb-1`}>{label}</span>
+                                <p className="text-[11px] text-gray-600 line-clamp-2">
+                                  {(c.preview as any)[key] || <span className="text-gray-400 italic">—</span>}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {isDeleteConfirm ? (
+                          <>
+                            <AdminBtn variant="red" size="sm" loading={deletingId === c.id} onClick={() => delCategory(c.id)}>
+                              {t.adminDeleteBtn}
+                            </AdminBtn>
+                            <AdminBtn variant="ghost" size="sm" onClick={() => setDeleteConfirmId(null)}>
+                              {t.cancel}
+                            </AdminBtn>
+                          </>
+                        ) : (
+                          <>
+                            <AdminBtn
+                              variant={isExpanded ? 'blue' : 'ghost'}
+                              size="sm"
+                              onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                            >
+                              {isExpanded ? t.testBankHideQuestions : t.testBankViewQuestions}
+                            </AdminBtn>
+                            <AdminBtn variant="red-ghost" size="sm" onClick={() => { setDeleteConfirmId(c.id); setExpandedId(null); }}>
+                              {t.delete}
+                            </AdminBtn>
+                          </>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Preview */}
-                    {c.preview && (
-                      <div className="grid grid-cols-3 gap-2 mt-3">
-                        {[
-                          { key: 'text_uz', label: 'UZ', bg: 'bg-emerald-50 border-emerald-100', text: 'text-emerald-800' },
-                          { key: 'text_ru', label: 'RU', bg: 'bg-sky-50 border-sky-100', text: 'text-sky-800' },
-                          { key: 'text_en', label: 'EN', bg: 'bg-gray-50 border-gray-100', text: 'text-gray-700' },
-                        ].map(({ key, label, bg, text }) => (
-                          <div key={key} className={`p-2 rounded-xl border ${bg}`}>
-                            <span className={`text-[10px] font-bold uppercase tracking-wider ${text} block mb-1`}>{label}</span>
-                            <p className="text-[11px] text-gray-600 line-clamp-2">
-                              {c.preview[key] || <span className="text-gray-400 italic">—</span>}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {/* Delete confirm text */}
+                    <AnimatePresence>
+                      {isDeleteConfirm && (
+                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
+                          <p className="mt-3 text-[13px] font-medium text-red-700">
+                            {t.testBankDeleteConfirmText.replace('{name}', c.name)}
+                          </p>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                  <AdminBtn variant="red-ghost" size="sm" loading={deletingId === c.id} onClick={() => delCategory(c.id)} className="shrink-0">
-                    {t.testBankDelete}
-                  </AdminBtn>
-                </div>
-              </motion.div>
-            ))}
+
+                  {/* Expanded questions panel */}
+                  <AnimatePresence>
+                    {isExpanded && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="overflow-hidden"
+                      >
+                        <QuestionsPanel catId={c.id} lang={lang} token={token} />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              );
+            })}
           </div>
         </AdminCard>
       </div>

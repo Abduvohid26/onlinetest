@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Button, Card, CardContent, Input } from '../components/ui';
+import { Card, CardContent } from '../components/ui';
 import { motion } from 'motion/react';
 import { translations, Language, formatPreExamMediaAccessFailure } from '../i18n';
 import { readJsonSafe } from '../lib/http';
@@ -9,7 +9,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { FacePositionChecker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { InstituteLogo } from '../components/InstituteLogo';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
-import { AdminBtn, AdminAlert } from './admin/ui';
+import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
 import {
   attachDefaultMicrophone,
@@ -773,11 +773,10 @@ export function PreExamCheck({
                       <p className="text-sm font-semibold text-green-700">{t.preExamLivenessPassed}</p>
                     )}
                     {verified && !livenessPassed && livenessFailed && !livenessChecking && (
-                      <Button
-                        type="button"
-                        variant="outline"
+                      <AdminBtn
+                        variant="ghost"
                         size="sm"
-                        className="rounded-xl w-full"
+                        className="w-full"
                         onClick={() => {
                           setLivenessFailed(false);
                           setError('');
@@ -785,7 +784,7 @@ export function PreExamCheck({
                         }}
                       >
                         {t.preExamLivenessRetryBtn}
-                      </Button>
+                      </AdminBtn>
                     )}
                   </div>
                 </div>
@@ -798,15 +797,15 @@ export function PreExamCheck({
               {/* PIN kodi */}
               {exam.has_pin && (
                 <div className="p-4 border border-gray-200 bg-white rounded-xl shadow-sm">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-[13px] font-medium text-gray-600 mb-1.5">
                     {t.enterPin}
                   </label>
-                  <Input
+                  <AdminInput
                     type="password"
                     value={pin}
                     onChange={(e) => setPin(e.target.value)}
-                    placeholder="• • •"
-                    className="text-center tracking-widest text-lg"
+                    placeholder="• • • • • •"
+                    className="text-center tracking-widest text-[17px]"
                   />
                 </div>
               )}
@@ -852,32 +851,34 @@ export function PreExamCheck({
                   </div>
                 );
               })()}
-              <div className="flex gap-3">
-                <Button
-                  variant="outline"
+              <div className="flex gap-2.5">
+                <AdminBtn
+                  variant="ghost"
+                  size="lg"
                   onClick={onCancel}
-                  className="px-6 rounded-full"
                   disabled={starting}
                 >
                   {t.cancel}
-                </Button>
-                <Button
+                </AdminBtn>
+                <AdminBtn
+                  variant="blue"
+                  size="lg"
+                  loading={starting}
                   onClick={handleStart}
                   disabled={
                     !cameraReady ||
                     !agreed ||
                     !vacRulesScrolledEnd ||
-                    starting ||
                     (exam.has_pin && !pin) ||
                     !user.profile_image ||
                     !verified ||
                     !livenessPassed ||
                     livenessChecking
                   }
-                  className="px-8 rounded-full shadow-lg shadow-black/10"
+                  className="px-8"
                 >
                   {starting ? t.preExamStarting : t.takeExam}
-                </Button>
+                </AdminBtn>
               </div>
             </div>
           </div>
