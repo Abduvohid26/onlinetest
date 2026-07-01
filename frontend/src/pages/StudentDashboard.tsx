@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
 import { ExamResultSummary, type ExamResultPayload } from '../components/ExamResultSummary';
@@ -29,6 +30,7 @@ export function StudentDashboard({
   const [isBanned, setIsBanned] = useState(false);
   const [detailPayload, setDetailPayload] = useState<ExamResultPayload | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [pdfDownloadingId, setPdfDownloadingId] = useState<number | null>(null);
   const [clockSkewMs, setClockSkewMs] = useState(0);
   const [tick, setTick] = useState(0);
   const t = translations[lang];
@@ -131,6 +133,29 @@ export function StudentDashboard({
     }
   };
 
+  /** "Batafsil" oynasini ochmasdan to'g'ridan-to'g'ri sertifikat PDF yuklab olish. */
+  const downloadCertificate = async (examId: number, resultId: string) => {
+    setPdfDownloadingId(examId);
+    try {
+      const res = await fetch(apiUrl(`/api/student/exams/${examId}/certificate.pdf`), {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('PDF');
+      const blob = await res.blob();
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = href;
+      a.download = `${resultId}.pdf`;
+      a.click();
+      URL.revokeObjectURL(href);
+    } catch (e) {
+      console.error(e);
+      alert(t.resultPdfError);
+    } finally {
+      setPdfDownloadingId(null);
+    }
+  };
+
   if (isBanned) {
     return (
       <div className="px-3 sm:px-6 py-8 max-w-lg mx-auto">
@@ -149,9 +174,23 @@ export function StudentDashboard({
 
   return (
     <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-5xl mx-auto relative">
-      {/* Result detail overlay */}
-      {detailPayload && (
+      {/* Result detail overlay — createPortal orqali document.body ga chiqariladi.
+          Sabab: App.tsx dagi animatsiyalangan motion.div (framer-motion "filter"/"transform"
+          qo'yadi) "fixed" pozitsiyani haqiqiy ekran o'rniga o'sha konteynerga nisbatan
+          hisoblab qo'yardi — overlay sahifa boshidan emas, joriy scroll holatidan
+          boshlanib qolardi va yopish tugmasi noto'g'ri joyda ko'rinardi. */}
+      {detailPayload && createPortal(
         <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto overscroll-y-contain bg-slate-900/50 backdrop-blur-sm px-3 py-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {/* Har doim ko'rinadigan yopish tugmasi — ichkarida scroll qancha uzun bo'lishidan
+              qat'iy nazar, "qaytish" imkoni doim qo'lda bo'lsin. */}
+          <button
+            type="button"
+            onClick={() => setDetailPayload(null)}
+            aria-label={t.studentDash}
+            className="fixed top-[max(0.75rem,env(safe-area-inset-top))] right-3 z-[110] w-9 h-9 rounded-full bg-white shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center justify-center transition-colors"
+          >
+            <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
           <div className="flex-1 min-h-0 w-full max-w-4xl mx-auto py-2">
             <ExamResultSummary
               data={detailPayload}
@@ -160,7 +199,8 @@ export function StudentDashboard({
               onBack={() => setDetailPayload(null)}
             />
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       {/* ── Header ── */}
@@ -445,7 +485,7 @@ export function StudentDashboard({
                   </div>
 
                   {r.status === 'Completed' && r.result_public_id && (
-                    <div className="px-4 sm:px-5 pb-4">
+                    <div className="px-4 sm:px-5 pb-4 space-y-2">
                       <AdminBtn
                         variant="ghost"
                         size="md"
@@ -459,6 +499,20 @@ export function StudentDashboard({
                         }
                       >
                         {t.studentResultCertificateBtn}
+                      </AdminBtn>
+                      <AdminBtn
+                        variant="blue"
+                        size="md"
+                        className="w-full"
+                        loading={pdfDownloadingId === r.exam_id}
+                        onClick={() => downloadCertificate(r.exam_id, r.result_public_id)}
+                        icon={
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                          </svg>
+                        }
+                      >
+                        {t.resultDownloadPdf}
                       </AdminBtn>
                     </div>
                   )}

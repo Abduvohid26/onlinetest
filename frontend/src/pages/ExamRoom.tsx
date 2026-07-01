@@ -181,6 +181,10 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const [violationWarning, setViolationWarning] = useState<ViolationWarning | null>(null);
   // Modal ochiqligida yangi violationlar serverga yuborilmasin
   const warningModalShowingRef = useRef(false);
+  // Modal yopilgandan keyingi qisqa "nafas olish" oynasi — davom etayotgan real muammo
+  // (masalan xonadagi shovqin, kamera burchagi) talaba modalni yopgan zahoti yana
+  // darhol yangi ogohlantirish/strike bermasin, tuzatishga vaqt bersin.
+  const postWarningGraceUntilRef = useRef(0);
   /** Kamera oqimi video elementga ulangach +1 (async setup va ref vaqti sinxroni). */
   const [proctorStreamRevision, setProctorStreamRevision] = useState(0);
   const [faceStatus, setFaceStatus] = useState<FaceStatusLive>('WAITING');
@@ -850,6 +854,10 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.
     if (warningModalShowingRef.current && !INSTANT_BAN_TYPES.has(type)) return;
 
+    // Modal yopilgandan keyingi qisqa grace oynasi — davom etayotgan sabab (masalan
+    // xonadagi shovqin) darhol ketma-ket yana strike bermasin, tuzatishga vaqt bersin.
+    if (Date.now() < postWarningGraceUntilRef.current && !INSTANT_BAN_TYPES.has(type)) return;
+
     // Dedup: bir xil tur uchun qisqa interval (server 60s ichida bitta rasmiy ogohlantirishni birlashtiradi)
     const now = Date.now();
     if (FOCUS_BURST_TYPES.has(type) && now < focusBurstLockUntilRef.current) {
@@ -1222,7 +1230,11 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 // Xuddi rasmiy ogohlantirish modalidagi kabi — modal yopilgandan keyingi
                 // qisqa fokus/visibility tebranishi yolg'on TAB_SWITCH bermasin.
                 blurIgnoreUntilRef.current = Date.now() + 2000;
-                dismissWarningMsg(activeWarningMsg.id);
+                postWarningGraceUntilRef.current = Date.now() + 8000;
+                // Talaba "Tushundim" bosganda navbatda yig'ilib qolgan boshqa xabarlar
+                // ham birga tozalanadi — ketma-ket bir nechta modal chiqib, talabani
+                // charchatib qo'ymasin (masalan bir necha marta ketma-ket tarmoq xatosi).
+                setWarningQueue([]);
               }}
               className="w-full py-3 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base bg-red-600 hover:bg-red-700 text-white transition-all active:scale-[0.98]"
             >
@@ -1316,6 +1328,11 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                 warningModalShowingRef.current = false;
                 // Modal yopilgandan keyin 2 soniya blur ignore — yolg'on TAB_SWITCH oldini oladi
                 blurIgnoreUntilRef.current = Date.now() + 2000;
+                // Davom etayotgan sabab (masalan xonadagi shovqin) darhol yana strike
+                // bermasin — talabaga tuzatish uchun 8 soniya beriladi.
+                postWarningGraceUntilRef.current = Date.now() + 8000;
+                // Navbatda yig'ilib qolgan boshqa (umumiy) xabarlar ham birga tozalanadi.
+                setWarningQueue([]);
                 setViolationWarning(null);
                 recoverCameraPreview();
               }}
@@ -1704,12 +1721,13 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         </div>
       </motion.div>
 
-      {/* Proctoring Sidebar */}
-      <motion.div 
+      {/* Proctoring Sidebar — kamera, savollar va ogohlantirishlar birgalikda sticky:
+          faqat asosiy savol/variantlar ustuni scroll bo'ladi, sidebar joyida qoladi. */}
+      <motion.div
         initial={{ opacity: 0, x: 20 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ delay: 0.3, type: "spring", stiffness: 300, damping: 30 }}
-        className="w-full lg:w-80 space-y-6 lg:sticky lg:top-24 h-fit"
+        className="w-full lg:w-80 space-y-6 sticky top-24 z-30 h-fit"
       >
         {(() => {
           const fsCfg = FACE_STATUS_CFG[faceStatus] ?? FACE_STATUS_CFG.WAITING;

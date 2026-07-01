@@ -12,7 +12,7 @@ function simpleHash(input: string): string {
 export function getDeviceFingerprint(): string {
   try {
     const key = 'vac_device_fp_v1';
-    const existing = sessionStorage.getItem(key);
+    const existing = localStorage.getItem(key);
     if (existing && existing.trim()) return existing.trim();
     const parts = [
       navigator.userAgent || '',
@@ -26,18 +26,25 @@ export function getDeviceFingerprint(): string {
       Intl.DateTimeFormat().resolvedOptions().timeZone || '',
     ];
     const fp = `vac-${simpleHash(parts.join('|'))}`;
-    sessionStorage.setItem(key, fp);
+    localStorage.setItem(key, fp);
     return fp;
   } catch {
     return 'vac-fallback';
   }
 }
 
-/** Server /start javobidagi deviceToken — sessiya davomida saqlanadi. */
+/**
+ * Server /start javobidagi deviceToken — localStorage'da saqlanadi (sessionStorage EMAS).
+ * Sabab: sessionStorage tab yopilganda/qayta login qilinganda o'chib ketadi — talaba
+ * imtihon "In Progress" holatda qolgan holda shunchaki tabni yopib qayta ochsa yoki
+ * sessiyasi tugab qayta login qilsa, token yo'qolib "DEVICE_MISMATCH" bilan imtihondan
+ * butunlay chetlatilib qolardi (xuddi shu qurilmada davom etsa ham). localStorage esa
+ * brauzer/qurilma darajasida saqlanadi va bu holatlarda ham saqlanib qoladi.
+ */
 export function setDeviceSessionToken(token: string): void {
   try {
     if (token && token.trim()) {
-      sessionStorage.setItem(DEVICE_TOKEN_KEY, token.trim());
+      localStorage.setItem(DEVICE_TOKEN_KEY, token.trim());
     }
   } catch {
     /* ignore */
@@ -46,7 +53,7 @@ export function setDeviceSessionToken(token: string): void {
 
 export function clearDeviceSessionToken(): void {
   try {
-    sessionStorage.removeItem(DEVICE_TOKEN_KEY);
+    localStorage.removeItem(DEVICE_TOKEN_KEY);
   } catch {
     /* ignore */
   }
@@ -54,7 +61,7 @@ export function clearDeviceSessionToken(): void {
 
 export function getDeviceSessionToken(): string {
   try {
-    return (sessionStorage.getItem(DEVICE_TOKEN_KEY) || '').trim();
+    return (localStorage.getItem(DEVICE_TOKEN_KEY) || '').trim();
   } catch {
     return '';
   }

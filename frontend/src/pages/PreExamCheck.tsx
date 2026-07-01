@@ -617,7 +617,9 @@ export function PreExamCheck({
             </div>
 
             <div className="lg:col-span-7 space-y-6 min-w-0">
-          {/* Kamera — keng ekranda to'liq ustun */}
+          {/* Kamera — keng ekranda to'liq ustun. Chap taraftagi VAC qoidalari ro'yxati
+              uzun bo'lsa ham kamera ko'rinishda qolishi uchun sticky. */}
+          <div className="sticky top-24 z-10">
           <div
             className="relative w-full rounded-lg sm:rounded-xl overflow-hidden border-2 sm:border-4 border-gray-200 shadow-xl bg-black aspect-video max-h-[min(58vh,640px)] lg:max-h-[min(72vh,720px)] mx-auto lg:mx-0"
           >
@@ -661,6 +663,7 @@ export function PreExamCheck({
                 {micReady ? t.preExamMicActive : t.preExamMicInactive}
               </span>
             </div>
+          </div>
           </div>
 
           {exam.custom_rules && (

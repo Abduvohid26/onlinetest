@@ -20,7 +20,7 @@ ENV DJANGO_SETTINGS_MODULE=exam_platform.settings
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends nginx curl ca-certificates \
+    && apt-get install -y --no-install-recommends nginx curl ca-certificates fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt /app/backend/
