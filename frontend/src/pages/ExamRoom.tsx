@@ -155,7 +155,20 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const [showTimeWarning, setShowTimeWarning] = useState(false);
   /** Ogohlantirish bosqichi 1–3 (serverdagi warn_types soni; ban 4-chi hodisada). */
   const [strikeLevel, setStrikeLevel] = useState(0);
-  const [warningMsg, setWarningMsg] = useState('');
+  // Umumiy ogohlantirish/xato xabarlari — navbat (queue) bilan.
+  // Rasmiy ogohlantirish yoki ban modali ochiq bo'lsa, bu xabarlar orqada yashiringan
+  // bo'lardi (ikkalasi ham ekran markazida) va taymer ular ko'rinmasdan turib
+  // tugab, xabar yo'qolib ketardi. Shu sabab: navbatdagi birinchi xabar faqat
+  // boshqa bloklovchi modal yo'q paytda "faol" hisoblanadi va o'shanda taymer boshlanadi.
+  const [warningQueue, setWarningQueue] = useState<{ id: number; text: string; duration: number }[]>([]);
+  const warningIdRef = useRef(0);
+  const showWarningMsg = useCallback((text: string, duration = 5000) => {
+    const id = ++warningIdRef.current;
+    setWarningQueue((q) => [...q, { id, text, duration }]);
+  }, []);
+  const dismissWarningMsg = useCallback((id: number) => {
+    setWarningQueue((q) => q.filter((m) => m.id !== id));
+  }, []);
   const [submitting, setSubmitting] = useState(false);
   const [hardBlocked, setHardBlocked] = useState(false);
   const [banPdfBusy, setBanPdfBusy] = useState(false);
@@ -471,6 +484,35 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const socketRef = useRef<RealtimeSocket | null>(null);
   const peerConnectionsRef = useRef<{ [id: string]: RTCPeerConnection }>({});
 
+  // Kamera/mikrofonni TO'LIQ bo'shatish. Avval faqat track.stop() chaqirilardi —
+  // bu haqiqiy uskunani o'chirsa ham, AudioContext ochiq qolgani sababli ba'zi
+  // brauzerlarda kamera/mikrofon "band" indikatori yonib turishda davom etardi.
+  const releaseCameraAndMic = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+  }, []);
+
+  // Imtihon TO'LIQ tugaganda (submit muvaffaqiyatli) — kamera/mikrofondan tashqari
+  // WebRTC peer connection va WebSocket'ni ham darhol yopamiz (asosiy effekt cleanup'i
+  // faqat komponent unmount bo'lganda yoki `banned` o'zgarganda ishlaydi — muvaffaqiyatli
+  // submitdan keyin komponent AnimatePresence exit animatsiyasi davomida bir muddat
+  // mount holida qolishi mumkin, shuning uchun bu yerda darhol tozalaymiz).
+  // Ban holatida socket ATAYLAB yopilmaydi — admin "unblock" xabari shu orqali kelishi mumkin;
+  // uni `banned` o'zgarganda asosiy effekt cleanup'i o'z vaqtida tozalaydi.
+  const releaseAllExamResources = useCallback(() => {
+    releaseCameraAndMic();
+    Object.values(peerConnectionsRef.current).forEach((pc) => pc.close());
+    peerConnectionsRef.current = {};
+    socketRef.current?.destroy();
+    socketRef.current = null;
+  }, [releaseCameraAndMic]);
+
   const recoverCameraPreview = useCallback(() => {
     const v = videoRef.current;
     const s = streamRef.current;
@@ -671,11 +713,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                   setViolationWarning(null);
                   setBanViolationsCount(null);
                   setProctorRetryNonce((n) => n + 1);
-                  setWarningMsg(translations[langRef.current].unblockAllowedMsg || 'Admin imtihonni davom ettirishingizga ruxsat berdi!');
-                  setTimeout(() => setWarningMsg(''), 6000);
+                  showWarningMsg(translations[langRef.current].unblockAllowedMsg || 'Admin imtihonni davom ettirishingizga ruxsat berdi!', 6000);
                 } else {
-                  setWarningMsg(translations[langRef.current].unblockDeniedMsg || 'Admin imtihonni tugatdi. Topshira olmaysiz.');
-                  setTimeout(() => setWarningMsg(''), 8000);
+                  showWarningMsg(translations[langRef.current].unblockDeniedMsg || 'Admin imtihonni tugatdi. Topshira olmaysiz.', 8000);
                 }
               }
             } else if (msg.type === 'offer') {
@@ -725,7 +765,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           const analyser = audioCtx.createAnalyser();
           const source = audioCtx.createMediaStreamSource(stream);
           source.connect(analyser);
-          analyser.fftSize = 256;
+          // 2048: har bir o'qishda ~46ms (44.1kHz da) audio oynasi — kichikroq buferda (256 = ~5.8ms)
+          // tez-tez so'rov qilinganda ham nutqning ko'p qismi "sample" oralig'idan chetda qolib ketardi.
+          analyser.fftSize = 2048;
           audioContextRef.current = audioCtx;
           analyserRef.current = analyser;
         } else {
@@ -737,7 +779,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         setCameraPreviewOk(false);
         if (err instanceof DOMException && err.message === VIRTUAL_CAMERA_BLOCKED_MESSAGE) {
           setCameraErrorHint(translations[langRef.current].virtualCameraBlocked);
-          setWarningMsg(translations[langRef.current].virtualCameraBlocked);
+          showWarningMsg(translations[langRef.current].virtualCameraBlocked, 8000);
           void logViolationRef.current('VIRTUAL_WEBCAM_SUSPECTED');
         } else {
           console.error('Failed to setup AI proctoring:', err);
@@ -775,7 +817,10 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     };
   }, [banned, exam.id, token, user.id, proctorRetryNonce]);
 
-  // --- Real-time ovoz faolligi (VAD) — RMS + zero-crossing, ~1s da bir freym ---
+  // --- Real-time ovoz faolligi (VAD) — RMS + zero-crossing, ~200ms da bir freym.
+  //     (Avval 1000ms edi — bunda har o'qishda faqat ~5.8ms audio "suratga olinardi",
+  //     ya'ni gapirishning katta qismi ikkita so'rov oralig'ida butunlay ko'rinmay qolardi.
+  //     200ms + kattaroq fftSize tezroq va ishonchliroq ushlaydi.)
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
 
   useEffect(() => {
@@ -788,7 +833,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       const frame = analyzeVoiceFrame(analyserRef.current);
       const signal = voiceTrackerRef.current?.push(frame);
       if (signal) void logViolationRef.current(signal);
-    }, 1000);
+    }, 200);
     return () => clearInterval(id);
   }, [banned, analyserRef.current]);
 
@@ -850,16 +895,15 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
 
       if (!res.ok) {
         const hint = data.violationReason || data.error || data.code || `HTTP ${res.status}`;
-        setWarningMsg(String(hint));
-        setTimeout(() => setWarningMsg(''), 5000);
+        showWarningMsg(String(hint), 5000);
         return;
       }
 
-      // Startup grace (kamera qizishi, ~40s) — modal emas, faqat status bar (false-positive).
+      // Startup grace (kamera qizishi, ~40s) — rasmiy ogohlantirish emas (false-positive),
+      // shuning uchun strike hisoblanmaydi, faqat yengil xabar modali ko'rsatiladi.
       if (data.startupGrace) {
         const detail = (data.violationReason || type).trim();
-        setWarningMsg(detail);
-        setTimeout(() => setWarningMsg(''), 5000);
+        showWarningMsg(detail, 5000);
         return;
       }
 
@@ -873,7 +917,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           setBanViolationsCount(null);
         }
         setBanned(true);
-        streamRef.current?.getTracks().forEach((t) => t.stop());
+        releaseCameraAndMic();
         return;
       }
 
@@ -892,8 +936,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       });
     } catch {
       // Tarmoq xatosi — local state
-      setWarningMsg(type);
-      setTimeout(() => setWarningMsg(''), 3000);
+      showWarningMsg(type, 3000);
     }
   };
 
@@ -1022,6 +1065,10 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
 
     const onVis = () => {
       if (bannedRef.current) return;
+      // Modal yopilgandan keyingi qisqa grace oynasi — xuddi `onBlur`dagi kabi (bir xil
+      // blurIgnoreUntilRef). Aks holda ogohlantirish modalini yopish paytidagi tasodifiy
+      // visibility tebranishi yolg'on TAB_SWITCH_SOFT chiqarardi.
+      if (Date.now() < blurIgnoreUntilRef.current) return;
       if (document.visibilityState === 'hidden') {
         // Qisqa hidden holatlari false positive bermasligi uchun delay.
         clearHiddenTimer();
@@ -1047,8 +1094,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     async (ans: Record<string, string>, fl: number[]) => {
       if (submittingRef.current || bannedRef.current) return;
       if (isOffline) {
-        setWarningMsg(t.offlineSubmit);
-        setTimeout(() => setWarningMsg(''), 4000);
+        showWarningMsg(t.offlineSubmit, 4000);
         return;
       }
       submittingRef.current = true;
@@ -1065,22 +1111,20 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         syncVacIfOk(res);
         const json = await readJsonSafe<ExamResultPayload & { error?: string }>(res);
         if (!res.ok) {
-          setWarningMsg(String(json?.error || t.submitError));
-          setTimeout(() => setWarningMsg(''), 5000);
+          showWarningMsg(String(json?.error || t.submitError), 5000);
           submittingRef.current = false;
           setSubmitting(false);
           return;
         }
         if (!json?.result_public_id || !Array.isArray(json.questions)) {
-          setWarningMsg(t.submitError);
-          setTimeout(() => setWarningMsg(''), 5000);
+          showWarningMsg(t.submitError, 5000);
           submittingRef.current = false;
           setSubmitting(false);
           return;
         }
         safeLocalRemove(`exam_answers_${exam.id}`);
         safeLocalRemove(`exam_answers_ts_${exam.id}`);
-        streamRef.current?.getTracks().forEach((t) => t.stop());
+        releaseAllExamResources();
         const payload: ExamResultPayload = {
           exam_id: json.exam_id,
           result_public_id: json.result_public_id,
@@ -1098,13 +1142,12 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         onFinish(payload);
       } catch (err) {
         console.error('Failed to submit', err);
-        setWarningMsg(t.submitError);
-        setTimeout(() => setWarningMsg(''), 5000);
+        showWarningMsg(t.submitError, 5000);
         submittingRef.current = false;
         setSubmitting(false);
       }
     },
-    [exam.id, exam.title, token, user.name, user.id, onFinish, isOffline, t.offlineSubmit, t.submitError, nextGuardHeaders]
+    [exam.id, exam.title, token, user.name, user.id, onFinish, isOffline, t.offlineSubmit, t.submitError, nextGuardHeaders, releaseAllExamResources]
   );
 
   const handleSubmit = () => runSubmitCore(answersRef.current, flaggedRef.current);
@@ -1137,6 +1180,60 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     return () => window.clearInterval(timer);
   }, [banned, runSubmitCore]);
 
+  // Bloklovchi modal (rasmiy ogohlantirish yoki ban) ochiq bo'lsa, navbatdagi xabar
+  // ekranda ko'rinmaydi (ikkalasi ham markazda, balandroq z-index yopib qo'yadi) —
+  // shuning uchun taymer FAQAT bloklovchi modal yo'qolgach boshlanadi. Aks holda xabar
+  // hech qachon ko'rinmasdan turib taymer bilan sukut saqlab yo'qolib ketardi.
+  const warningBlocked = Boolean(violationWarning) || banned || hardBlocked;
+  useEffect(() => {
+    if (warningBlocked) return;
+    const current = warningQueue[0];
+    if (!current) return;
+    const timer = window.setTimeout(() => dismissWarningMsg(current.id), current.duration);
+    return () => window.clearTimeout(timer);
+  }, [warningBlocked, warningQueue, dismissWarningMsg]);
+
+  // Har uch overlay holatida ham (ogohlantirish/ban/umumiy) ko'rinishi kerak —
+  // pastdagi ikkita early-return asosiy JSX daraxtini almashtirib yuboradi,
+  // shuning uchun bu modalni alohida hisoblab, har bir branchga qo'shib chiqamiz.
+  const activeWarningMsg = warningBlocked ? undefined : warningQueue[0];
+  const warningMsgModal = activeWarningMsg
+    ? createPortal(
+        <div
+          className="fixed inset-0 z-[10040] flex items-center justify-center bg-black/50 overflow-y-auto overscroll-y-contain px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="warning-msg-title"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            className="w-full max-w-md rounded-lg sm:rounded-xl border-2 border-red-400 bg-red-50 shadow-2xl p-5 sm:p-7 text-center"
+          >
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
+              <svg className="w-7 h-7 sm:w-9 sm:h-9 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+            </div>
+            <h2 id="warning-msg-title" className="text-lg sm:text-xl font-bold text-red-700 mb-2">{t.proctorWarningTitle}</h2>
+            <p className="text-sm sm:text-base font-medium text-gray-800 break-words mb-5">{activeWarningMsg.text}</p>
+            <button
+              type="button"
+              onClick={() => {
+                // Xuddi rasmiy ogohlantirish modalidagi kabi — modal yopilgandan keyingi
+                // qisqa fokus/visibility tebranishi yolg'on TAB_SWITCH bermasin.
+                blurIgnoreUntilRef.current = Date.now() + 2000;
+                dismissWarningMsg(activeWarningMsg.id);
+              }}
+              className="w-full py-3 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base bg-red-600 hover:bg-red-700 text-white transition-all active:scale-[0.98]"
+            >
+              {t.violationContinueExam}
+            </button>
+          </motion.div>
+        </div>,
+        document.body,
+      )
+    : null;
+
   // --- Ogohlantirish modal (ban emas, davom etish mumkin) ---
   if (violationWarning && !banned && !hardBlocked) {
     const isFinal = violationWarning.isFinalWarning;
@@ -1149,7 +1246,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     const warnContinue = t.violationContinueExam;
     const reasonLabel = t.violationReasonLabel;
 
-    return createPortal(
+    return <>{createPortal(
       <div
         className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 overflow-y-auto overscroll-y-contain px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
         role="dialog"
@@ -1232,7 +1329,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         </motion.div>
       </div>,
       document.body,
-    );
+    )}{warningMsgModal}</>;
   }
 
   // --- Ban ekrani (to'liq bloklash) ---
@@ -1242,7 +1339,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     const banPdfLabel = t.banReportDownload;
     const backLabel = t.banBackToDashboard;
 
-    return createPortal(
+    return <>{createPortal(
       <div
         className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 overflow-y-auto overscroll-y-contain px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
         role="dialog"
@@ -1310,6 +1407,11 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               placeholder={lang === 'ru' ? 'Опишите ситуацию подробно (мин. 12 симв.) — admin рассмотрит' : lang === 'en' ? 'Describe the situation in detail (min 12 chars) — admin will review' : "Vaziyatni batafsil yozing (kamida 12 belgi) — admin ko'rib chiqadi"}
               className="w-full min-h-[80px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 transition-colors"
             />
+            {/* Placeholder yozilgach yo'qoladi — tugma nega o'chiqligi ko'rinmay qolmasin uchun doimiy hisoblagich. */}
+            <p className={`text-[11px] text-right ${appealReason.trim().length >= 12 ? 'text-emerald-600' : 'text-gray-400'}`}>
+              {appealReason.trim().length}/12{' '}
+              {lang === 'ru' ? 'символов (минимум)' : lang === 'en' ? 'characters (minimum)' : 'belgi (kamida)'}
+            </p>
             {appealMsg ? (
               <AdminAlert type={appealMsg.startsWith('ok:') ? 'success' : 'error'}>
                 {appealMsg.startsWith('ok:') ? appealMsg.slice(3) : appealMsg}
@@ -1355,7 +1457,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         </motion.div>
       </div>,
       document.body,
-    );
+    )}{warningMsgModal}</>;
   }
 
   // --- Yuz holati overlay konfiguratsiyasi ---
@@ -1492,21 +1594,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               </div>
             </motion.div>
           )}
-          {warningMsg && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-red-500/10 border border-red-500/20 text-red-700 px-6 py-4 rounded-lg relative flex items-center gap-3 shadow-sm"
-            >
-              <svg className="w-6 h-6 text-red-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              <div>
-                <strong className="font-semibold block">{t.proctorWarningTitle}</strong>
-                <span className="text-sm">{warningMsg}</span>
-              </div>
-            </motion.div>
-          )}
         </AnimatePresence>
+
+        {warningMsgModal}
 
         <div className="space-y-6 pb-20">
           {currentQ && (
@@ -1596,6 +1686,19 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
             >
               {t.examNavNext}
+            </AdminBtn>
+          </div>
+
+          {/* Har safar tepaga qaytmasdan topshirish mumkin bo'lsin — sahifa pastida ham tugma. */}
+          <div className="pt-2 flex justify-end">
+            <AdminBtn
+              variant="blue"
+              size="md"
+              loading={submitting}
+              onClick={handleSubmit}
+              className="px-6"
+            >
+              {submitting ? t.submitting : t.submitExam}
             </AdminBtn>
           </div>
         </div>

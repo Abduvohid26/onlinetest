@@ -290,7 +290,8 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
               {method === 'bank' && (
                 <motion.div key="bank" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
                   <div>
-                    <label className="text-[13px] font-medium text-gray-600 block mb-2">{t.testBankCategories} <span className="text-red-500">*</span></label>
+                    <label className="text-[13px] font-medium text-gray-600 block mb-1">{t.testBankCategories} <span className="text-red-500">*</span></label>
+                    <p className="text-[12px] text-gray-400 mb-2">{t.examCategoriesPickHint}</p>
                     <div className="border border-gray-200 rounded-2xl overflow-hidden">
                       {bankCategories.length === 0 ? (
                         <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50">{t.testBankNeedFirst}</div>

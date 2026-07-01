@@ -45,6 +45,11 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
 /**
  * Ketma-ket "voiced" freymlarni hisoblab, barqaror gapirishni aniqlaydigan tracker.
  * Qisqa tasodifiy tovushlar ban bermasligi uchun streak talab qiladi.
+ *
+ * Chaqiruvchi (ExamRoom) endi ~200ms da bir freym beradi (avval 1000ms edi), shuning
+ * uchun streak talablari ham shunga mos kichraytirilgan — real vaqtdagi aniqlash
+ * tezligi sezilarli oshadi (SUSPICIOUS_AUDIO: ~2s -> ~0.6s, WHISPER: ~3s -> ~0.8s),
+ * lekin bitta freymga ishonib qolmaslik uchun baribir bir nechta ketma-ket freym talab qilinadi.
  */
 export class VoiceActivityTracker {
   private voicedStreak = 0;
@@ -55,7 +60,7 @@ export class VoiceActivityTracker {
     if (frame.loud) {
       this.loudStreak += 1;
       this.voicedStreak = 0;
-      if (this.loudStreak >= 2) {
+      if (this.loudStreak >= 3) {
         this.loudStreak = 0;
         return 'SUSPICIOUS_AUDIO';
       }
@@ -65,7 +70,7 @@ export class VoiceActivityTracker {
 
     if (frame.voiced) {
       this.voicedStreak += 1;
-      if (this.voicedStreak >= 3) {
+      if (this.voicedStreak >= 4) {
         this.voicedStreak = 0;
         return 'WHISPER_OR_CONVERSATION_SUSPECTED';
       }

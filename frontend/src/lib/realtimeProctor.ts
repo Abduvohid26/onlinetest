@@ -63,7 +63,7 @@ const STREAK = {
   gaze: 6, // ~0.8s uzoq qaragan
   movement: 5,
   hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
-  mouth: 5, // ~0.65s gapirish naqshi
+  mouth: 3, // ~0.4s gapirish naqshi (tezroq aniqlash)
   tooFar: 10, // ~1.3s juda uzoq
   tooClose: 8, // ~1s juda yaqin
   offCenter: 10, // ~1.3s markazdan chetda
@@ -378,10 +378,12 @@ export class RealtimeProctor {
     if (!upper || !lower) return;
     const openRatio = Math.abs(lower.y - upper.y) / (faceHeight || 1e-6);
 
+    // Oyna qisqartirildi (14->9, min 8->6) — tezroq aniqlash uchun; crossings talabi
+    // ham 3->2 ga tushirildi (baribir yolg'iz bitta chekka emas, tebranish talab qilinadi).
     const hist = this.mouthHistory;
     hist.push(openRatio);
-    if (hist.length > 14) hist.shift(); // ~1.8s oyna
-    if (hist.length < 8) return;
+    if (hist.length > 9) hist.shift(); // ~1.17s oyna
+    if (hist.length < 6) return;
 
     // Tebranishni hisoblash: o'rtacha atrofida yuqoriga/pastga kesishishlar soni.
     const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
@@ -391,7 +393,7 @@ export class RealtimeProctor {
       if ((hist[i - 1] - mean) * (hist[i] - mean) < 0) crossings++;
     }
     // Gapirish: og'iz bir necha marta ochilib-yopiladi + amplituda yetarli.
-    const talking = crossings >= 3 && amp >= 0.03;
+    const talking = crossings >= 2 && amp >= 0.03;
     if (this.streak('mouth', talking, STREAK.mouth)) this.emit('MOUTH_MOVEMENT_TALKING');
   }
 }

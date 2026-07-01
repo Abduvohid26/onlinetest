@@ -483,6 +483,7 @@ export function ImtixonTab({
                 >
                   <div>
                     <AdminLabel required>{t.testBankCategories}</AdminLabel>
+                    <p className="text-[12px] text-gray-400 mb-2">{t.examCategoriesPickHint}</p>
                     <div className="border border-gray-200 rounded-2xl overflow-hidden">
                       {categories.length === 0 ? (
                         <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50">

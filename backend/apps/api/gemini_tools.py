@@ -578,6 +578,14 @@ def parse_flexible_questionnaire(raw_text: str, language: str = "auto") -> list[
             continue
 
         stem = " ".join(stem_parts).strip()
+        # Raqamlangan sarlavhadan keyin yana "Вопрос:"/"Savol:" kabi ortiqcha yorliq
+        # kelishi mumkin (masalan hujjatda "1.\nВопрос: <savol matni>") — split/hm
+        # bosqichida faqat "1." kesib tashlanadi, shuning uchun qolgan yorliqni bu yerda
+        # ham tozalaymiz (raqamsiz holatni ham qamrab oladi: "Вопрос: ..." raqamsiz).
+        stem = re.sub(
+            r"(?im)^\s*(вопрос|savol|question|задание)\s*#?\s*\d*\s*[:.)\-]?\s*",
+            "", stem
+        ).strip()
         # Stem oxiridan "To'g'ri javob:" kabi narsalarni olib tashlaymiz
         stem = re.sub(
             r"(?im)\s*(to['']?g['']?ri\s+javob(?:lar)?|правильн\w+\s+ответ\w*|correct\s+answer(?:s)?)\s*[:\-].*$",
@@ -984,6 +992,13 @@ def _normalize_parsed_items(arr: list, src_language: str) -> list[dict]:
             else:
                 ca = opts[0]
         text = str(item.get("text") or "").strip()
+        # AI ba'zan manba hujjatdagi "Вопрос:"/"Savol:"/"Question:" yorlig'ini so'zma-so'z
+        # ko'chirib qo'yadi (masalan hujjatda "1.\nВопрос: <matn>" bo'lsa) — bu UI'da
+        # savol raqami bilan birga ikkilanib ko'rinadi, shuning uchun kesib tashlaymiz.
+        text = re.sub(
+            r"(?im)^\s*(вопрос|savol|question|задание)\s*#?\s*\d*\s*[:.)\-]?\s*",
+            "", text
+        ).strip()
         if len(text) < 4:
             continue
         cat = str(item.get("categoryName") or "Umumiy").strip()[:300] or "Umumiy"

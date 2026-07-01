@@ -240,30 +240,60 @@ export function StudentDashboard({
               transition={{ duration: 0.2 }}
               className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
             >
-              {exams.length === 0 ? (
-                <div className="col-span-full">
-                  <div className="rounded-lg border border-gray-200 bg-white py-14 px-6 text-center">
-                    <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3 text-gray-400">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                      </svg>
-                    </div>
-                    <p className="text-[14px] font-medium text-gray-600 mb-1">{t.emptyStudentExams}</p>
-                    <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mt-3 max-w-md mx-auto">
-                      {!user?.group_id
-                        ? t.studentNoGroupHint
-                        : t.studentNoExamsForGroupHint.replace('{group}', user.group_name || String(user.group_id))}
-                    </p>
-                  </div>
-                </div>
-              ) : exams.map((e: any, i) => {
+              {(() => {
                 void tick;
                 const now = nowMs();
+                // Talaba ro'yxatida faqat hali TUGAMAGAN imtihonlar ko'rinadi — "Tugagan"
+                // kartalar olib tashlanadi, lekin hali boshlanmagan (istalgan vaqt masofasidagi)
+                // imtihonlar ham countdown bilan ko'rinishda qoladi.
+                const visibleExams = exams.filter((e: any) => {
+                  const endMs = new Date(e.end_time).getTime();
+                  return now <= endMs;
+                });
+
+                if (exams.length === 0) {
+                  return (
+                    <div className="col-span-full">
+                      <div className="rounded-lg border border-gray-200 bg-white py-14 px-6 text-center">
+                        <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3 text-gray-400">
+                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                          </svg>
+                        </div>
+                        <p className="text-[14px] font-medium text-gray-600 mb-1">{t.emptyStudentExams}</p>
+                        <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mt-3 max-w-md mx-auto">
+                          {!user?.group_id
+                            ? t.studentNoGroupHint
+                            : t.studentNoExamsForGroupHint.replace('{group}', user.group_name || String(user.group_id))}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (visibleExams.length === 0) {
+                  return (
+                    <div className="col-span-full">
+                      <div className="rounded-lg border border-gray-200 bg-white py-14 px-6 text-center">
+                        <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3 text-gray-400">
+                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <p className="text-[14px] font-medium text-gray-600 mb-1">{t.studentNoOpenExamsTitle}</p>
+                        <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mt-3 max-w-md mx-auto">
+                          {t.studentNoOpenExamsHint}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                return visibleExams.map((e: any, i) => {
                 const startMs = new Date(e.start_time).getTime();
                 const endMs = new Date(e.end_time).getTime();
                 const isOngoing = now >= startMs && now <= endMs;
                 const isUpcoming = now < startMs;
-                const isPast = now > endMs;
                 const untilStart = msUntil(e.start_time, now);
 
                 return (
@@ -272,7 +302,7 @@ export function StudentDashboard({
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.04 }}
-                    className={`rounded-lg border border-gray-200 bg-white overflow-hidden transition-colors hover:border-gray-300 ${isPast ? 'opacity-60' : ''}`}
+                    className="rounded-lg border border-gray-200 bg-white overflow-hidden transition-colors hover:border-gray-300"
                   >
                     <div className="p-4 sm:p-5">
                       {/* Title row */}
@@ -347,7 +377,8 @@ export function StudentDashboard({
                     </div>
                   </motion.div>
                 );
-              })}
+                });
+              })()}
             </motion.div>
           ) : (
             <motion.div
