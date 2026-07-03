@@ -24,21 +24,6 @@ import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../
 // Identity check: har 3 soniyada (OpenCV SFace lokal, tez ~100ms; throttle 60/min)
 const IDENTITY_CHECK_MS = 3_000;
 
-const container = {
-  hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: {
-      staggerChildren: 0.05
-    }
-  }
-};
-
-const item: any = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
-};
-
 interface ExamRoomProps {
   exam: any;
   studentExamId: number;
@@ -358,6 +343,37 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const fullscreenEnteredRef = useRef(false);
   const blurIgnoreUntilRef = useRef(0); // timestamp: shu vaqtgacha blur ignore qilinadi
 
+  // Majburiy fullscreen (kiosk): fullscreenda emas bo'lsa, imtihon ustidan gate ko'rsatiladi.
+  const [needsFullscreen, setNeedsFullscreen] = useState(false);
+  const fullscreenSupportedRef = useRef(
+    typeof document !== 'undefined' && !!document.documentElement.requestFullscreen,
+  );
+
+  const requestExamFullscreen = useCallback(() => {
+    const el = document.documentElement;
+    if (document.fullscreenElement || !el.requestFullscreen) return;
+    fullscreenRequestedRef.current = true;
+    blurIgnoreUntilRef.current = Date.now() + 3000;
+    el.requestFullscreen().then(
+      () => {
+        fullscreenRequestedRef.current = false;
+      },
+      () => {
+        fullscreenRequestedRef.current = false;
+      },
+    );
+  }, []);
+
+  // Fullscreen holatini kuzatib gate'ni ko'rsatish/yashirish. Fullscreen API qo'llab-quvvatlanmasa
+  // (eski/ba'zi mobil brauzerlar) gate ko'rsatilmaydi — talaba imtihondan bloklanib qolmasin.
+  useEffect(() => {
+    if (!fullscreenSupportedRef.current) return;
+    const sync = () => setNeedsFullscreen(!document.fullscreenElement);
+    sync();
+    document.addEventListener('fullscreenchange', sync);
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, []);
+
   useEffect(() => {
     const ua = navigator.userAgent || '';
     if (/anydesk|teamviewer|rustdesk|splashtop/i.test(ua)) {
@@ -643,11 +659,21 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       }
     };
 
+    // Zoom bloklash: Ctrl+g'ildirak (trackpad/mishka) va Safari pinch gesture.
+    // Ctrl+'+'/'-'/'0' allaqachon handleKeyDown ichida preventDefault qilinadi.
+    const blockZoomWheel = (e: WheelEvent) => {
+      if (e.ctrlKey) e.preventDefault();
+    };
+    const blockGesture = (e: Event) => e.preventDefault();
+
     document.addEventListener('contextmenu', handleContextMenu);
     document.addEventListener('copy', handleCopyPaste);
     document.addEventListener('paste', handleCopyPaste);
     document.addEventListener('cut', handleCopyPaste);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('wheel', blockZoomWheel, { passive: false });
+    document.addEventListener('gesturestart', blockGesture);
+    document.addEventListener('gesturechange', blockGesture);
 
     let devtoolsTick: number | null = null;
     if (enableSizeHeuristicDevtools) {
@@ -803,6 +829,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       document.removeEventListener('paste', handleCopyPaste);
       document.removeEventListener('cut', handleCopyPaste);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('wheel', blockZoomWheel);
+      document.removeEventListener('gesturestart', blockGesture);
+      document.removeEventListener('gesturechange', blockGesture);
       if (devtoolsTick !== null) clearInterval(devtoolsTick);
       
       if (document.fullscreenElement) {
@@ -1503,22 +1532,49 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   };
 
   return (
-    <div className="flex flex-col lg:flex-row gap-8 p-4 md:p-8 max-w-7xl mx-auto">
-      {/* Main Exam Area */}
-      <motion.div 
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="flex-1 space-y-8"
-      >
-        <motion.div variants={item} className="sticky top-24 z-40 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-5 rounded-xl shadow-sm border border-gray-200 gap-4">
-          <div className="flex-1 w-full">
-            <h1 className="text-2xl font-bold tracking-tight text-gray-900 mb-2">{exam.title}</h1>
-            <div className="flex items-center gap-3">
-              <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+    <div className="h-[100dvh] flex flex-col bg-gray-50 overflow-hidden select-none">
+      {/* ── Majburiy fullscreen gate (kiosk) ── */}
+      <AnimatePresence>
+        {needsFullscreen && !banned && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[10060] flex items-center justify-center bg-slate-900/95 backdrop-blur-sm px-5"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              className="w-full max-w-md text-center rounded-2xl bg-white p-7 sm:p-9 shadow-2xl"
+            >
+              <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">{t.examFullscreenGateTitle}</h2>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{t.examFullscreenGateBody}</p>
+              <button
+                type="button"
+                onClick={requestExamFullscreen}
+                className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-700 active:scale-[0.98]"
+              >
+                {t.examFullscreenGateBtn}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Yuqori panel: sarlavha + progress + taymer + topshirish ── */}
+      <header className="shrink-0 bg-white border-b border-gray-200 shadow-sm">
+        <div className="w-full max-w-7xl mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3 sm:gap-5">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-sm sm:text-base font-bold tracking-tight text-gray-900 truncate">{exam.title}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden max-w-[220px]">
                 <div className="h-full bg-indigo-500 transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
               </div>
-              <span className="text-xs font-medium text-gray-500 whitespace-nowrap">
+              <span className="text-[11px] font-medium text-gray-500 whitespace-nowrap">
                 {t.questionProgress
                   .replace('{cur}', String(qIndex + 1))
                   .replace('{total}', String(totalQuestions))
@@ -1526,169 +1582,179 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
-            <div className={`flex flex-col items-end ${timeLeft < 300 ? 'text-red-600' : 'text-gray-700'}`}>
-              <span className="text-xs font-medium uppercase tracking-wider opacity-70">{t.timeRemaining}</span>
-              <span className="font-mono text-2xl font-bold tracking-tight">
-                {formatTime(timeLeft)}
-              </span>
-            </div>
-            <AdminBtn variant="blue" size="lg" loading={submitting} onClick={handleSubmit} className="px-6 shrink-0">
-              {submitting ? t.submitting : t.submitExam}
-            </AdminBtn>
+          <div className={`flex flex-col items-end leading-none ${timeLeft < 300 ? 'text-red-600' : 'text-gray-700'}`}>
+            <span className="text-[9px] font-semibold uppercase tracking-wider opacity-70">{t.timeRemaining}</span>
+            <span className="font-mono text-xl sm:text-2xl font-bold tabular-nums">
+              {formatTime(timeLeft)}
+            </span>
           </div>
-        </motion.div>
+          <AdminBtn variant="blue" size="md" loading={submitting} onClick={handleSubmit} className="shrink-0 sm:px-6">
+            {submitting ? t.submitting : t.submitExam}
+          </AdminBtn>
+        </div>
+      </header>
 
-        <AnimatePresence>
-          {timeLeft <= 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: -12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -12 }}
-              className="bg-red-500/10 border border-red-400/30 text-red-800 px-6 py-4 rounded-lg shadow-sm text-sm font-medium"
-            >
-              {t.examTimeExpiredHint}
-            </motion.div>
-          )}
-          {showTimeWarning && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-orange-500/10 border border-orange-500/20 text-orange-700 px-6 py-4 rounded-lg relative flex items-center gap-3 shadow-sm"
-            >
-              <svg className="w-6 h-6 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <div>
-                <strong className="font-semibold block">{t.timeWarningTitle}</strong>
-                {t.timeWarningBody.trim() ? <span className="text-sm">{t.timeWarningBody}</span> : null}
-              </div>
-            </motion.div>
-          )}
-          {isOffline && (
-            <motion.div 
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-yellow-500/10 border border-yellow-500/20 text-yellow-700 px-6 py-4 rounded-lg relative flex items-center gap-3 shadow-sm"
-            >
-              <svg className="w-6 h-6 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-              <div>
-                <strong className="font-semibold block">{t.connectionLostTitle}</strong>
-                {t.connectionLostBody.trim() ? <span className="text-sm">{t.connectionLostBody}</span> : null}
-              </div>
-            </motion.div>
-          )}
-          {!isOffline && realtimeSyncOffline && !realtimeBannerDismissed && (
-            <motion.div
-              initial={{ opacity: 0, y: -20, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-amber-50 border border-amber-200 text-amber-950 px-5 py-4 rounded-lg shadow-sm flex items-start gap-3"
-            >
-              <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              <div className="flex-1 min-w-0">
-                <strong className="font-semibold block text-sm">{t.realtimeSyncOfflineTitle}</strong>
-                <span className="text-sm text-amber-900/90">{t.realtimeSyncOfflineBodyShort}</span>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  <button
-                    type="button"
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition"
-                    onClick={() => {
-                      setRealtimeBannerDismissed(false);
-                      setProctorRetryNonce((n) => n + 1);
-                    }}
-                  >
-                    {t.realtimeSyncRetry}
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs font-medium px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100 transition"
-                    onClick={() => setRealtimeBannerDismissed(true)}
-                  >
-                    {t.realtimeSyncDismiss}
-                  </button>
+      {/* ── Asosiy tana: chapda savol, o'ngda proctoring paneli ── */}
+      <div className="flex-1 min-h-0 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-3 p-2.5 sm:p-3 overflow-y-auto lg:overflow-hidden">
+        {/* Savol ustuni */}
+        <div className="flex-1 min-h-0 flex flex-col gap-2.5">
+          <AnimatePresence>
+            {timeLeft <= 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -12 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -12 }}
+                className="shrink-0 bg-red-500/10 border border-red-400/30 text-red-800 px-4 py-2.5 rounded-lg shadow-sm text-sm font-medium"
+              >
+                {t.examTimeExpiredHint}
+              </motion.div>
+            )}
+            {showTimeWarning && (
+              <motion.div
+                initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="shrink-0 bg-orange-500/10 border border-orange-500/20 text-orange-700 px-4 py-2.5 rounded-lg relative flex items-center gap-3 shadow-sm"
+              >
+                <svg className="w-5 h-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <div>
+                  <strong className="font-semibold block text-sm">{t.timeWarningTitle}</strong>
+                  {t.timeWarningBody.trim() ? <span className="text-xs">{t.timeWarningBody}</span> : null}
                 </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {warningMsgModal}
-
-        <div className="space-y-6 pb-20">
-          {currentQ && (
-            <motion.div variants={item} key={currentQ.id} id={`question-${currentQ.id}`}>
-              <div className={`rounded-lg border bg-white overflow-hidden transition-all ${flaggedQuestions.includes(currentQ.id) ? 'border-amber-300 ring-2 ring-amber-200' : 'border-gray-200'}`}>
-                <div className="bg-gray-50/80 border-b border-gray-100 px-5 py-4 flex items-start justify-between gap-3">
-                  <p className="text-[15px] font-medium leading-relaxed text-gray-900 flex-1">
-                    <span className="text-indigo-600 font-bold mr-2">{qIndex + 1}.</span>
-                    {currentQParsed.cleanText || currentQ.text}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => toggleFlag(currentQ.id)}
-                    className={`shrink-0 ml-3 p-2 rounded-lg transition-colors ${flaggedQuestions.includes(currentQ.id) ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
-                    title={t.flagQuestion}
-                  >
-                    <svg className="w-4.5 h-4.5" fill={flaggedQuestions.includes(currentQ.id) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" /></svg>
-                  </button>
+              </motion.div>
+            )}
+            {isOffline && (
+              <motion.div
+                initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="shrink-0 bg-yellow-500/10 border border-yellow-500/20 text-yellow-700 px-4 py-2.5 rounded-lg relative flex items-center gap-3 shadow-sm"
+              >
+                <svg className="w-5 h-5 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                <div>
+                  <strong className="font-semibold block text-sm">{t.connectionLostTitle}</strong>
+                  {t.connectionLostBody.trim() ? <span className="text-xs">{t.connectionLostBody}</span> : null}
                 </div>
-                <div className="p-4 sm:p-5 space-y-2.5">
-                  {currentQParsed.images.map((img, idx) => (
-                    <div key={`${currentQ.id}-img-${idx}`} className="mb-3">
-                      <img
-                        src={img}
-                        alt={`Question ${qIndex + 1} image ${idx + 1}`}
-                        className="max-h-72 w-auto rounded-xl border border-slate-200"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                  ))}
-                  {currentOptions.map((opt: string, optIndex: number) => (
-                    <label
-                      key={`${currentQ.id}-opt-${optIndex}`}
-                      className={`flex items-center gap-4 p-4 rounded-lg cursor-pointer transition-all duration-200 border ${
-                        answers[String(currentQ.id)] === opt
-                          ? 'bg-indigo-50 border-indigo-300 shadow-sm ring-1 ring-indigo-200'
-                          : 'bg-white border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/40'
-                      }`}
+              </motion.div>
+            )}
+            {!isOffline && realtimeSyncOffline && !realtimeBannerDismissed && (
+              <motion.div
+                initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="shrink-0 bg-amber-50 border border-amber-200 text-amber-950 px-4 py-3 rounded-lg shadow-sm flex items-start gap-3"
+              >
+                <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                <div className="flex-1 min-w-0">
+                  <strong className="font-semibold block text-sm">{t.realtimeSyncOfflineTitle}</strong>
+                  <span className="text-xs text-amber-900/90">{t.realtimeSyncOfflineBodyShort}</span>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    <button
+                      type="button"
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition"
+                      onClick={() => {
+                        setRealtimeBannerDismissed(false);
+                        setProctorRetryNonce((n) => n + 1);
+                      }}
                     >
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold transition-colors ${
-                        answers[String(currentQ.id)] === opt
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {optionLetter(optIndex)}
-                      </div>
-                      <input
-                        type="radio"
-                        name={`q-${currentQ.id}`}
-                        value={opt}
-                        checked={answers[String(currentQ.id)] === opt}
-                        onChange={() =>
-                          setAnswers((prev) => ({
-                            ...prev,
-                            [String(currentQ.id)]: opt,
-                          }))
-                        }
-                        className="sr-only"
-                      />
-                      <span className={`text-[15px] leading-snug flex-1 ${answers[String(currentQ.id)] === opt ? 'font-semibold text-slate-900' : 'text-slate-700'}`}>
-                        {opt}
-                      </span>
-                    </label>
-                  ))}
-                  {currentOptions.length === 0 && (
-                    <AdminAlert type="error">{t.examOptionsMissing}</AdminAlert>
-                  )}
+                      {t.realtimeSyncRetry}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100 transition"
+                      onClick={() => setRealtimeBannerDismissed(true)}
+                    >
+                      {t.realtimeSyncDismiss}
+                    </button>
+                  </div>
                 </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {warningMsgModal}
+
+          {/* Savol kartasi — faqat variantlar ro'yxati ichida scroll bo'ladi */}
+          {currentQ && (
+            <motion.div
+              key={currentQ.id}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+              id={`question-${currentQ.id}`}
+              className={`flex-1 min-h-0 flex flex-col rounded-xl border bg-white overflow-hidden shadow-sm transition-all ${flaggedQuestions.includes(currentQ.id) ? 'border-amber-300 ring-2 ring-amber-200' : 'border-gray-200'}`}
+            >
+              <div className="shrink-0 bg-gray-50/80 border-b border-gray-100 px-4 sm:px-5 py-3 flex items-start justify-between gap-3">
+                <p className="text-[15px] font-medium leading-relaxed text-gray-900 flex-1">
+                  <span className="text-indigo-600 font-bold mr-2">{qIndex + 1}.</span>
+                  {currentQParsed.cleanText || currentQ.text}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => toggleFlag(currentQ.id)}
+                  className={`shrink-0 ml-3 p-2 rounded-lg transition-colors ${flaggedQuestions.includes(currentQ.id) ? 'bg-amber-100 text-amber-600' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
+                  title={t.flagQuestion}
+                >
+                  <svg className="w-4.5 h-4.5" fill={flaggedQuestions.includes(currentQ.id) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" /></svg>
+                </button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-2.5">
+                {currentQParsed.images.map((img, idx) => (
+                  <div key={`${currentQ.id}-img-${idx}`} className="mb-3">
+                    <img
+                      src={img}
+                      alt={`Question ${qIndex + 1} image ${idx + 1}`}
+                      className="max-h-60 w-auto rounded-xl border border-slate-200"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                ))}
+                {currentOptions.map((opt: string, optIndex: number) => (
+                  <label
+                    key={`${currentQ.id}-opt-${optIndex}`}
+                    className={`flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-lg cursor-pointer transition-all duration-200 border ${
+                      answers[String(currentQ.id)] === opt
+                        ? 'bg-indigo-50 border-indigo-300 shadow-sm ring-1 ring-indigo-200'
+                        : 'bg-white border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/40'
+                    }`}
+                  >
+                    <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-xl flex items-center justify-center flex-shrink-0 text-sm font-bold transition-colors ${
+                      answers[String(currentQ.id)] === opt
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {optionLetter(optIndex)}
+                    </div>
+                    <input
+                      type="radio"
+                      name={`q-${currentQ.id}`}
+                      value={opt}
+                      checked={answers[String(currentQ.id)] === opt}
+                      onChange={() =>
+                        setAnswers((prev) => ({
+                          ...prev,
+                          [String(currentQ.id)]: opt,
+                        }))
+                      }
+                      className="sr-only"
+                    />
+                    <span className={`text-[15px] leading-snug flex-1 ${answers[String(currentQ.id)] === opt ? 'font-semibold text-slate-900' : 'text-slate-700'}`}>
+                      {opt}
+                    </span>
+                  </label>
+                ))}
+                {currentOptions.length === 0 && (
+                  <AdminAlert type="error">{t.examOptionsMissing}</AdminAlert>
+                )}
               </div>
             </motion.div>
           )}
-          <div className="flex gap-3 justify-between items-center">
+
+          {/* Navigatsiya — har doim ko'rinib turadi */}
+          <div className="shrink-0 flex gap-3 justify-between items-center">
             <AdminBtn
               variant="ghost"
-              size="lg"
+              size="md"
               disabled={qIndex <= 0}
               onClick={() => setQIndex((i) => Math.max(0, i - 1))}
               icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>}
@@ -1697,7 +1763,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             </AdminBtn>
             <AdminBtn
               variant="blue"
-              size="lg"
+              size="md"
               disabled={qIndex >= totalQuestions - 1}
               onClick={() => setQIndex((i) => Math.min(totalQuestions - 1, i + 1))}
               iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
@@ -1705,167 +1771,147 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               {t.examNavNext}
             </AdminBtn>
           </div>
-
-          {/* Har safar tepaga qaytmasdan topshirish mumkin bo'lsin — sahifa pastida ham tugma. */}
-          <div className="pt-2 flex justify-end">
-            <AdminBtn
-              variant="blue"
-              size="md"
-              loading={submitting}
-              onClick={handleSubmit}
-              className="px-6"
-            >
-              {submitting ? t.submitting : t.submitExam}
-            </AdminBtn>
-          </div>
         </div>
-      </motion.div>
 
-      {/* Proctoring Sidebar — kamera, savollar va ogohlantirishlar birgalikda sticky:
-          faqat asosiy savol/variantlar ustuni scroll bo'ladi, sidebar joyida qoladi. */}
-      <motion.div
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 0.3, type: "spring", stiffness: 300, damping: 30 }}
-        className="w-full lg:w-80 space-y-6 sticky top-24 z-30 h-fit"
-      >
-        {(() => {
-          const fsCfg = FACE_STATUS_CFG[faceStatus] ?? FACE_STATUS_CFG.WAITING;
-          const isOk = faceStatus === 'OK';
-          const isWaiting = faceStatus === 'WAITING';
-          return (
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full shrink-0 ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelCamera}</span>
-              </div>
-              <div className="p-2">
-                <div className={`rounded-lg overflow-hidden bg-black/5 border-2 shadow-inner relative aspect-video transition-colors duration-300 ${fsCfg.border}`}>
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    onLoadedMetadata={() => {
-                      if (videoRef.current && videoRef.current.videoWidth > 0) {
+        {/* Proctoring paneli — kamera, savollar tarmog'i, ogohlantirishlar */}
+        <aside className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-2.5 min-h-0">
+          {(() => {
+            const fsCfg = FACE_STATUS_CFG[faceStatus] ?? FACE_STATUS_CFG.WAITING;
+            const isOk = faceStatus === 'OK';
+            const isWaiting = faceStatus === 'WAITING';
+            return (
+              <div className="shrink-0 bg-white rounded-lg border border-gray-200 overflow-hidden">
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelCamera}</span>
+                </div>
+                <div className="p-2">
+                  <div className={`rounded-lg overflow-hidden bg-black/5 border-2 shadow-inner relative aspect-video transition-colors duration-300 ${fsCfg.border}`}>
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      onLoadedMetadata={() => {
+                        if (videoRef.current && videoRef.current.videoWidth > 0) {
+                          setCameraPreviewOk(true);
+                          setCameraErrorHint('');
+                        }
+                      }}
+                      onPlaying={() => {
                         setCameraPreviewOk(true);
                         setCameraErrorHint('');
-                      }
-                    }}
-                    onPlaying={() => {
-                      setCameraPreviewOk(true);
-                      setCameraErrorHint('');
-                    }}
-                    className="w-full h-full object-cover"
-                    style={{ transform: 'scaleX(-1)' }}
-                  />
-                  {/* Real-time yuz pozitsiyasi + identity overlay */}
-                  {!cameraErrorHint && cameraPreviewOk && (
-                    <div className="absolute bottom-0 left-0 right-0 flex items-stretch">
-                      {/* Yuz pozitsiyasi (chap) */}
-                      {!isWaiting && (
-                        <div className={`flex-1 flex items-center gap-1.5 px-2 py-1.5 ${fsCfg.bg} ${fsCfg.text} transition-all duration-200`}>
-                          <span className="text-sm font-bold leading-none">{fsCfg.icon}</span>
-                          <span className="text-[10px] font-semibold leading-snug truncate">{fsCfg.label}</span>
-                        </div>
-                      )}
-                      {/* Identity check holati (o'ng) */}
-                      {identityStatus !== 'idle' && (
-                        <div className={`flex items-center gap-1 px-2 py-1.5 text-[10px] font-bold transition-all duration-200 shrink-0 ${
-                          identityStatus === 'checking' ? 'bg-blue-600/90 text-white' :
-                          identityStatus === 'ok'       ? 'bg-emerald-600/90 text-white' :
-                                                          'bg-red-600/90 text-white'
-                        }`}>
-                          {identityStatus === 'checking' && (
-                            <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
-                            </svg>
-                          )}
-                          {identityStatus === 'ok'       && <span>✓</span>}
-                          {identityStatus === 'fail'     && <span>✗</span>}
-                          <span>
-                            {identityStatus === 'checking' ? 'ID...' :
-                             identityStatus === 'ok'       ? 'ID OK' : 'ID ✗'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {(cameraErrorHint || !cameraPreviewOk) && (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center bg-white/75 text-[11px] sm:text-xs text-gray-800">
-                      {cameraErrorHint ? (
-                        <>
-                          <span className="font-semibold text-red-700 leading-snug">{cameraErrorHint}</span>
-                          <AdminBtn
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => {
-                              setCameraErrorHint('');
-                              setCameraPreviewOk(false);
-                              setProctorRetryNonce((n) => n + 1);
-                            }}
-                          >
-                            {t.examCameraReload}
-                          </AdminBtn>
-                        </>
-                      ) : (
-                        <span className="font-medium text-gray-600">{t.examCameraLoadingPreview}</span>
-                      )}
-                    </div>
-                  )}
+                      }}
+                      className="w-full h-full object-cover"
+                      style={{ transform: 'scaleX(-1)' }}
+                    />
+                    {/* Real-time yuz pozitsiyasi + identity overlay */}
+                    {!cameraErrorHint && cameraPreviewOk && (
+                      <div className="absolute bottom-0 left-0 right-0 flex items-stretch">
+                        {!isWaiting && (
+                          <div className={`flex-1 flex items-center gap-1.5 px-2 py-1.5 ${fsCfg.bg} ${fsCfg.text} transition-all duration-200`}>
+                            <span className="text-sm font-bold leading-none">{fsCfg.icon}</span>
+                            <span className="text-[10px] font-semibold leading-snug truncate">{fsCfg.label}</span>
+                          </div>
+                        )}
+                        {identityStatus !== 'idle' && (
+                          <div className={`flex items-center gap-1 px-2 py-1.5 text-[10px] font-bold transition-all duration-200 shrink-0 ${
+                            identityStatus === 'checking' ? 'bg-blue-600/90 text-white' :
+                            identityStatus === 'ok'       ? 'bg-emerald-600/90 text-white' :
+                                                            'bg-red-600/90 text-white'
+                          }`}>
+                            {identityStatus === 'checking' && (
+                              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
+                              </svg>
+                            )}
+                            {identityStatus === 'ok'       && <span>✓</span>}
+                            {identityStatus === 'fail'     && <span>✗</span>}
+                            <span>
+                              {identityStatus === 'checking' ? 'ID...' :
+                               identityStatus === 'ok'       ? 'ID OK' : 'ID ✗'}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(cameraErrorHint || !cameraPreviewOk) && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center bg-white/75 text-[11px] sm:text-xs text-gray-800">
+                        {cameraErrorHint ? (
+                          <>
+                            <span className="font-semibold text-red-700 leading-snug">{cameraErrorHint}</span>
+                            <AdminBtn
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setCameraErrorHint('');
+                                setCameraPreviewOk(false);
+                                setProctorRetryNonce((n) => n + 1);
+                              }}
+                            >
+                              {t.examCameraReload}
+                            </AdminBtn>
+                          </>
+                        ) : (
+                          <span className="font-medium text-gray-600">{t.examCameraLoadingPreview}</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
 
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelQuestions}</span>
+          {/* Savollar tarmog'i — ko'p bo'lsa panel ichida scroll */}
+          <div className="flex-1 min-h-0 flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="shrink-0 px-3 py-2 border-b border-gray-100">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelQuestions}</span>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3">
+              <div className="grid grid-cols-5 gap-2">
+                {exam.questions.map((q: any, i: number) => {
+                  const isAnswered = !!answers[q.id];
+                  const isFlagged = flaggedQuestions.includes(q.id);
+                  const isCurrent = i === qIndex;
+                  return (
+                    <button
+                      type="button"
+                      key={q.id}
+                      onClick={() => setQIndex(i)}
+                      className={`aspect-square w-full rounded-lg flex items-center justify-center text-sm font-medium transition-all ${
+                        isCurrent ? 'ring-2 ring-offset-1 ring-indigo-500' : ''
+                      } ${
+                        isFlagged ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' :
+                        isAnswered ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' :
+                        'bg-white text-gray-600 border border-gray-200 hover:bg-gray-50'
+                      }`}
+                    >
+                      {i + 1}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-          <div className="p-4">
-            <div className="grid grid-cols-5 gap-2">
-              {exam.questions.map((q: any, i: number) => {
-                const isAnswered = !!answers[q.id];
-                const isFlagged = flaggedQuestions.includes(q.id);
-                const isCurrent = i === qIndex;
-                return (
-                  <button
-                    type="button"
-                    key={q.id}
-                    onClick={() => setQIndex(i)}
-                    className={`w-10 h-10 rounded-xl flex items-center justify-center text-sm font-medium transition-all ${
-                      isCurrent ? 'ring-2 ring-offset-2 ring-indigo-500' : ''
-                    } ${
-                      isFlagged ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' :
-                      isAnswered ? 'bg-indigo-500 text-white shadow-md shadow-indigo-500/20' :
-                      'bg-white text-gray-600 border border-gray-200 hover:bg-white'
+
+          <div className="shrink-0 bg-white rounded-lg border border-gray-200 overflow-hidden">
+            <div className="px-3 py-2 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelWarnings}</span>
+              <div className="flex items-center gap-1.5">
+                {[1, 2, 3].map(num => (
+                  <div
+                    key={num}
+                    className={`w-3 h-3 rounded-full transition-colors ${
+                      strikeLevel >= num ? 'bg-red-500 shadow-sm shadow-red-500/50' : 'bg-gray-200'
                     }`}
-                  >
-                    {i + 1}
-                  </button>
-                );
-              })}
+                  />
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-          <div className="px-4 py-3 flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelWarnings}</span>
-            <div className="flex items-center gap-1.5">
-              {[1, 2, 3].map(num => (
-                <div
-                  key={num}
-                  className={`w-3 h-3 rounded-full transition-colors ${
-                    strikeLevel >= num ? 'bg-red-500 shadow-sm shadow-red-500/50' : 'bg-gray-200'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </motion.div>
+        </aside>
+      </div>
       <Calculator />
     </div>
   );

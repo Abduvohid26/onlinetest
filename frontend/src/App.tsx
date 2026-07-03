@@ -178,10 +178,15 @@ function AppContent() {
   }
 
   const t = translations[lang];
+  const examTaking = user.role === 'student' && examStatus === 'taking';
   const preExamFullBleed = user.role === 'student' && examStatus === 'checking';
+  // Imtihon topshirish paytida sahifa to'liq ekran (kiosk): header yashiriladi,
+  // hech qanday chetki bo'shliq/scroll qolmaydi.
+  const fullBleed = preExamFullBleed || examTaking;
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-x-clip">
+      {!examTaking && (
       <header className="fixed top-0 left-0 right-0 z-50 bg-white border-b border-gray-200 h-[62px] sm:h-[66px]">
         <div
           className={`flex items-center justify-between h-full ${
@@ -250,10 +255,11 @@ function AppContent() {
           </div>
         </div>
       </header>
+      )}
 
       <main
         className={`flex-1 min-h-0 w-full relative z-10 ${
-          preExamFullBleed
+          fullBleed
             ? 'max-w-none px-0 pt-0'
             : user.role === 'admin'
               ? 'max-w-none px-0 pt-[62px] sm:pt-[66px]'
