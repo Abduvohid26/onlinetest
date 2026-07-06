@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
+from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, fill_missing_exam_translations
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
@@ -217,6 +218,10 @@ def student_exams_list(request):
     out = []
     for e in exams_qs:
         se = ses_by_exam.get(e.id)
+        if se is not None and (se.status or "").strip() == "In Progress":
+            if auto_finalize_student_exam_if_expired(se, e, str(u.id)):
+                se.refresh_from_db()
+                ses_by_exam[e.id] = se
         if se is not None and se.status in ("Completed", "Banned"):
             continue
         in_progress = se is not None and (se.status or "").strip() == "In Progress" and bool(se.started_at)
@@ -267,6 +272,11 @@ def student_exams_start(request, pk: int):
     ex_row = ExamStudentException.objects.filter(exam_id=pk, student_id=u.id).first()
     if ex_row:
         return Response({"error": ex_row.reason, "code": "EXAM_BLOCKED"}, status=403)
+
+    stale = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
+    if stale is not None and (stale.status or "").strip() == "In Progress":
+        if auto_finalize_student_exam_if_expired(stale, exam, str(u.id)):
+            stale.refresh_from_db()
 
     now = dj_tz.now()
     in_general = bool(
@@ -434,9 +444,16 @@ def student_exams_start(request, pk: int):
     full_questions: list[dict]
     student_lang = resolve_student_exam_language(request, exam)
     ex_lang = effective_exam_language(exam, student_lang)
+    is_auto_exam = (exam.language or "uz").lower() == "auto"
     if exam.exam_mode == "bank_mixed":
         if se.session_questions_json:
             full_questions = safe_json_loads(se.session_questions_json, [])
+            if is_auto_exam:
+                upgraded = fill_missing_exam_translations(full_questions)
+                if upgraded is not full_questions:
+                    full_questions = upgraded
+                    se.session_questions_json = json.dumps(full_questions)
+                    se.save(update_fields=["session_questions_json"])
         else:
             n = max(8, exam.bank_question_count or 20)
             group = Group.objects.filter(pk=u.group_id).first() if u.group_id else None
@@ -464,7 +481,10 @@ def student_exams_start(request, pk: int):
                     status=400,
                 )
             picked_rows = list(base_qs.order_by("?")[:n_bank])
-            picked = [bank_row_to_exam_dict(row, ex_lang) for row in picked_rows]
+            if is_auto_exam:
+                picked = [bank_row_to_exam_dict_multilingual(row) for row in picked_rows]
+            else:
+                picked = [bank_row_to_exam_dict(row, ex_lang) for row in picked_rows]
             if track == "bachelor" and picked:
                 n_para = max(1, int(len(picked) * 0.25))
                 idxs = list(range(len(picked)))
@@ -504,21 +524,28 @@ def student_exams_start(request, pk: int):
                     )
                     extra_pool = list(base_qs.order_by("?")[n_bank : n_bank + n_ai])
                     for row in extra_pool:
-                        ai_part.append(bank_row_to_exam_dict(row, ex_lang))
+                        if is_auto_exam:
+                            ai_part.append(bank_row_to_exam_dict_multilingual(row))
+                        else:
+                            ai_part.append(bank_row_to_exam_dict(row, ex_lang))
             next_id = len(picked) + 1
             ai_with_ids = [{**q, "id": next_id + j} for j, q in enumerate(ai_part)]
             merged = shuffle_in_place(picked + ai_with_ids)
             full_questions = [{**q, "id": idx + 1} for idx, q in enumerate(merged)]
+            if is_auto_exam:
+                full_questions = fill_missing_exam_translations(full_questions)
             se.session_questions_json = json.dumps(full_questions)
             se.save(update_fields=["session_questions_json"])
     else:
         full_questions = safe_json_loads(exam.questions_json, [])
+        if is_auto_exam:
+            full_questions = fill_missing_exam_translations(full_questions)
 
     full_questions = apply_exam_language_to_questions(
         full_questions, exam.language or "uz", student_lang
     )
     shuffled = build_student_question_list(full_questions)
-    deadline = submission_deadline(exam, se)
+    deadline = submission_deadline(exam, se, student_id=str(u.id))
     exam_out = {
         "id": exam.id,
         "teacher_id": exam.teacher_id,
@@ -578,7 +605,7 @@ def student_exams_submit(request, pk: int):
             return sig_err
         exam = se.exam
         now_submit = dj_tz.now()
-        deadline = submission_deadline(exam, se)
+        deadline = submission_deadline(exam, se, student_id=str(u.id))
         if deadline and now_submit > deadline:
             return Response(
                 {"error": "Imtihon vaqti tugagan. Javoblar qabul qilinmaydi."},
@@ -691,9 +718,9 @@ def student_exam_clock(request, pk: int):
     sig_err = _verify_exam_hmac_or_403(se, request)
     if sig_err is not None:
         return sig_err
-    deadline = submission_deadline(exam, se)
+    deadline = submission_deadline(exam, se, student_id=str(u.id))
     now = dj_tz.now()
-    sec = seconds_until_deadline(exam, se)
+    sec = seconds_until_deadline(exam, se, student_id=str(u.id))
 
     # Liveness watchdog: nazorat kadrlari boshlangan, lekin uzoq vaqt kelmayotgan bo'lsa
     # (kamera o'chirilgan / oqim to'xtatilgan) — client PROCTOR_FEED_LOST loglaydi.
@@ -766,7 +793,7 @@ def student_exam_save_progress(request, pk: int):
     sig_err = _verify_exam_hmac_or_403(se, request)
     if sig_err is not None:
         return sig_err
-    deadline = submission_deadline(exam, se)
+    deadline = submission_deadline(exam, se, student_id=str(u.id))
     if deadline and dj_tz.now() > deadline:
         return Response({"error": "Imtihon vaqti tugagan"}, status=403)
     answers = (request.data or {}).get("answers")

@@ -1214,6 +1214,39 @@ class ExamFlowApiTests(TestCase):
         self.assertIn("results", body)
         self.assertIn("violations", body)
 
+    def test_expired_in_progress_session_auto_finalized_on_exam_list(self):
+        now = dj_tz.now()
+        past_exam = Exam.objects.create(
+            teacher_id=self.admin.id,
+            title="Expired window",
+            start_time=now - timedelta(days=3),
+            end_time=now - timedelta(days=2),
+            duration_minutes=60,
+            questions_json=__import__("json").dumps(QUESTIONS),
+            language="uz",
+            pin="",
+            custom_rules="",
+            exam_mode="static",
+            bank_category_ids="[]",
+            bank_question_count=0,
+        )
+        ExamGroup.objects.create(exam_id=past_exam.id, group_id=self.group.id)
+        se = StudentExam.objects.create(
+            student_id=self.student.id,
+            exam_id=past_exam.id,
+            status="In Progress",
+            started_at=now - timedelta(days=3, hours=1),
+            draft_answers_json='{"1":"A"}',
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.student_token}")
+        r = self.client.get("/api/student/exams")
+        self.assertEqual(r.status_code, 200)
+        ids = {row["id"] for row in r.json()}
+        self.assertNotIn(past_exam.id, ids)
+        se.refresh_from_db()
+        self.assertEqual(se.status, "Completed")
+        self.assertIsNotNone(se.completed_at)
+
 
 class BankExamOptionsTests(TestCase):
   def test_bank_row_empty_uz_options_fallback(self):

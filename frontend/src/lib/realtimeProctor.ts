@@ -120,6 +120,7 @@ export class RealtimeProctor {
   private lastRecheck = 0;
   // Og'iz qimirlashi (gapirish) aniqlash
   private mouthHistory: number[] = [];
+  private jawOpenHistory: number[] = [];
 
   constructor(video: HTMLVideoElement, cb: RealtimeProctorCallbacks) {
     this.video = video;
@@ -136,7 +137,7 @@ export class RealtimeProctor {
         baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
         runningMode: 'VIDEO',
         numFaces: 3,
-        outputFaceBlendshapes: false,
+        outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: false,
       });
 
@@ -233,9 +234,11 @@ export class RealtimeProctor {
     const ts = performance.now();
 
     let faces: FaceLandmark[][] = [];
+    let faceBlendshapes: Array<{ categoryName: string; score: number }> | undefined;
     try {
       const res = this.faceLandmarker.detectForVideo(v, ts);
       faces = res?.faceLandmarks || [];
+      faceBlendshapes = res?.faceBlendshapes?.[0]?.categories;
     } catch {
       return;
     }
@@ -271,13 +274,14 @@ export class RealtimeProctor {
       if (this.streak('tooClose', posStatus === 'TOO_CLOSE', STREAK.tooClose)) this.emit('FACE_TOO_CLOSE');
       if (this.streak('offCenter', posStatus === 'OFF_CENTER', STREAK.offCenter)) this.emit('FACE_OFF_CENTER');
 
-      this.analyzeHeadAndMovement(faces[0]);
+      this.analyzeHeadAndMovement(faces[0], faceBlendshapes);
     } else {
       this.streaks['tooFar'] = 0;
       this.streaks['tooClose'] = 0;
       this.streaks['offCenter'] = 0;
       this.prevNose = null;
       this.mouthHistory = [];
+      this.jawOpenHistory = [];
     }
 
     // 2) Qo'l / imo-ishora (yuklangani bo'lsa)
@@ -320,7 +324,10 @@ export class RealtimeProctor {
     return 'OK';
   }
 
-  private analyzeHeadAndMovement(lm: FaceLandmark[]): void {
+  private analyzeHeadAndMovement(
+    lm: FaceLandmark[],
+    blendshapes?: Array<{ categoryName: string; score: number }>,
+  ): void {
     // MediaPipe FaceMesh indekslari: burun=1, chap yuz cheti=234, o'ng=454, manglay=10, iyak=152
     const nose = lm[1];
     const left = lm[234];
@@ -366,34 +373,61 @@ export class RealtimeProctor {
     }
     this.prevNose = { x: nose.x, y: nose.y };
 
-    // 4) Og'iz qimirlashi (gapirish): yuqori/pastki lab orasi yuz balandligiga nisbatan.
-    //    Ochilib-yopilish tebranishi (oscillation) = gapirish. Ovozdan mustaqil ishlaydi.
-    this.detectMouthMovement(lm, height);
+    // 4) Og'iz qimirlashi (gapirish): blendshape jawOpen + lab landmark tebranishi.
+    this.detectMouthMovement(lm, blendshapes);
   }
 
-  // MediaPipe FaceMesh: yuqori ichki lab=13, pastki ichki lab=14
-  private detectMouthMovement(lm: FaceLandmark[], faceHeight: number): void {
-    const upper = lm[13];
-    const lower = lm[14];
-    if (!upper || !lower) return;
-    const openRatio = Math.abs(lower.y - upper.y) / (faceHeight || 1e-6);
+  private detectMouthMovement(
+    lm: FaceLandmark[],
+    blendshapes?: Array<{ categoryName: string; score: number }>,
+  ): void {
+    let talking = false;
 
-    // Oyna qisqartirildi (14->9, min 8->6) — tezroq aniqlash uchun; crossings talabi
-    // ham 3->2 ga tushirildi (baribir yolg'iz bitta chekka emas, tebranish talab qilinadi).
-    const hist = this.mouthHistory;
-    hist.push(openRatio);
-    if (hist.length > 9) hist.shift(); // ~1.17s oyna
-    if (hist.length < 6) return;
-
-    // Tebranishni hisoblash: o'rtacha atrofida yuqoriga/pastga kesishishlar soni.
-    const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
-    const amp = Math.max(...hist) - Math.min(...hist);
-    let crossings = 0;
-    for (let i = 1; i < hist.length; i++) {
-      if ((hist[i - 1] - mean) * (hist[i] - mean) < 0) crossings++;
+    // MediaPipe blendshape — eng ishonchli yo'l.
+    const jaw = blendshapes?.find((b) => b.categoryName === 'jawOpen');
+    if (jaw) {
+      const jawHist = this.jawOpenHistory;
+      jawHist.push(jaw.score);
+      if (jawHist.length > 14) jawHist.shift();
+      if (jawHist.length >= 7) {
+        const mean = jawHist.reduce((a, b) => a + b, 0) / jawHist.length;
+        const amp = Math.max(...jawHist) - Math.min(...jawHist);
+        let crossings = 0;
+        for (let i = 1; i < jawHist.length; i++) {
+          if ((jawHist[i - 1] - mean) * (jawHist[i] - mean) < 0) crossings++;
+        }
+        talking =
+          (crossings >= 2 && amp >= 0.045) ||
+          (jaw.score >= 0.18 && amp >= 0.03) ||
+          jawHist.filter((s) => s >= 0.12).length >= 4;
+      }
     }
-    // Gapirish: og'iz bir necha marta ochilib-yopiladi + amplituda yetarli.
-    const talking = crossings >= 1 && amp >= 0.022;
-    if (this.streak('mouth', talking, 2)) this.emit('MOUTH_MOVEMENT_TALKING');
+
+    // Landmark zaxira: og'iz kengligi (MAR) tebranishi.
+    if (!talking) {
+      const upper = lm[13];
+      const lower = lm[14];
+      const left = lm[61];
+      const right = lm[291];
+      if (upper && lower && left && right) {
+        const vertical = Math.abs(lower.y - upper.y);
+        const horizontal = Math.abs(right.x - left.x) || 1e-6;
+        const mar = vertical / horizontal;
+        const hist = this.mouthHistory;
+        hist.push(mar);
+        if (hist.length > 12) hist.shift();
+        if (hist.length >= 7) {
+          const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
+          const amp = Math.max(...hist) - Math.min(...hist);
+          let crossings = 0;
+          for (let i = 1; i < hist.length; i++) {
+            if ((hist[i - 1] - mean) * (hist[i] - mean) < 0) crossings++;
+          }
+          talking = crossings >= 2 && amp >= 0.012;
+        }
+      }
+    }
+
+    if (this.streak('mouth', talking, 3)) this.emit('MOUTH_MOVEMENT_TALKING');
   }
 }

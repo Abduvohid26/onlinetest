@@ -1,23 +1,52 @@
 /**
- * Real-time ovoz faolligi (VAD) — oddiy chastota o'rtacha qiymati o'rniga.
+ * Real-time ovoz faolligi (VAD) — nutqqa o'xshash spektr + vaqt-domeni signallari.
  *
- * Vaqt-domeni (time-domain) signalidan RMS energiya + zero-crossing rate (ZCR)
- * hisoblaydi. Gapirish: barqaror energiya + nutqqa xos ZCR oralig'i. Bu shovqin,
- * mikrofon shitirlashi va qisqa taqillashlardan gapirishni ajratishga yordam beradi.
+ * Oddiy RMS/ZCR yetarli emas (klaviatura, stul, shovqin ham "voiced" bo'lib qolardi).
+ * Nutq diapazoni (180–3600 Hz) energiya ulushi + ZCR + spektr tekisligi ishlatiladi.
  */
 
 export interface VoiceFrame {
-  rms: number; // 0..1 normalized energiya
-  zcr: number; // 0..1 zero-crossing nisbati
-  voiced: boolean; // nutqqa o'xshash freym
-  loud: boolean; // baland ovoz/shovqin
+  rms: number;
+  zcr: number;
+  /** Inson nutqiga o'xshash freym (shovqin emas). */
+  humanVoice: boolean;
+  speechRatio: number;
 }
 
-// Kalibrlash mumkin (env emas — oddiy konstantalar).
-const RMS_VOICE = 0.045; // nutq energiyasi ostona
-const RMS_LOUD = 0.14; // baland shovqin/ovoz
-const ZCR_MIN = 0.02; // nutq ZCR oralig'i (gum/shovqin emas)
-const ZCR_MAX = 0.22;
+const RMS_VOICE = 0.038;
+const ZCR_MIN = 0.022;
+const ZCR_MAX = 0.19;
+/** Nutq energiyasi umumiy spektrdagi minimal ulushi. */
+const SPEECH_BAND_RATIO_MIN = 0.5;
+/** Oq shovqin ko'proq tekis spektrga ega; nutq torroq diapazonda jamlanadi. */
+const SPEECH_FLATNESS_MAX = 0.62;
+
+function speechBandMetrics(analyser: AnalyserNode): { speechRatio: number; flatness: number } {
+  const n = analyser.frequencyBinCount;
+  const freq = new Uint8Array(n);
+  analyser.getByteFrequencyData(freq);
+  const sr = analyser.context.sampleRate;
+  const binHz = sr / analyser.fftSize;
+
+  let total = 0;
+  let speech = 0;
+  let geo = 0;
+  let arith = 0;
+  let used = 0;
+  for (let i = 2; i < n; i++) {
+    const e = (freq[i] || 0) / 255;
+    if (e < 0.008) continue;
+    total += e;
+    used += 1;
+    arith += e;
+    geo += Math.log(e + 1e-7);
+    const hz = i * binHz;
+    if (hz >= 180 && hz <= 3600) speech += e;
+  }
+  const speechRatio = total > 0 ? speech / total : 0;
+  const flatness = used > 0 && arith > 0 ? Math.exp(geo / used) / (arith / used) : 1;
+  return { speechRatio, flatness };
+}
 
 export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
   const n = analyser.fftSize;
@@ -28,7 +57,7 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
   let crossings = 0;
   let prevSign = 0;
   for (let i = 0; i < n; i++) {
-    const v = (buf[i] - 128) / 128; // -1..1
+    const v = (buf[i] - 128) / 128;
     sumSq += v * v;
     const sign = v >= 0 ? 1 : -1;
     if (prevSign !== 0 && sign !== prevSign) crossings++;
@@ -36,46 +65,44 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
   }
   const rms = Math.sqrt(sumSq / n);
   const zcr = crossings / n;
+  const { speechRatio, flatness } = speechBandMetrics(analyser);
 
-  const loud = rms >= RMS_LOUD;
-  const voiced = rms >= RMS_VOICE && zcr >= ZCR_MIN && zcr <= ZCR_MAX;
-  return { rms, zcr, voiced, loud };
+  const humanVoice =
+    rms >= RMS_VOICE &&
+    zcr >= ZCR_MIN &&
+    zcr <= ZCR_MAX &&
+    speechRatio >= SPEECH_BAND_RATIO_MIN &&
+    flatness <= SPEECH_FLATNESS_MAX;
+
+  return { rms, zcr, humanVoice, speechRatio };
 }
 
 /**
- * Ketma-ket "voiced" freymlarni hisoblab, barqaror gapirishni aniqlaydigan tracker.
- * Qisqa tasodifiy tovushlar ban bermasligi uchun streak talab qiladi.
- *
- * Chaqiruvchi (ExamRoom) endi ~200ms da bir freym beradi (avval 1000ms edi), shuning
- * uchun streak talablari ham shunga mos kichraytirilgan — real vaqtdagi aniqlash
- * tezligi sezilarli oshadi (SUSPICIOUS_AUDIO: ~2s -> ~0.6s, WHISPER: ~3s -> ~0.8s),
- * lekin bitta freymga ishonib qolmaslik uchun baribir bir nechta ketma-ket freym talab qilinadi.
+ * Faqat barqaror inson nutqi uchun ogohlantirish (tahrirlangan shovqin emas).
  */
 export class VoiceActivityTracker {
-  private voicedStreak = 0;
-  private loudStreak = 0;
+  private voiceStreak = 0;
+  private noiseFloor = 0.018;
+  private calibrateLeft = 40;
 
-  /** Freymni qabul qiladi; signal kerak bo'lsa qaytaradi, aks holda null. */
-  push(frame: VoiceFrame): 'SUSPICIOUS_AUDIO' | 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
-    if (frame.loud) {
-      this.loudStreak += 1;
-      this.voicedStreak = 0;
-      if (this.loudStreak >= 3) {
-        this.loudStreak = 0;
-        return 'SUSPICIOUS_AUDIO';
-      }
-      return null;
+  push(frame: VoiceFrame): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+    if (this.calibrateLeft > 0) {
+      this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
+      this.calibrateLeft -= 1;
     }
-    this.loudStreak = 0;
 
-    if (frame.voiced) {
-      this.voicedStreak += 1;
-      if (this.voicedStreak >= 4) {
-        this.voicedStreak = 0;
+    const aboveFloor = frame.rms > this.noiseFloor * 1.35;
+    const isSpeech = frame.humanVoice && aboveFloor;
+
+    if (isSpeech) {
+      this.voiceStreak += 1;
+      // ~1.2s barqaror nutq (200ms freym, 6 streak)
+      if (this.voiceStreak >= 6) {
+        this.voiceStreak = 0;
         return 'WHISPER_OR_CONVERSATION_SUSPECTED';
       }
     } else {
-      this.voicedStreak = Math.max(0, this.voicedStreak - 1);
+      this.voiceStreak = Math.max(0, this.voiceStreak - 1);
     }
     return null;
   }

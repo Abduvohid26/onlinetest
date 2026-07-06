@@ -22,10 +22,40 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string }> = {
-  uz: { answered: 'Javob berilgan', flagged: 'Belgilangan', empty: 'Bo‘sh' },
-  ru: { answered: 'Отвечено', flagged: 'Отмечено', empty: 'Пусто' },
-  en: { answered: 'Answered', flagged: 'Flagged', empty: 'Empty' },
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string }> = {
+  uz: {
+    answered: 'Javob berilgan',
+    flagged: 'Belgilangan',
+    empty: 'Bo‘sh',
+    faceOk: 'Yuz aniq',
+    faceWaiting: 'Kamera tayyor...',
+    faceNoFace: "Yuz ko'rinmayapti",
+    faceMulti: 'Bir nechta yuz!',
+    faceTooFar: "Yaqinroq o'ting",
+    faceTooClose: "Uzoqroq toring",
+  },
+  ru: {
+    answered: 'Отвечено',
+    flagged: 'Отмечено',
+    empty: 'Пусто',
+    faceOk: 'Лицо видно',
+    faceWaiting: 'Камера...',
+    faceNoFace: 'Лицо не видно',
+    faceMulti: 'Несколько лиц!',
+    faceTooFar: 'Ближе к камере',
+    faceTooClose: 'Дальше от камеры',
+  },
+  en: {
+    answered: 'Answered',
+    flagged: 'Flagged',
+    empty: 'Empty',
+    faceOk: 'Face OK',
+    faceWaiting: 'Camera...',
+    faceNoFace: 'No face',
+    faceMulti: 'Multiple faces!',
+    faceTooFar: 'Move closer',
+    faceTooClose: 'Move back',
+  },
 };
 
 // Identity check: har 3 soniyada (OpenCV SFace lokal, tez ~100ms; throttle 60/min)
@@ -150,6 +180,63 @@ interface ViolationWarning {
   isFinalWarning: boolean;
 }
 
+interface WarningHistoryItem {
+  number: number;
+  reason: string;
+}
+
+const MAX_OFFICIAL_WARNINGS = 3;
+
+function WarningStepRow({
+  warningCount,
+  banReached,
+  isFinalPending,
+  t,
+}: {
+  warningCount: number;
+  banReached: boolean;
+  isFinalPending?: boolean;
+  t: (typeof translations)['uz'];
+}) {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <p className="text-[10px] sm:text-xs text-gray-500 uppercase tracking-wide font-medium">
+        {t.violationProgressTitle}
+      </p>
+      <div className="flex justify-center items-center gap-1.5 sm:gap-2">
+        {[1, 2, 3].map((n) => {
+          const done = warningCount >= n;
+          return (
+            <div
+              key={n}
+              className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 transition-all ${
+                done
+                  ? banReached
+                    ? 'bg-red-600 text-white border-red-700'
+                    : 'bg-orange-100 text-orange-700 border-orange-400'
+                  : 'bg-gray-100 text-gray-400 border-gray-200'
+              }`}
+            >
+              {done ? (banReached ? '✓' : '!') : n}
+            </div>
+          );
+        })}
+        <div
+          className={`min-w-[2.75rem] h-9 sm:h-10 px-2 rounded-full flex items-center justify-center text-[10px] sm:text-xs font-extrabold border-2 transition-all ${
+            banReached
+              ? 'bg-red-700 text-white border-red-800 shadow-md'
+              : isFinalPending
+                ? 'bg-red-600 text-white border-red-700 shadow-md'
+                : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
+          }`}
+        >
+          {t.violationStepBan}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamId, token, user, lang, onFinish }: ExamRoomProps) {
   const t = translations[lang];
   const [exam, setExam] = useState(initialExam);
@@ -204,6 +291,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [unblockReady, setUnblockReady] = useState(false);
   /** BAN paytida serverdagi jami violation yozuvlari (3 ta "!" o'rniga) */
   const [banViolationsCount, setBanViolationsCount] = useState<number | null>(null);
+  const [banLastReason, setBanLastReason] = useState<string | null>(null);
+  const [warningHistory, setWarningHistory] = useState<WarningHistoryItem[]>([]);
   // Ogohlantirish modal
   const [violationWarning, setViolationWarning] = useState<ViolationWarning | null>(null);
   // Modal ochiqligida yangi violationlar serverga yuborilmasin
@@ -956,10 +1045,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     };
   }, [banned, exam.id, token, user.id, proctorRetryNonce, requestExamFullscreen]);
 
-  // --- Real-time ovoz faolligi (VAD) — RMS + zero-crossing, ~200ms da bir freym.
-  //     (Avval 1000ms edi — bunda har o'qishda faqat ~5.8ms audio "suratga olinardi",
-  //     ya'ni gapirishning katta qismi ikkita so'rov oralig'ida butunlay ko'rinmay qolardi.
-  //     200ms + kattaroq fftSize tezroq va ishonchliroq ushlaydi.)
+  // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
 
   useEffect(() => {
@@ -1055,7 +1141,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (data.banned) {
         if (type === 'IDENTITY_SUBSTITUTION') setIdentityTerminated(true);
         setViolationWarning(null);
-        setStrikeLevel(3);
+        setStrikeLevel(MAX_OFFICIAL_WARNINGS);
+        setBanLastReason(data.violationReason || type);
         if (typeof data.violationsCount === 'number') {
           setBanViolationsCount(data.violationsCount);
         } else {
@@ -1072,11 +1159,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         typeof data.warningNumber === 'number' && data.warningNumber > 0
           ? data.warningNumber
           : Math.max(1, official);
+      const reasonText = data.violationReason || type;
+      setWarningHistory((prev) => {
+        if (prev.some((w) => w.number === shownNumber)) return prev;
+        return [...prev, { number: shownNumber, reason: reasonText }].sort((a, b) => a.number - b.number);
+      });
       setStrikeLevel(official > 0 ? official : shownNumber);
       fullscreenSuppressRef.current = true;
       warningModalShowingRef.current = true;
       setViolationWarning({
-        reason: data.violationReason || type,
+        reason: reasonText,
         warningNumber: shownNumber,
         isFinalWarning: data.isFinalWarning === true,
       });
@@ -1315,10 +1407,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Student-Lang': lang,
+          'X-Student-Lang': langRef.current,
           ...examAuthHeaders(token),
         },
-        body: JSON.stringify({ pin: exam.preExamPin || '', student_lang: lang }),
+        body: JSON.stringify({ pin: exam.preExamPin || '', student_lang: langRef.current }),
       });
       const data = await readJsonSafe<{
         error?: string;
@@ -1448,13 +1540,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   if (violationWarning && !banned && !hardBlocked) {
     const isFinal = violationWarning.isFinalWarning;
     const warnNum = violationWarning.warningNumber;
-    // MAX_WARNINGS_BEFORE_BAN = 3; 3-chida ban, shuning uchun circles 3 ta
-    const MAX_W = 3;
-    const remaining = Math.max(0, MAX_W - warnNum);
+    const remaining = Math.max(0, MAX_OFFICIAL_WARNINGS - warnNum);
 
     const warnTitle = t.violationWarningTitle.replace('{n}', String(warnNum));
     const warnContinue = t.violationContinueExam;
     const reasonLabel = t.violationReasonLabel;
+    const bannerText = isFinal
+      ? t.violationFinalBanner
+      : t.violationRemainingBanner.replace('{n}', String(remaining));
 
     return <>{createPortal(
       <div
@@ -1483,15 +1576,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               {warnTitle}
             </h2>
 
-            {/* Countdown banner */}
-            <div className={`rounded-lg px-3 py-2 mb-4 text-center text-sm font-semibold ${
+            <div className={`rounded-lg px-3 py-2.5 mb-4 text-center text-sm font-semibold leading-snug ${
               isFinal
                 ? 'bg-red-600 text-white'
-                : 'bg-orange-100 text-orange-800 border border-orange-300'
+                : 'bg-orange-100 text-orange-900 border border-orange-300'
             }`}>
-              {isFinal
-                ? '⛔ Keyingi qoidabuzarlikda BLOKLANSIZ!'
-                : `⚠ Yana ${remaining} ta ogohlantirish qoldi — bloklansiz!`}
+              {isFinal ? `⛔ ${bannerText}` : `⚠ ${bannerText}`}
             </div>
 
             <div className="bg-white rounded-xl sm:rounded-lg px-4 py-3 sm:px-5 sm:py-4 mb-4 text-center border border-gray-200">
@@ -1499,22 +1589,20 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               <p className="text-sm sm:text-base font-semibold text-gray-800 break-words">{violationWarning.reason}</p>
             </div>
 
-            <div className="flex justify-center gap-2 sm:gap-3 mb-4">
-              {[1, 2, 3].map((n) => (
-                <div
-                  key={n}
-                  className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold border-2 transition-all ${
-                    n <= warnNum
-                      ? isFinal
-                        ? 'bg-red-100 text-red-700 border-red-400'
-                        : 'bg-orange-100 text-orange-700 border-orange-400'
-                      : 'bg-gray-100 text-gray-400 border-gray-200'
-                  }`}
-                >
-                  {n <= warnNum ? '!' : n}
-                </div>
-              ))}
+            <div className="mb-4">
+              <WarningStepRow
+                warningCount={warnNum}
+                banReached={false}
+                isFinalPending={isFinal}
+                t={t}
+              />
             </div>
+
+            {isFinal ? (
+              <p className="text-[11px] sm:text-xs text-red-800/90 text-center mb-4 font-medium leading-relaxed">
+                {t.violationFinalNotice}
+              </p>
+            ) : null}
 
             <p className="text-[11px] sm:text-xs text-gray-500 text-center mb-4 sm:mb-5 leading-relaxed">{t.violationFooterHonest}</p>
           </div>
@@ -1564,6 +1652,40 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           </div>
           <h2 id="ban-ended-title" className="text-2xl font-bold text-red-600 mb-3 tracking-tight">{banTitle}</h2>
           <p className="text-gray-700 mb-4 leading-relaxed text-sm">{banMsg}</p>
+
+          <div className="mb-5 rounded-xl border border-red-200 bg-white px-4 py-4 text-left space-y-4">
+            <p className="text-sm font-bold text-red-800">{t.banProgressTitle}</p>
+            <p className="text-[13px] text-gray-700 leading-relaxed">{t.banStepsExplainer}</p>
+            <WarningStepRow
+              warningCount={MAX_OFFICIAL_WARNINGS}
+              banReached
+              t={t}
+            />
+            {banLastReason ? (
+              <div className="rounded-lg border border-red-100 bg-red-50/80 px-3 py-2.5">
+                <p className="text-[10px] uppercase tracking-wide text-red-700/80 font-semibold mb-1">
+                  {t.banLastViolationLabel}
+                </p>
+                <p className="text-sm font-semibold text-gray-900 break-words">{banLastReason}</p>
+              </div>
+            ) : null}
+            {warningHistory.length > 0 ? (
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold mb-2">
+                  {t.banWarningHistoryLabel}
+                </p>
+                <ul className="space-y-1.5 text-[13px] text-gray-700">
+                  {warningHistory.map((w) => (
+                    <li key={w.number} className="flex gap-2">
+                      <span className="shrink-0 font-bold text-orange-700">{w.number}.</span>
+                      <span className="break-words">{w.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
+
           {banViolationsCount != null && (
             <p className="text-sm text-red-800/90 font-medium mb-5">
               {t.banRecordCountHint.replace('{n}', String(banViolationsCount))}
@@ -1675,12 +1797,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Yuz holati overlay konfiguratsiyasi ---
   const FACE_STATUS_CFG: Record<FaceStatusLive, { label: string; border: string; bg: string; text: string; icon: string }> = {
-    OK:             { label: 'Yuz aniq',          border: 'border-green-400',  bg: 'bg-green-500/90',  text: 'text-white', icon: '✓' },
-    WAITING:        { label: 'Kamera tayyor...',   border: 'border-gray-300',   bg: 'bg-gray-700/80',   text: 'text-white', icon: '⋯' },
-    NO_FACE:        { label: 'Yuz ko\'rinmayapti', border: 'border-red-500',    bg: 'bg-red-600/90',    text: 'text-white', icon: '⚠' },
-    MULTIPLE_FACES: { label: 'Bir nechta yuz!',   border: 'border-red-500',    bg: 'bg-red-600/90',    text: 'text-white', icon: '⚠' },
-    TOO_FAR:        { label: 'Yaqinroq o\'ting',   border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '↔' },
-    TOO_CLOSE:      { label: 'Uzoqroq toring',     border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '↔' },
+    OK:             { label: EXAM_L[lang].faceOk,       border: 'border-green-400',  bg: 'bg-green-500/90',  text: 'text-white', icon: '✓' },
+    WAITING:        { label: EXAM_L[lang].faceWaiting, border: 'border-gray-300',   bg: 'bg-gray-700/80',   text: 'text-white', icon: '⋯' },
+    NO_FACE:        { label: EXAM_L[lang].faceNoFace,  border: 'border-red-500',    bg: 'bg-red-600/90',    text: 'text-white', icon: '⚠' },
+    MULTIPLE_FACES: { label: EXAM_L[lang].faceMulti,   border: 'border-red-500',    bg: 'bg-red-600/90',    text: 'text-white', icon: '⚠' },
+    TOO_FAR:        { label: EXAM_L[lang].faceTooFar,  border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '↔' },
+    TOO_CLOSE:      { label: EXAM_L[lang].faceTooClose, border: 'border-amber-400', bg: 'bg-amber-500/90',  text: 'text-white', icon: '↔' },
     OFF_CENTER:     { label: 'Markazga o\'ting',   border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '⊕' },
     TURNED:         { label: 'Kameraga qarang',    border: 'border-orange-400', bg: 'bg-orange-500/90', text: 'text-white', icon: '↻' },
     GAZE_AWAY:      { label: 'Kameraga qarang',    border: 'border-orange-400', bg: 'bg-orange-500/90', text: 'text-white', icon: '👁' },

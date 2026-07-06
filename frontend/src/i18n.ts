@@ -326,7 +326,16 @@ export const translations = {
     violationWarningTitle: "{n}-ogohlantirish (3 tadan)",
     violationContinueExam: "Tushundim, davom etaman",
     violationFinalNotice:
-      "Bu oxirgi ogohlantirish (3/3). Keyingi qoidabuzarlik imtihonni tugatadi va akkauntingiz bloklanadi.",
+      "Bu 3/3 ogohlantirish. Keyingi qoidabuzarlikda imtihon to‘xtatiladi va BAN qo‘yiladi (boshqa ogohlantirish yo‘q).",
+    violationRemainingBanner: "Yana {n} ta ogohlantirish qoldi — hali BAN emas",
+    violationFinalBanner: "3 ta ogohlantirish berildi! Keyingi qoidabuzarlik = BAN",
+    violationStepBan: "BAN",
+    violationProgressTitle: "Ogohlantirish bosqichlari",
+    banProgressTitle: "Nima bo‘ldi?",
+    banStepsExplainer:
+      "1-chi, 2-chi va 3-chi qoidabuzarliklar uchun rasmiy ogohlantirish berildi. 4-chi qoidabuzarlikda imtihon to‘xtatildi.",
+    banLastViolationLabel: "Ban sababi (oxirgi qoidabuzarlik)",
+    banWarningHistoryLabel: "Oldingi ogohlantirishlar",
     violationReasonLabel: "Sabab",
     violationFooterHonest:
       "Qisqa vaqt oralig'ida bir nechta shubha bitta rasmiy ogohlantirish sifatida birlashtirilishi mumkin. Imtihonni halol davom ettiring.",
@@ -915,7 +924,16 @@ export const translations = {
     violationWarningTitle: "Предупреждение {n} из 3",
     violationContinueExam: "Понял, продолжить",
     violationFinalNotice:
-      "Это последнее предупреждение (3 из 3). Следующее нарушение завершит экзамен и заблокирует аккаунт.",
+      "Это предупреждение 3/3. Следующее нарушение — остановка экзамена и BAN (без новых предупреждений).",
+    violationRemainingBanner: "Осталось предупреждений: {n} — BAN ещё нет",
+    violationFinalBanner: "3 предупреждения! Следующее нарушение = BAN",
+    violationStepBan: "BAN",
+    violationProgressTitle: "Этапы предупреждений",
+    banProgressTitle: "Что произошло",
+    banStepsExplainer:
+      "За 1-е, 2-е и 3-е нарушения вы получили предупреждения. На 4-м нарушении экзамен остановлен.",
+    banLastViolationLabel: "Причина BAN (последнее нарушение)",
+    banWarningHistoryLabel: "Предыдущие предупреждения",
     violationReasonLabel: "Причина",
     violationFooterHonest:
       "Несколько подозрений за короткий интервал могут объединиться в одно официальное предупреждение. Продолжайте честно.",
@@ -1504,7 +1522,16 @@ export const translations = {
     violationWarningTitle: "Warning {n} of 3",
     violationContinueExam: "Understood, continue",
     violationFinalNotice:
-      "This is your final warning (3 of 3). Another violation will end the exam and block your account.",
+      "This is warning 3/3. The next violation stops the exam and applies a BAN (no further warnings).",
+    violationRemainingBanner: "{n} warning(s) left — not banned yet",
+    violationFinalBanner: "3 warnings given! Next violation = BAN",
+    violationStepBan: "BAN",
+    violationProgressTitle: "Warning steps",
+    banProgressTitle: "What happened",
+    banStepsExplainer:
+      "You received official warnings for violations 1, 2, and 3. On the 4th violation the exam was stopped.",
+    banLastViolationLabel: "Ban reason (last violation)",
+    banWarningHistoryLabel: "Previous warnings",
     violationReasonLabel: "Reason",
     violationFooterHonest:
       "Multiple suspicious events within a short window may merge into one official warning. Continue honestly.",

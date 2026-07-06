@@ -465,6 +465,7 @@ export function StudentDashboard({
                   const isOngoing = now >= startMs && now <= endMs;
                   const isUpcoming = now < startMs;
                   const untilStart = msUntil(e.start_time, now);
+                  const showLive = isOngoing || e.in_progress;
 
                   return (
                     <motion.div
@@ -473,12 +474,12 @@ export function StudentDashboard({
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.04 }}
                       className={`group flex flex-col rounded-xl border bg-white overflow-hidden transition-all ${
-                        isOngoing ? 'border-gray-200 hover:border-indigo-300 hover:shadow-md' : 'border-gray-200 hover:border-gray-300'
+                        showLive ? 'border-gray-200 hover:border-indigo-300 hover:shadow-md' : 'border-gray-200 hover:border-gray-300'
                       }`}
                     >
                       {/* Status strip */}
                       <div className="px-5 pt-4 flex items-center justify-between gap-2">
-                        {isOngoing ? (
+                        {showLive ? (
                           <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
                             <span className="relative flex h-2 w-2">
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />

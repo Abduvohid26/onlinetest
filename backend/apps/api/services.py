@@ -62,6 +62,59 @@ def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) ->
     }
 
 
+def finalize_student_exam_session(
+    se,
+    exam,
+    answers: dict,
+    flagged: list | None = None,
+    *,
+    completed_at=None,
+) -> tuple[int, int]:
+    """Javoblar bilan sessiyani Completed qiladi (submit va avto-tugatish uchun)."""
+    from apps.api.view_utils import validate_exam_answers
+
+    if se.session_questions_json:
+        questions = safe_json_loads(se.session_questions_json, [])
+    else:
+        questions = safe_json_loads(exam.questions_json, [])
+    raw_answers = answers if isinstance(answers, dict) else {}
+    try:
+        norm = validate_exam_answers(questions, raw_answers)
+    except ValueError:
+        norm = {}
+    score = sum(1 for q in questions if norm.get(str(q["id"])) == q.get("correctAnswer"))
+    flagged_json = json.dumps(flagged) if flagged else "[]"
+    done_at = completed_at or dj_tz.now()
+    result_public_id = next_result_public_id()
+    verify_secret = secrets.token_hex(32)
+    ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
+    se.status = "Completed"
+    se.score = score
+    se.answers_json = json.dumps(norm)
+    se.flagged_questions_json = flagged_json
+    se.completed_at = done_at
+    se.result_public_id = result_public_id
+    se.result_verify_secret = verify_secret
+    se.ai_summary_json = ai_summary_json
+    se.draft_answers_json = "{}"
+    se.draft_flagged_json = "[]"
+    se.draft_updated_at = None
+    se.save()
+    return score, len(questions)
+
+
+def auto_finalize_student_exam_if_expired(se, exam, student_id: str) -> bool:
+    """Vaqt tugagan In Progress sessiyani draft javoblar bilan yakunlaydi."""
+    from apps.api.exam_time import is_student_exam_expired
+
+    if not is_student_exam_expired(exam, se, student_id):
+        return False
+    answers = safe_json_loads(se.draft_answers_json, {})
+    flagged = safe_json_loads(se.draft_flagged_json, [])
+    finalize_student_exam_session(se, exam, answers, flagged)
+    return True
+
+
 def next_result_public_id() -> str:
     year = datetime.now(timezone.utc).year
     with transaction.atomic():
@@ -394,6 +447,138 @@ def apply_exam_language_to_questions(full: list[dict], exam_lang: str, student_l
     if (exam_lang or "uz").lower() != "auto":
         return full
     return [localize_exam_question(q, student_lang) for q in full]
+
+
+def _question_has_lang_field(q: dict, lang: str) -> bool:
+    if lang == "en":
+        return bool((q.get("text_en") or q.get("text") or "").strip())
+    if lang == "ru":
+        return bool((q.get("text_ru") or "").strip())
+    return bool((q.get("text_uz") or q.get("text") or "").strip())
+
+
+def fill_missing_exam_translations(questions: list[dict]) -> list[dict]:
+    """Auto imtihon: text_uz / text_ru / text_en yetishmasa AI bilan to'ldiradi."""
+    if not questions:
+        return []
+    from apps.api.gemini_tools import detect_question_language, translate_questions_batch
+
+    need_indices: list[int] = []
+    payload: list[dict] = []
+    for i, q in enumerate(questions):
+        if all(_question_has_lang_field(q, lg) for lg in ("uz", "ru", "en")):
+            continue
+        need_indices.append(i)
+        src_text = (
+            (q.get("text_uz") or "").strip()
+            or (q.get("text_ru") or "").strip()
+            or (q.get("text_en") or "").strip()
+            or (q.get("text") or "").strip()
+        )
+        if _question_has_lang_field(q, "uz") and isinstance(q.get("options_uz"), list):
+            src_opts = list(q.get("options_uz") or [])
+            src_ca = str(q.get("correct_answer_uz") or q.get("correctAnswer") or "")
+            src = "uz"
+        elif _question_has_lang_field(q, "ru") and isinstance(q.get("options_ru"), list):
+            src_opts = list(q.get("options_ru") or [])
+            src_ca = str(q.get("correct_answer_ru") or q.get("correctAnswer") or "")
+            src = "ru"
+        elif isinstance(q.get("options_en"), list) and (q.get("text_en") or q.get("text")):
+            src_opts = list(q.get("options_en") or [])
+            src_ca = str(q.get("correct_answer_en") or q.get("correctAnswer") or "")
+            src = "en"
+        else:
+            src_opts = list(q.get("options") or [])
+            src_ca = str(q.get("correctAnswer") or "")
+            src = detect_question_language(src_text)
+        payload.append(
+            {
+                "text": src_text,
+                "options": src_opts,
+                "correctAnswer": src_ca,
+                "_src": src,
+            }
+        )
+
+    if not payload:
+        return questions
+
+    by_src: dict[str, list[tuple[int, dict]]] = {}
+    for j, idx in enumerate(need_indices):
+        item = payload[j]
+        src = str(item.pop("_src", "uz"))
+        by_src.setdefault(src, []).append((idx, item))
+
+    out = [dict(q) for q in questions]
+    for src, batch in by_src.items():
+        try:
+            translations = translate_questions_batch([b[1] for b in batch], src)
+        except Exception:
+            continue
+        for k, (idx, base) in enumerate(batch):
+            tr = translations[k] if k < len(translations) else {}
+            merged = exam_question_with_translations(
+                {
+                    "id": out[idx].get("id"),
+                    "text": base["text"],
+                    "options": base["options"],
+                    "correctAnswer": base["correctAnswer"],
+                },
+                tr,
+                src,
+            )
+            out[idx] = {**out[idx], **merged}
+    return out
+
+
+def bank_row_to_exam_dict_multilingual(row) -> dict:
+    """Test bazasi savolini 3 tilda saqlash (auto imtihon sessiyasi uchun)."""
+    opts_en = safe_json_loads(row.options_json, [])
+    opts_uz = safe_json_loads(getattr(row, "options_uz_json", None) or "[]", [])
+    opts_ru = safe_json_loads(getattr(row, "options_ru_json", None) or "[]", [])
+    if not any(str(x).strip() for x in opts_uz):
+        opts_uz = list(opts_en)
+    if not any(str(x).strip() for x in opts_ru):
+        opts_ru = list(opts_en)
+
+    text_en = (row.text or "").strip()
+    text_uz = (getattr(row, "text_uz", None) or "").strip() or text_en
+    text_ru = (getattr(row, "text_ru", None) or "").strip() or text_en
+    ca_en = str(row.correct_answer or "").strip()
+    ca_uz = (getattr(row, "correct_answer_uz", None) or "").strip() or ca_en
+    ca_ru = (getattr(row, "correct_answer_ru", None) or "").strip() or ca_en
+
+    opts_en_c = _coerce_exam_options(list(opts_en), list(opts_en))
+    opts_uz_c = _coerce_exam_options(list(opts_uz), list(opts_en))
+    opts_ru_c = _coerce_exam_options(list(opts_ru), list(opts_en))
+
+    def _align_ca(ca: str, opts: list[str]) -> str:
+        ca = str(ca or "").strip()
+        if ca in opts:
+            return ca
+        for o in opts:
+            if ca and (ca in o or o.endswith(ca)):
+                return o
+        return opts[0] if opts else ca
+
+    ca_en = _align_ca(ca_en, opts_en_c)
+    ca_uz = _align_ca(ca_uz, opts_uz_c)
+    ca_ru = _align_ca(ca_ru, opts_ru_c)
+
+    return {
+        "text": text_uz,
+        "text_en": text_en,
+        "text_uz": text_uz,
+        "text_ru": text_ru,
+        "options": opts_uz_c,
+        "options_en": opts_en_c,
+        "options_uz": opts_uz_c,
+        "options_ru": opts_ru_c,
+        "correctAnswer": ca_uz,
+        "correct_answer_en": ca_en,
+        "correct_answer_uz": ca_uz,
+        "correct_answer_ru": ca_ru,
+    }
 
 
 def bank_row_to_exam_dict(row, exam_lang: str) -> dict:
