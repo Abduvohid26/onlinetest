@@ -6,22 +6,103 @@ import { ExamResultSummary, type ExamResultPayload } from '../components/ExamRes
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { formatCountdown, formatExamDateTime, msUntil } from '../lib/datetimeLocal';
-import { AdminBtn, AdminAlert } from './admin/ui';
+import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 
 const REFRESH_INTERVAL_MS = 30_000;
+const REFRESH_BANNED_WAIT_MS = 8_000;
+
+/* Sahifa ichidagi qo'shimcha matnlar (uz/ru/en) — katta i18n fayliga tegmasdan. */
+const LOCAL: Record<Language, Record<string, string>> = {
+  uz: {
+    greeting: 'Xush kelibsiz',
+    subtitleActive: 'ta imtihon topshirishga tayyor',
+    subtitleNone: 'Hozircha ochiq imtihon yo‘q',
+    statActive: 'Faol imtihonlar',
+    statCompleted: 'Yakunlangan',
+    statAvg: 'O‘rtacha natija',
+    pillLive: 'Faol',
+    scoreLabel: 'Natija',
+    pendingEval: 'Baholanmoqda',
+    questionsWord: 'savol',
+  },
+  ru: {
+    greeting: 'Добро пожаловать',
+    subtitleActive: 'экзамен(ов) готов(ы) к сдаче',
+    subtitleNone: 'Пока нет открытых экзаменов',
+    statActive: 'Активные экзамены',
+    statCompleted: 'Завершено',
+    statAvg: 'Средний балл',
+    pillLive: 'Идёт',
+    scoreLabel: 'Результат',
+    pendingEval: 'На проверке',
+    questionsWord: 'вопр.',
+  },
+  en: {
+    greeting: 'Welcome',
+    subtitleActive: 'exam(s) ready to take',
+    subtitleNone: 'No open exams right now',
+    statActive: 'Active exams',
+    statCompleted: 'Completed',
+    statAvg: 'Average score',
+    pillLive: 'Live',
+    scoreLabel: 'Score',
+    pendingEval: 'Under review',
+    questionsWord: 'questions',
+  },
+};
+
+/* Ball rangi — 50%+ yashil, 40–49 amber, past qizil. */
+function scoreTone(pct: number): { text: string; bar: string } {
+  if (pct >= 50) return { text: 'text-emerald-600', bar: 'bg-emerald-500' };
+  if (pct >= 40) return { text: 'text-amber-600', bar: 'bg-amber-500' };
+  return { text: 'text-red-600', bar: 'bg-red-500' };
+}
+
+/* Kichik statistika plitkasi. */
+function StatTile({
+  label,
+  value,
+  accent,
+  icon,
+}: {
+  label: string;
+  value: React.ReactNode;
+  accent?: boolean;
+  icon: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white px-3 sm:px-4 py-3 sm:py-3.5 flex items-center gap-2.5 sm:gap-3">
+      <div
+        className={`hidden sm:flex w-9 h-9 rounded-lg items-center justify-center shrink-0 ${
+          accent ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-100 text-gray-500'
+        }`}
+      >
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <div className="text-[18px] sm:text-[19px] font-bold text-gray-900 leading-none tabular-nums">{value}</div>
+        <div className="text-[11px] sm:text-[11.5px] text-gray-500 mt-1 leading-tight">{label}</div>
+      </div>
+    </div>
+  );
+}
 
 export function StudentDashboard({
   token,
   user,
   onStartExam,
+  onResumeExam,
   lang,
 }: {
   token: string;
-  user?: { group_id?: number | null; group_name?: string | null };
+  user?: { name?: string | null; group_id?: number | null; group_name?: string | null };
   onStartExam: (exam: any, studentExamId: number) => void;
+  onResumeExam: (exam: any, pin?: string) => void | Promise<void>;
   lang: Language;
 }) {
   const [exams, setExams] = useState<any[]>([]);
+  const [resumePins, setResumePins] = useState<Record<number, string>>({});
+  const [resumeBusyId, setResumeBusyId] = useState<number | null>(null);
   const [results, setResults] = useState<any[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -34,6 +115,7 @@ export function StudentDashboard({
   const [clockSkewMs, setClockSkewMs] = useState(0);
   const [tick, setTick] = useState(0);
   const t = translations[lang];
+  const L = LOCAL[lang];
   const cancelledRef = useRef(false);
 
   const nowMs = () => Date.now() + clockSkewMs;
@@ -96,9 +178,16 @@ export function StudentDashboard({
     setLoading(true);
     setError('');
     void fetchData();
-    const id = window.setInterval(() => void fetchData(), REFRESH_INTERVAL_MS);
-    return () => { cancelledRef.current = true; clearInterval(id); };
+    return () => { cancelledRef.current = true; };
   }, [fetchData]);
+
+  const hasBannedResult = results.some((r: any) => r.status === 'Banned');
+  const refreshMs = hasBannedResult ? REFRESH_BANNED_WAIT_MS : REFRESH_INTERVAL_MS;
+
+  useEffect(() => {
+    const id = window.setInterval(() => void fetchData(), refreshMs);
+    return () => clearInterval(id);
+  }, [fetchData, refreshMs]);
 
   const handleManualReload = () => {
     if (refreshing) return;
@@ -159,30 +248,66 @@ export function StudentDashboard({
   if (isBanned) {
     return (
       <div className="px-3 sm:px-6 py-8 max-w-lg mx-auto">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
-          <div className="w-14 h-14 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div className="rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
+          <div className="w-16 h-16 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-5">
+            <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
             </svg>
           </div>
-          <h2 className="text-[17px] font-bold text-red-700 mb-1">{t.studentAccountBannedTitle}</h2>
-          <p className="text-[14px] text-red-600/80">{t.studentAccountBannedBody}</p>
+          <h2 className="text-[18px] font-bold text-gray-900 mb-1.5">{t.studentAccountBannedTitle}</h2>
+          <p className="text-[14px] text-gray-500 leading-relaxed">{t.studentAccountBannedBody}</p>
         </div>
       </div>
     );
   }
 
+  void tick;
+  const now = nowMs();
+
+  // Hali tugamagan imtihonlar yoki yarim qolgan sessiya (in_progress).
+  const visibleExams = exams.filter(
+    (e: any) => now <= new Date(e.end_time).getTime() || e.in_progress,
+  );
+  const ongoingCount = visibleExams.filter(
+    (e: any) => now >= new Date(e.start_time).getTime() && now <= new Date(e.end_time).getTime(),
+  ).length;
+
+  const completedResults = results.filter((r: any) => r.status === 'Completed');
+  const gradedPcts = completedResults
+    .map((r: any) => r.percentage)
+    .filter((p: any) => typeof p === 'number');
+  const avgPct = gradedPcts.length
+    ? Math.round(gradedPcts.reduce((a: number, b: number) => a + b, 0) / gradedPcts.length)
+    : null;
+
+  const firstName = (user?.name || '').toString().trim().split(/\s+/)[0] || '';
+
+  const Tab = ({ id, label, count }: { id: 'available' | 'results'; label: string; count: number }) => {
+    const active = activeTab === id;
+    return (
+      <button
+        onClick={() => setActiveTab(id)}
+        className={`h-9 px-3 sm:px-4 rounded-lg text-[12.5px] sm:text-[13px] font-semibold transition-colors inline-flex items-center justify-center gap-2 whitespace-nowrap flex-1 sm:flex-none ${
+          active ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'
+        }`}
+      >
+        {label}
+        <span
+          className={`text-[11px] font-bold tabular-nums px-1.5 h-[18px] min-w-[18px] inline-flex items-center justify-center rounded-full ${
+            active ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-200/70 text-gray-500'
+          }`}
+        >
+          {count}
+        </span>
+      </button>
+    );
+  };
+
   return (
-    <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-5xl mx-auto relative">
-      {/* Result detail overlay — createPortal orqali document.body ga chiqariladi.
-          Sabab: App.tsx dagi animatsiyalangan motion.div (framer-motion "filter"/"transform"
-          qo'yadi) "fixed" pozitsiyani haqiqiy ekran o'rniga o'sha konteynerga nisbatan
-          hisoblab qo'yardi — overlay sahifa boshidan emas, joriy scroll holatidan
-          boshlanib qolardi va yopish tugmasi noto'g'ri joyda ko'rinardi. */}
+    <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-6xl mx-auto relative">
+      {/* Result detail overlay — createPortal orqali document.body ga chiqariladi. */}
       {detailPayload && createPortal(
         <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto overscroll-y-contain bg-slate-900/50 backdrop-blur-sm px-3 py-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
-          {/* Har doim ko'rinadigan yopish tugmasi — ichkarida scroll qancha uzun bo'lishidan
-              qat'iy nazar, "qaytish" imkoni doim qo'lda bo'lsin. */}
           <button
             type="button"
             onClick={() => setDetailPayload(null)}
@@ -203,46 +328,79 @@ export function StudentDashboard({
         document.body,
       )}
 
-      {/* ── Header ── */}
-      <div className="flex flex-wrap items-center gap-3 mb-5">
-        {/* Tabs */}
-        <div className="flex items-center h-9 rounded-lg bg-gray-100 p-0.5 border border-gray-200">
-          <button
-            onClick={() => setActiveTab('available')}
-            className={`h-full px-4 rounded-md text-[13px] font-semibold transition-colors ${activeTab === 'available' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            {t.tabAvailableExams}
-          </button>
-          <button
-            onClick={() => setActiveTab('results')}
-            className={`h-full px-4 rounded-md text-[13px] font-semibold transition-colors ${activeTab === 'results' ? 'bg-white text-gray-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}`}
-          >
-            {t.tabMyResults}
-          </button>
+      {/* ── Page header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
+        <div className="min-w-0">
+          <h1 className="text-[22px] sm:text-[26px] font-bold tracking-tight text-gray-900 leading-tight">
+            {L.greeting}{firstName ? `, ${firstName}` : ''}
+          </h1>
+          <p className="text-[13.5px] text-gray-500 mt-1">
+            {visibleExams.length > 0
+              ? <>
+                  <span className="font-semibold text-gray-700">{visibleExams.length}</span> {L.subtitleActive}
+                </>
+              : L.subtitleNone}
+          </p>
         </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="hidden sm:inline-flex items-center gap-1.5 h-9 px-3 rounded-lg border border-gray-200 bg-white text-[12px] text-gray-500 tabular-nums">
+            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {formatExamDateTime(new Date(now).toISOString(), lang)}
+          </div>
+          <AdminBtn
+            variant="ghost"
+            size="md"
+            loading={refreshing}
+            onClick={handleManualReload}
+            icon={
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            }
+          >
+            <span className="hidden sm:inline">{t.reload ?? 'Yangilash'}</span>
+          </AdminBtn>
+        </div>
+      </div>
 
-        {/* Spacer */}
-        <div className="flex-1" />
-
-        {/* Current time */}
-        <p className="text-[12px] text-gray-400 tabular-nums hidden sm:block">
-          {t.examCurrentTime}: {formatExamDateTime(new Date(nowMs()).toISOString(), lang)}
-        </p>
-
-        {/* Reload */}
-        <AdminBtn
-          variant="ghost"
-          size="sm"
-          loading={refreshing}
-          onClick={handleManualReload}
+      {/* ── Stat tiles ── */}
+      <div className="grid grid-cols-3 gap-2.5 sm:gap-3 mb-5">
+        <StatTile
+          label={L.statActive}
+          value={visibleExams.length}
+          accent
           icon={
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
             </svg>
           }
-        >
-          <span className="hidden sm:inline">{t.reload ?? 'Yangilash'}</span>
-        </AdminBtn>
+        />
+        <StatTile
+          label={L.statCompleted}
+          value={completedResults.length}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          }
+        />
+        <StatTile
+          label={L.statAvg}
+          value={avgPct != null ? `${avgPct}%` : '—'}
+          icon={
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" />
+            </svg>
+          }
+        />
+      </div>
+
+      {/* ── Tabs ── */}
+      <div className="flex items-center gap-1 h-11 rounded-xl bg-gray-100 p-1 border border-gray-200 w-full sm:w-fit mb-5">
+        <Tab id="available" label={t.tabAvailableExams} count={visibleExams.length} />
+        <Tab id="results" label={t.tabMyResults} count={results.length} />
       </div>
 
       {/* Error */}
@@ -256,13 +414,13 @@ export function StudentDashboard({
 
       {/* Loading skeleton */}
       {loading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {[1, 2, 3].map((i) => (
-            <div key={i} className="rounded-lg border border-gray-200 bg-white p-5 space-y-3 animate-pulse">
+            <div key={i} className="rounded-xl border border-gray-200 bg-white p-5 space-y-3 animate-pulse">
               <div className="h-4 bg-gray-100 rounded w-3/4" />
               <div className="h-3 bg-gray-100 rounded w-1/2" />
               <div className="h-3 bg-gray-100 rounded w-2/3" />
-              <div className="h-9 bg-gray-100 rounded mt-4" />
+              <div className="h-10 bg-gray-100 rounded-lg mt-4" />
             </div>
           ))}
         </div>
@@ -278,147 +436,166 @@ export function StudentDashboard({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2 }}
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
             >
-              {(() => {
-                void tick;
-                const now = nowMs();
-                // Talaba ro'yxatida faqat hali TUGAMAGAN imtihonlar ko'rinadi — "Tugagan"
-                // kartalar olib tashlanadi, lekin hali boshlanmagan (istalgan vaqt masofasidagi)
-                // imtihonlar ham countdown bilan ko'rinishda qoladi.
-                const visibleExams = exams.filter((e: any) => {
+              {exams.length === 0 ? (
+                <EmptyState
+                  icon={
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                  }
+                  title={t.emptyStudentExams}
+                  hint={!user?.group_id ? t.studentNoGroupHint : t.studentNoExamsForGroupHint.replace('{group}', user.group_name || String(user.group_id))}
+                />
+              ) : visibleExams.length === 0 ? (
+                <EmptyState
+                  icon={
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  }
+                  title={t.studentNoOpenExamsTitle}
+                  hint={t.studentNoOpenExamsHint}
+                />
+              ) : (
+                visibleExams.map((e: any, i) => {
+                  const startMs = new Date(e.start_time).getTime();
                   const endMs = new Date(e.end_time).getTime();
-                  return now <= endMs;
-                });
+                  const isOngoing = now >= startMs && now <= endMs;
+                  const isUpcoming = now < startMs;
+                  const untilStart = msUntil(e.start_time, now);
 
-                if (exams.length === 0) {
                   return (
-                    <div className="col-span-full">
-                      <div className="rounded-lg border border-gray-200 bg-white py-14 px-6 text-center">
-                        <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3 text-gray-400">
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-                          </svg>
-                        </div>
-                        <p className="text-[14px] font-medium text-gray-600 mb-1">{t.emptyStudentExams}</p>
-                        <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mt-3 max-w-md mx-auto">
-                          {!user?.group_id
-                            ? t.studentNoGroupHint
-                            : t.studentNoExamsForGroupHint.replace('{group}', user.group_name || String(user.group_id))}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                if (visibleExams.length === 0) {
-                  return (
-                    <div className="col-span-full">
-                      <div className="rounded-lg border border-gray-200 bg-white py-14 px-6 text-center">
-                        <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3 text-gray-400">
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </div>
-                        <p className="text-[14px] font-medium text-gray-600 mb-1">{t.studentNoOpenExamsTitle}</p>
-                        <p className="text-[13px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-4 py-3 mt-3 max-w-md mx-auto">
-                          {t.studentNoOpenExamsHint}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                }
-
-                return visibleExams.map((e: any, i) => {
-                const startMs = new Date(e.start_time).getTime();
-                const endMs = new Date(e.end_time).getTime();
-                const isOngoing = now >= startMs && now <= endMs;
-                const isUpcoming = now < startMs;
-                const untilStart = msUntil(e.start_time, now);
-
-                return (
-                  <motion.div
-                    key={e.id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: i * 0.04 }}
-                    className="rounded-lg border border-gray-200 bg-white overflow-hidden transition-colors hover:border-gray-300"
-                  >
-                    <div className="p-4 sm:p-5">
-                      {/* Title row */}
-                      <div className="flex items-start justify-between gap-2 mb-4">
-                        <h3 className="text-[14.5px] font-semibold text-gray-900 leading-snug min-w-0">{e.title}</h3>
+                    <motion.div
+                      key={e.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.04 }}
+                      className={`group flex flex-col rounded-xl border bg-white overflow-hidden transition-all ${
+                        isOngoing ? 'border-gray-200 hover:border-indigo-300 hover:shadow-md' : 'border-gray-200 hover:border-gray-300'
+                      }`}
+                    >
+                      {/* Status strip */}
+                      <div className="px-5 pt-4 flex items-center justify-between gap-2">
+                        {isOngoing ? (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                            </span>
+                            {L.pillLive}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 px-2 py-1 rounded-md">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            {t.examStateUpcoming}
+                          </span>
+                        )}
                         <span className="shrink-0 text-[10px] font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md uppercase tracking-wide">
                           {e.language}
                         </span>
                       </div>
 
-                      {/* Info rows */}
-                      <dl className="space-y-2 text-[13px]">
-                        <div className="flex items-center justify-between gap-2">
-                          <dt className="text-gray-500">{t.startTime}</dt>
-                          <dd className="font-medium text-gray-900 tabular-nums text-right">{formatExamDateTime(e.start_time, lang)}</dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <dt className="text-gray-500">{t.endTime}</dt>
-                          <dd className="font-medium text-gray-900 tabular-nums text-right">{formatExamDateTime(e.end_time, lang)}</dd>
-                        </div>
-                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100">
-                          <dt className="text-gray-500">{t.duration}</dt>
-                          <dd>
+                      <div className="px-5 pt-2.5 pb-4 flex-1">
+                        <h3 className="text-[15.5px] font-semibold text-gray-900 leading-snug mb-3.5">{e.title}</h3>
+
+                        <dl className="space-y-2.5 text-[13px]">
+                          <MetaRow
+                            icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />}
+                            label={t.startTime}
+                            value={formatExamDateTime(e.start_time, lang)}
+                          />
+                          <MetaRow
+                            icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />}
+                            label={t.endTime}
+                            value={formatExamDateTime(e.end_time, lang)}
+                          />
+                          <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-gray-100">
+                            <span className="text-gray-500 inline-flex items-center gap-2">
+                              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                              {t.duration}
+                            </span>
                             <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-md text-[12px] tabular-nums">
                               {e.duration_minutes} {t.minutesShort}
                             </span>
-                          </dd>
-                        </div>
-                        {e.exam_mode === 'bank_mixed' && e.bank_question_count ? (
-                          <div className="flex items-center justify-between gap-2">
-                            <dt className="text-gray-500">{t.examBankQuestionCount}</dt>
-                            <dd className="font-medium text-gray-900 tabular-nums">{e.bank_question_count}</dd>
+                          </div>
+                          {e.exam_mode === 'bank_mixed' && e.bank_question_count ? (
+                            <MetaRow
+                              icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
+                              label={t.examBankQuestionCount}
+                              value={String(e.bank_question_count)}
+                            />
+                          ) : null}
+                        </dl>
+
+                        {(isUpcoming && untilStart > 0) || e.has_pin ? (
+                          <div className="mt-3.5 flex flex-wrap gap-1.5">
+                            {isUpcoming && untilStart > 0 && (
+                              <span className="text-[11.5px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1">
+                                {t.examStartsIn}: <strong className="tabular-nums">{formatCountdown(untilStart, lang)}</strong>
+                              </span>
+                            )}
+                            {e.has_pin && (
+                              <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-gray-600 bg-gray-50 border border-gray-200 rounded-md px-2 py-1">
+                                <svg className="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                                {t.examPinRequiredBadge}
+                              </span>
+                            )}
                           </div>
                         ) : null}
-                      </dl>
+                      </div>
 
-                      {/* Badges */}
-                      {((isUpcoming && untilStart > 0) || e.has_pin) && (
-                        <div className="mt-3 space-y-1.5">
-                          {isUpcoming && untilStart > 0 && (
-                            <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2.5 py-1.5">
-                              {t.examStartsIn}: <strong className="tabular-nums">{formatCountdown(untilStart, lang)}</strong>
-                            </div>
-                          )}
-                          {e.has_pin && (
-                            <div className="inline-flex items-center gap-1.5 text-[12px] font-medium text-amber-700">
-                              <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                              </svg>
-                              {t.examPinRequiredBadge}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Action button */}
-                    <div className="px-4 sm:px-5 pb-4 sm:pb-5 pt-0">
-                      {isOngoing ? (
-                        <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => onStartExam(e, 0)}>
-                          {t.takeExam}
-                        </AdminBtn>
-                      ) : isUpcoming ? (
-                        <AdminBtn variant="ghost" size="lg" className="w-full" disabled>
-                          {t.examStateUpcoming}{untilStart > 0 ? ` · ${formatCountdown(untilStart, lang)}` : ''}
-                        </AdminBtn>
-                      ) : (
-                        <AdminBtn variant="ghost" size="lg" className="w-full" disabled>
-                          {t.examStateEnded}
-                        </AdminBtn>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-                });
-              })()}
+                      <div className="px-5 pb-5">
+                        {e.in_progress ? (
+                          <div className="space-y-2.5">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md">
+                              {t.examInProgressBadge}
+                            </span>
+                            {e.has_pin && (
+                              <AdminInput
+                                type="password"
+                                value={resumePins[e.id] || ''}
+                                onChange={(ev) => setResumePins((prev) => ({ ...prev, [e.id]: ev.target.value }))}
+                                placeholder={t.enterPin}
+                                className="text-center tracking-widest h-10"
+                                autoComplete="off"
+                              />
+                            )}
+                            <AdminBtn
+                              variant="emerald"
+                              size="lg"
+                              className="w-full"
+                              loading={resumeBusyId === e.id}
+                              disabled={e.has_pin && !(resumePins[e.id] || '').trim()}
+                              onClick={async () => {
+                                setResumeBusyId(e.id);
+                                try {
+                                  await onResumeExam(e, resumePins[e.id] || '');
+                                } finally {
+                                  setResumeBusyId(null);
+                                }
+                              }}
+                            >
+                              {t.resumeExam}
+                            </AdminBtn>
+                          </div>
+                        ) : isOngoing ? (
+                          <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => onStartExam(e, 0)} iconRight={
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 5l7 7-7 7" /></svg>
+                          }>
+                            {t.takeExam}
+                          </AdminBtn>
+                        ) : (
+                          <AdminBtn variant="ghost" size="lg" className="w-full" disabled>
+                            {t.examStateUpcoming}{untilStart > 0 ? ` · ${formatCountdown(untilStart, lang)}` : ''}
+                          </AdminBtn>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
             </motion.div>
           ) : (
             <motion.div
@@ -427,101 +604,155 @@ export function StudentDashboard({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2 }}
-              className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
             >
               {results.length === 0 ? (
-                <div className="col-span-full">
-                  <div className="rounded-lg border border-gray-200 bg-white py-14 px-6 text-center">
-                    <div className="w-12 h-12 bg-gray-50 border border-gray-100 rounded-lg flex items-center justify-center mx-auto mb-3 text-gray-400">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                    </div>
-                    <p className="text-[14px] font-medium text-gray-600">{t.emptyStudentResults}</p>
-                  </div>
-                </div>
-              ) : results.map((r: any, i) => (
-                <motion.div
-                  key={r.id}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.04 }}
-                  className="rounded-lg border border-gray-200 bg-white overflow-hidden hover:border-gray-300 transition-colors flex flex-col"
-                >
-                  <div className="px-4 sm:px-5 py-3.5 border-b border-gray-100">
-                    <h3 className="text-[14.5px] font-semibold text-gray-900 leading-snug">{r.title}</h3>
-                  </div>
-                  <div className="px-4 sm:px-5 py-4 flex-1 space-y-3">
-                    {/* Score */}
-                    <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3.5 py-2.5">
-                      <span className="text-[13px] text-gray-500 font-medium">{t.resultScore}</span>
-                      <span className={`text-[22px] font-bold tabular-nums leading-none ${(r.percentage ?? 0) >= 50 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {r.percentage != null ? `${r.percentage}%` : r.score != null ? `${r.score}` : t.resultPending}
-                        {r.total_questions > 0 && r.percentage != null && (
-                          <span className="block text-[11px] font-normal text-gray-500 text-right">
-                            {r.score}/{r.total_questions}
-                          </span>
+                <EmptyState
+                  icon={
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                  }
+                  title={t.emptyStudentResults}
+                />
+              ) : (
+                results.map((r: any, i) => {
+                  const isCompleted = r.status === 'Completed';
+                  const isBannedRes = r.status === 'Banned';
+                  const pct = typeof r.percentage === 'number' ? r.percentage : null;
+                  const tone = pct != null ? scoreTone(pct) : null;
+
+                  return (
+                    <motion.div
+                      key={r.id}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.04 }}
+                      className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden hover:border-gray-300 transition-colors"
+                    >
+                      {/* Header: title + status pill */}
+                      <div className="px-5 py-4 flex items-start justify-between gap-3 border-b border-gray-100">
+                        <h3 className="text-[14.5px] font-semibold text-gray-900 leading-snug min-w-0">{r.title}</h3>
+                        <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md ${
+                          isCompleted ? 'bg-emerald-50 text-emerald-700' :
+                          isBannedRes ? 'bg-red-50 text-red-700' :
+                          'bg-amber-50 text-amber-700'
+                        }`}>
+                          {isCompleted ? t.resultStatusCompleted : isBannedRes ? t.resultStatusBanned : t.resultStatusOther}
+                        </span>
+                      </div>
+
+                      {/* Body: score focal */}
+                      <div className="px-5 py-4 flex-1 flex flex-col justify-center">
+                        {isCompleted && pct != null ? (
+                          <>
+                            <div className="flex items-baseline justify-between mb-2">
+                              <span className="text-[12px] text-gray-500 font-medium">{L.scoreLabel}</span>
+                              <span className={`text-[26px] font-bold leading-none tabular-nums ${tone!.text}`}>{pct}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                              <div className={`h-full rounded-full ${tone!.bar}`} style={{ width: `${Math.max(3, Math.min(100, pct))}%` }} />
+                            </div>
+                            <div className="flex items-center justify-between mt-2.5 text-[11.5px] text-gray-400">
+                              <span className="tabular-nums">{r.score}/{r.total_questions} {L.questionsWord}</span>
+                              {r.completed_at && <span className="tabular-nums">{new Date(r.completed_at).toLocaleDateString()}</span>}
+                            </div>
+                          </>
+                        ) : isBannedRes ? (
+                          <div className="flex items-center gap-3 py-1">
+                            <div className="w-10 h-10 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
+                            </div>
+                            <div>
+                              <div className="text-[14px] font-semibold text-gray-900">{t.resultStatusBanned}</div>
+                              <div className="text-[12px] text-gray-400">{L.scoreLabel}: —</div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-3 py-1">
+                            <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            </div>
+                            <div>
+                              <div className="text-[14px] font-semibold text-gray-900">{L.pendingEval}</div>
+                              <div className="text-[12px] text-gray-400">{t.resultPending}</div>
+                            </div>
+                          </div>
                         )}
-                      </span>
-                    </div>
+                      </div>
 
-                    {/* Status */}
-                    <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-lg px-3.5 py-2.5">
-                      <span className="text-[13px] text-gray-500 font-medium">{t.resultStatus}</span>
-                      <span className={`text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${
-                        r.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' :
-                        r.status === 'Banned' ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
-                      }`}>
-                        {r.status === 'Completed' ? t.resultStatusCompleted : r.status === 'Banned' ? t.resultStatusBanned : t.resultStatusOther}
-                      </span>
-                    </div>
-
-                    {r.completed_at && (
-                      <p className="text-[12px] text-gray-400 text-center">
-                        {t.resultCompletedLabel}: {new Date(r.completed_at).toLocaleString()}
-                      </p>
-                    )}
-                  </div>
-
-                  {r.status === 'Completed' && r.result_public_id && (
-                    <div className="px-4 sm:px-5 pb-4 space-y-2">
-                      <AdminBtn
-                        variant="ghost"
-                        size="md"
-                        className="w-full"
-                        loading={detailLoading}
-                        onClick={() => openResultDetail(r.exam_id)}
-                        icon={
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        }
-                      >
-                        {t.studentResultCertificateBtn}
-                      </AdminBtn>
-                      <AdminBtn
-                        variant="blue"
-                        size="md"
-                        className="w-full"
-                        loading={pdfDownloadingId === r.exam_id}
-                        onClick={() => downloadCertificate(r.exam_id, r.result_public_id)}
-                        icon={
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
-                          </svg>
-                        }
-                      >
-                        {t.resultDownloadPdf}
-                      </AdminBtn>
-                    </div>
-                  )}
-                </motion.div>
-              ))}
+                      {/* Footer: actions (only completed with public id) */}
+                      {isCompleted && r.result_public_id && (
+                        <div className="px-5 pb-4 pt-0 flex gap-2">
+                          <AdminBtn
+                            variant="ghost"
+                            size="md"
+                            className="flex-1"
+                            loading={detailLoading}
+                            onClick={() => openResultDetail(r.exam_id)}
+                            icon={
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                              </svg>
+                            }
+                          >
+                            {t.studentResultCertificateBtn}
+                          </AdminBtn>
+                          <AdminBtn
+                            variant="blue"
+                            size="md"
+                            className="shrink-0 px-3"
+                            loading={pdfDownloadingId === r.exam_id}
+                            onClick={() => downloadCertificate(r.exam_id, r.result_public_id)}
+                            aria-label={t.resultDownloadPdf}
+                            icon={
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3" />
+                              </svg>
+                            }
+                          >
+                            PDF
+                          </AdminBtn>
+                        </div>
+                      )}
+                    </motion.div>
+                  );
+                })
+              )}
             </motion.div>
           )}
         </AnimatePresence>
       )}
+    </div>
+  );
+}
+
+/* ── Meta row (icon + label + value) ─────────────────────────────────────── */
+function MetaRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="text-gray-500 inline-flex items-center gap-2">
+        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">{icon}</svg>
+        {label}
+      </span>
+      <span className="font-medium text-gray-900 tabular-nums text-right">{value}</span>
+    </div>
+  );
+}
+
+/* ── Empty state (full-width, centered) ──────────────────────────────────── */
+function EmptyState({ icon, title, hint }: { icon: React.ReactNode; title: string; hint?: string }) {
+  return (
+    <div className="col-span-full">
+      <div className="rounded-2xl border border-dashed border-gray-300 bg-white py-16 px-6 text-center">
+        <div className="w-14 h-14 bg-gray-50 border border-gray-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-gray-400">
+          {icon}
+        </div>
+        <p className="text-[15px] font-semibold text-gray-700 mb-1">{title}</p>
+        {hint && (
+          <p className="text-[13px] text-gray-500 max-w-md mx-auto mt-2">{hint}</p>
+        )}
+      </div>
     </div>
   );
 }

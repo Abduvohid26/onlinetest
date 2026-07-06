@@ -11,7 +11,7 @@ import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../
 import { translations, Language } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
-import { examAuthHeaders } from '../lib/deviceFingerprint';
+import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
 import { buildGuardedExamHeaders, syncVacFromResponse } from '../lib/examRequestGuard';
 import type { ExamResultPayload } from '../components/ExamResultSummary';
 import {
@@ -20,6 +20,13 @@ import {
 } from '../lib/preferredCameraStream';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
+
+// Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string }> = {
+  uz: { answered: 'Javob berilgan', flagged: 'Belgilangan', empty: 'Bo‘sh' },
+  ru: { answered: 'Отвечено', flagged: 'Отмечено', empty: 'Пусто' },
+  en: { answered: 'Answered', flagged: 'Flagged', empty: 'Empty' },
+};
 
 // Identity check: har 3 soniyada (OpenCV SFace lokal, tez ~100ms; throttle 60/min)
 const IDENTITY_CHECK_MS = 3_000;
@@ -106,6 +113,22 @@ function safeLocalRemove(key: string): void {
   }
 }
 
+/** Print Screen / skrinshot tugmalari (brauzer va OS farqlari). */
+function isPrintScreenKeyboardEvent(e: KeyboardEvent): boolean {
+  const code = (e.code || '').toLowerCase();
+  const key = (e.key || '').toLowerCase();
+  if (code === 'printscreen' || key === 'printscreen' || key === 'snapshot') return true;
+  // Windows: Win+Shift+S (Snipping Tool) — Chrome ba'zan metaKey sifatida beradi
+  if (e.shiftKey && (e.metaKey || e.ctrlKey) && key === 's') return true;
+  // macOS: Cmd+Shift+3/4/5
+  if (e.metaKey && e.shiftKey && ['3', '4', '5'].includes(key)) return true;
+  return false;
+}
+
+function reportPrintScreenViolation(log: (type: string) => void): void {
+  void log('PRINT_SCREEN');
+}
+
 function initialSecondsLeft(exam: ExamRoomProps['exam']) {
   if (exam.submission_deadline) {
     const end = new Date(exam.submission_deadline).getTime();
@@ -127,8 +150,21 @@ interface ViolationWarning {
   isFinalWarning: boolean;
 }
 
-export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: ExamRoomProps) {
+export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamId, token, user, lang, onFinish }: ExamRoomProps) {
   const t = translations[lang];
+  const [exam, setExam] = useState(initialExam);
+  const [studentExamId, setStudentExamId] = useState(initialStudentExamId);
+  const examQuestions = React.useMemo(
+    () => (Array.isArray(exam.questions) ? exam.questions : []),
+    [exam.questions],
+  );
+  const sessionStarted = Boolean(exam.startedAt && exam.sessionKey);
+  const sessionStartedRef = useRef(sessionStarted);
+  const [startingSession, setStartingSession] = useState(false);
+  const [startError, setStartError] = useState('');
+  useEffect(() => {
+    sessionStartedRef.current = sessionStarted;
+  }, [sessionStarted]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [flaggedQuestions, setFlaggedQuestions] = useState<number[]>([]);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -136,7 +172,11 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const [realtimeSyncOffline, setRealtimeSyncOffline] = useState(false);
   const [realtimeBannerDismissed, setRealtimeBannerDismissed] = useState(false);
   const [banned, setBanned] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(() => initialSecondsLeft(exam));
+  const [timeLeft, setTimeLeft] = useState(() =>
+    initialExam.startedAt && initialExam.sessionKey
+      ? initialSecondsLeft(initialExam)
+      : initialExam.duration_minutes * 60,
+  );
   const [showTimeWarning, setShowTimeWarning] = useState(false);
   /** Ogohlantirish bosqichi 1–3 (serverdagi warn_types soni; ban 4-chi hodisada). */
   const [strikeLevel, setStrikeLevel] = useState(0);
@@ -160,6 +200,8 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const [appealReason, setAppealReason] = useState('');
   const [appealBusy, setAppealBusy] = useState(false);
   const [appealMsg, setAppealMsg] = useState('');
+  /** Admin ban yechganda — "Davom etish" tugmasi chiqadi (WebSocket yoki polling). */
+  const [unblockReady, setUnblockReady] = useState(false);
   /** BAN paytida serverdagi jami violation yozuvlari (3 ta "!" o'rniga) */
   const [banViolationsCount, setBanViolationsCount] = useState<number | null>(null);
   // Ogohlantirish modal
@@ -225,6 +267,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   }, []);
 
   useEffect(() => {
+    if (!sessionStarted) return;
     let cancelled = false;
     (async () => {
       try {
@@ -239,9 +282,9 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         }>(res);
         if (!res.ok || cancelled) return;
         const localRaw = safeLocalGet(`exam_answers_${exam.id}`);
-        const localAns = sanitizeExamAnswers(exam.questions, parseAnswersJson(localRaw));
+        const localAns = sanitizeExamAnswers(examQuestions, parseAnswersJson(localRaw));
         const srv = sanitizeExamAnswers(
-          exam.questions,
+          examQuestions,
           (data.answers && typeof data.answers === 'object' ? data.answers : {}) as Record<string, string>,
         );
         const merged = { ...srv, ...localAns };
@@ -252,14 +295,14 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       } catch {
         const saved = safeLocalGet(`exam_answers_${exam.id}`);
         if (saved && !cancelled) {
-          setAnswers(sanitizeExamAnswers(exam.questions, parseAnswersJson(saved)));
+          setAnswers(sanitizeExamAnswers(examQuestions, parseAnswersJson(saved)));
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [exam.id, token, nextGuardHeaders, exam.questions]);
+  }, [exam.id, token, nextGuardHeaders, examQuestions, sessionStarted]);
 
   useEffect(() => {
     safeLocalSet(`exam_answers_${exam.id}`, JSON.stringify(answers));
@@ -342,8 +385,13 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const fullscreenRequestedRef = useRef(false);
   const fullscreenEnteredRef = useRef(false);
   const blurIgnoreUntilRef = useRef(0); // timestamp: shu vaqtgacha blur ignore qilinadi
+  /** Modal/ogohlantirish fullscreen'dan chiqarishi — buni qoidabuzarlik deb hisoblamaymiz */
+  const fullscreenSuppressRef = useRef(false);
+  /** Foydalanuvchi ESC bilan ataylab chiqdi */
+  const userEscFullscreenExitRef = useRef(false);
+  const needsFullscreenRef = useRef(false);
 
-  // Majburiy fullscreen (kiosk): fullscreenda emas bo'lsa, imtihon ustidan gate ko'rsatiladi.
+  // Majburiy fullscreen (kiosk): faqat ESC bilan chiqilganda gate ko'rsatiladi.
   const [needsFullscreen, setNeedsFullscreen] = useState(false);
   const fullscreenSupportedRef = useRef(
     typeof document !== 'undefined' && !!document.documentElement.requestFullscreen,
@@ -353,25 +401,59 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     const el = document.documentElement;
     if (document.fullscreenElement || !el.requestFullscreen) return;
     fullscreenRequestedRef.current = true;
+    fullscreenSuppressRef.current = true;
     blurIgnoreUntilRef.current = Date.now() + 3000;
     el.requestFullscreen().then(
       () => {
         fullscreenRequestedRef.current = false;
+        fullscreenSuppressRef.current = false;
+        userEscFullscreenExitRef.current = false;
+        needsFullscreenRef.current = false;
+        setNeedsFullscreen(false);
       },
       () => {
         fullscreenRequestedRef.current = false;
+        fullscreenSuppressRef.current = false;
       },
     );
   }, []);
 
-  // Fullscreen holatini kuzatib gate'ni ko'rsatish/yashirish. Fullscreen API qo'llab-quvvatlanmasa
-  // (eski/ba'zi mobil brauzerlar) gate ko'rsatilmaydi — talaba imtihondan bloklanib qolmasin.
   useEffect(() => {
     if (!fullscreenSupportedRef.current) return;
-    const sync = () => setNeedsFullscreen(!document.fullscreenElement);
-    sync();
-    document.addEventListener('fullscreenchange', sync);
-    return () => document.removeEventListener('fullscreenchange', sync);
+
+    const onFullscreenChange = () => {
+      if (document.fullscreenElement) {
+        fullscreenEnteredRef.current = true;
+        fullscreenRequestedRef.current = false;
+        userEscFullscreenExitRef.current = false;
+        fullscreenSuppressRef.current = false;
+        needsFullscreenRef.current = false;
+        setNeedsFullscreen(false);
+        return;
+      }
+
+      if (!fullscreenEnteredRef.current || bannedRef.current) return;
+
+      if (fullscreenSuppressRef.current || warningModalShowingRef.current) {
+        return;
+      }
+
+      if (userEscFullscreenExitRef.current && sessionStartedRef.current) {
+        userEscFullscreenExitRef.current = false;
+        needsFullscreenRef.current = true;
+        setNeedsFullscreen(true);
+        void logViolationRef.current('FULLSCREEN_EXIT_HARD');
+        return;
+      }
+
+      // Boshqa sabab (brauzer UI) — gate ko'rsatilmaydi; keyingi klikda qayta fullscreen.
+      needsFullscreenRef.current = false;
+      setNeedsFullscreen(false);
+    };
+
+    onFullscreenChange();
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
   }, []);
 
   useEffect(() => {
@@ -394,7 +476,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
 
     // Blur: faqat fullscreen rejimida va fullscreen so'ralayotgan paytda emas
     const onBlur = () => {
-      if (bannedRef.current) return;
+      if (bannedRef.current || !sessionStartedRef.current) return;
       const now = Date.now();
       // Fullscreen so'ralayotgan paytda (2 soniya) blur ignore
       if (now < blurIgnoreUntilRef.current) return;
@@ -414,39 +496,19 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       }, 900);
     };
 
-    // Fullscreen o'zgarishi
-    const onFs = () => {
-      if (bannedRef.current) return;
-      if (document.fullscreenElement) {
-        // Fullscreen kirildi — bu yaxshi
-        fullscreenEnteredRef.current = true;
-        fullscreenRequestedRef.current = false;
-        clearBlurTimer();
-        return;
-      }
-      // Fullscreen chiqildi
-      if (!fullscreenEnteredRef.current) {
-        // Hali fullscreanga kirmagan — ignore (boshlang'ich holat)
-        return;
-      }
-      // Foydalanuvchi fullscreendan chiqdi — ogohlantirish, darhol ban emas
-      void logViolationRef.current('FULLSCREEN_EXIT_HARD');
-    };
-
+    // Fullscreen o'zgarishi — asosiy handler yuqoridagi useEffect'da (ESC vs modal ajratiladi).
     window.addEventListener('blur', onBlur);
-    document.addEventListener('fullscreenchange', onFs);
     return () => {
       clearBlurTimer();
       window.removeEventListener('blur', onBlur);
-      document.removeEventListener('fullscreenchange', onFs);
     };
   }, []);
 
   const [qIndex, setQIndex] = useState(0);
   const answeredCount = Object.keys(answers).length;
-  const totalQuestions = exam.questions.length;
-  const progress = totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0;
-  const currentQ = exam.questions[qIndex];
+  const totalQuestions = examQuestions.length || Number(exam.bank_question_count) || 0;
+  const progress = examQuestions.length > 0 ? (answeredCount / examQuestions.length) * 100 : 0;
+  const currentQ = examQuestions[qIndex];
   const currentOptions = React.useMemo(
     () => normalizeQuestionOptions(currentQ?.options),
     [currentQ],
@@ -470,6 +532,27 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   useEffect(() => {
     bannedRef.current = banned;
   }, [banned]);
+
+  // Ban ekranida WebSocket ishlamasa ham admin yechganda "Davom etish" chiqishi uchun polling.
+  useEffect(() => {
+    if (!banned || unblockReady) return;
+    const pollUnblock = async () => {
+      try {
+        const res = await fetch(apiUrl('/api/student/exams'), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const list = await readJsonSafe<Array<{ id: number; in_progress?: boolean }>>(res);
+        const row = Array.isArray(list) ? list.find((e) => e.id === exam.id) : null;
+        if (row?.in_progress) setUnblockReady(true);
+      } catch {
+        /* ignore */
+      }
+    };
+    void pollUnblock();
+    const id = window.setInterval(() => void pollUnblock(), 5000);
+    return () => clearInterval(id);
+  }, [banned, unblockReady, exam.id, token]);
 
   useEffect(() => {
     tokenRef.current = token;
@@ -557,6 +640,35 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       });
   }, []);
 
+  const resumeAfterViolationAck = useCallback(() => {
+    warningModalShowingRef.current = false;
+    blurIgnoreUntilRef.current = Date.now() + 2000;
+    postWarningGraceUntilRef.current = Date.now() + 8000;
+    setWarningQueue([]);
+    setViolationWarning(null);
+    recoverCameraPreview();
+    fullscreenSuppressRef.current = true;
+    needsFullscreenRef.current = false;
+    setNeedsFullscreen(false);
+    void requestExamFullscreen();
+  }, [recoverCameraPreview]);
+
+  const continueAfterUnblock = useCallback(() => {
+    setUnblockReady(false);
+    setBanned(false);
+    setStrikeLevel(0);
+    setViolationWarning(null);
+    setBanViolationsCount(null);
+    warningModalShowingRef.current = false;
+    postWarningGraceUntilRef.current = Date.now() + 8000;
+    fullscreenSuppressRef.current = true;
+    needsFullscreenRef.current = false;
+    setNeedsFullscreen(false);
+    setProctorRetryNonce((n) => n + 1);
+    recoverCameraPreview();
+    void requestExamFullscreen();
+  }, [recoverCameraPreview]);
+
   useEffect(() => {
     if (banned) return;
     const id = window.setInterval(() => {
@@ -627,15 +739,18 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = (e.key || '').toLowerCase();
+      if (key === 'escape' && document.fullscreenElement && sessionStartedRef.current) {
+        userEscFullscreenExitRef.current = true;
+      }
+      if (isPrintScreenKeyboardEvent(e)) {
+        e.preventDefault();
+        reportPrintScreenViolation((t) => void logViolationRef.current(t));
+        return;
+      }
       const isClipboardCombo = (e.ctrlKey || e.metaKey) && ['c', 'v', 'x', 'a'].includes(key);
       const isDevtoolsCombo =
         key === 'f12' ||
         ((e.ctrlKey || e.metaKey) && e.shiftKey && ['i', 'j'].includes(key));
-      if (key === 'printscreen') {
-        e.preventDefault();
-        void logViolationRef.current('PRINT_SCREEN');
-        return;
-      }
       if (isDevtoolsCombo) {
         e.preventDefault();
         const now = Date.now();
@@ -666,11 +781,19 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     };
     const blockGesture = (e: Event) => e.preventDefault();
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (isPrintScreenKeyboardEvent(e)) {
+        e.preventDefault();
+        reportPrintScreenViolation((t) => void logViolationRef.current(t));
+      }
+    };
+
     document.addEventListener('contextmenu', handleContextMenu);
     document.addEventListener('copy', handleCopyPaste);
     document.addEventListener('paste', handleCopyPaste);
     document.addEventListener('cut', handleCopyPaste);
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
     document.addEventListener('wheel', blockZoomWheel, { passive: false });
     document.addEventListener('gesturestart', blockGesture);
     document.addEventListener('gesturechange', blockGesture);
@@ -695,28 +818,14 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       }, 12_000);
     }
 
-    // requestFullscreen faqat foydalanuvchi jesti (click/touch) bilan — useEffect o'zi "user gesture" emas
-    const onFirstUserGesture = () => {
-      if (document.fullscreenElement) {
-        window.removeEventListener('pointerdown', onFirstUserGesture, true);
-        return;
-      }
-      if (document.documentElement.requestFullscreen) {
-        fullscreenRequestedRef.current = true;
-        blurIgnoreUntilRef.current = Date.now() + 3000;
-        void document.documentElement.requestFullscreen().then(
-          () => {
-            window.removeEventListener('pointerdown', onFirstUserGesture, true);
-          },
-          () => {
-            fullscreenRequestedRef.current = false;
-          }
-        );
-      } else {
-        window.removeEventListener('pointerdown', onFirstUserGesture, true);
-      }
+    // Har bir klik/touch — fullscreen (ESC gate ochiq bo'lsa, faqat gate tugmasi ishlaydi).
+    const ensureFullscreenOnGesture = () => {
+      if (bannedRef.current) return;
+      if (needsFullscreenRef.current) return;
+      if (document.fullscreenElement) return;
+      requestExamFullscreen();
     };
-    window.addEventListener('pointerdown', onFirstUserGesture, { capture: true });
+    window.addEventListener('pointerdown', ensureFullscreenOnGesture, { capture: true });
 
     const setupAI = async () => {
       try {
@@ -738,11 +847,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               const md = msg as any;
               if (String(md.student_id) === String(user.id)) {
                 if (md.can_retake) {
-                  setBanned(false);
-                  setStrikeLevel(0);
-                  setViolationWarning(null);
-                  setBanViolationsCount(null);
-                  setProctorRetryNonce((n) => n + 1);
+                  setUnblockReady(true);
                   showWarningMsg(translations[langRef.current].unblockAllowedMsg || 'Admin imtihonni davom ettirishingizga ruxsat berdi!', 6000);
                 } else {
                   showWarningMsg(translations[langRef.current].unblockDeniedMsg || 'Admin imtihonni tugatdi. Topshira olmaysiz.', 8000);
@@ -823,12 +928,13 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
 
     // Cleanup
     return () => {
-      window.removeEventListener('pointerdown', onFirstUserGesture, true);
+      window.removeEventListener('pointerdown', ensureFullscreenOnGesture, true);
       document.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('copy', handleCopyPaste);
       document.removeEventListener('paste', handleCopyPaste);
       document.removeEventListener('cut', handleCopyPaste);
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
       document.removeEventListener('wheel', blockZoomWheel);
       document.removeEventListener('gesturestart', blockGesture);
       document.removeEventListener('gesturechange', blockGesture);
@@ -848,7 +954,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         audioContextRef.current.close().catch(() => {});
       }
     };
-  }, [banned, exam.id, token, user.id, proctorRetryNonce]);
+  }, [banned, exam.id, token, user.id, proctorRetryNonce, requestExamFullscreen]);
 
   // --- Real-time ovoz faolligi (VAD) — RMS + zero-crossing, ~200ms da bir freym.
   //     (Avval 1000ms edi — bunda har o'qishda faqat ~5.8ms audio "suratga olinardi",
@@ -875,13 +981,15 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   // --- Violation logging ---
   const logViolation = async (type: string) => {
     if (bannedRef.current) return;
+    if (!sessionStartedRef.current) return;
 
     // Server: strict VAC da faqat IDENTITY_SUBSTITUTION darhol ban; qolganlari ogohlantirish ketma-ketligi.
     const INSTANT_BAN_TYPES = new Set(['IDENTITY_SUBSTITUTION']);
 
     // Modal ochiqligida yangi violationlar (IDENTITY_SUBSTITUTION dan tashqari) bloklansn —
     // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.
-    if (warningModalShowingRef.current && !INSTANT_BAN_TYPES.has(type)) return;
+    const BYPASS_MODAL_BLOCK = new Set(['IDENTITY_SUBSTITUTION', 'PRINT_SCREEN']);
+    if (warningModalShowingRef.current && !BYPASS_MODAL_BLOCK.has(type)) return;
 
     // Modal yopilgandan keyingi qisqa grace oynasi — davom etayotgan sabab (masalan
     // xonadagi shovqin) darhol ketma-ket yana strike bermasin, tuzatishga vaqt bersin.
@@ -936,8 +1044,8 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
         return;
       }
 
-      // Startup grace (kamera qizishi, ~40s) — rasmiy ogohlantirish emas (false-positive),
-      // shuning uchun strike hisoblanmaydi, faqat yengil xabar modali ko'rsatiladi.
+      // Ixtiyoriy startup grace (PROCTOR_STARTUP_GRACE_SECONDS) — strike hisoblanmaydi,
+      // faqat yengil xabar modali ko'rsatiladi.
       if (data.startupGrace) {
         const detail = (data.violationReason || type).trim();
         showWarningMsg(detail, 5000);
@@ -965,6 +1073,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           ? data.warningNumber
           : Math.max(1, official);
       setStrikeLevel(official > 0 ? official : shownNumber);
+      fullscreenSuppressRef.current = true;
       warningModalShowingRef.current = true;
       setViolationWarning({
         reason: data.violationReason || type,
@@ -1013,7 +1122,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
   const triggerIdentityCheckRef = useRef<() => void>(() => {});
 
   useEffect(() => {
-    if (banned || !user.profile_image) return;
+    if (banned || !user.profile_image || !sessionStarted) return;
 
     const setIdStatus = (s: 'idle' | 'checking' | 'ok' | 'fail') => {
       if (identityStatusTimerRef.current !== null) {
@@ -1089,7 +1198,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       clearInterval(id);
       if (identityStatusTimerRef.current !== null) clearTimeout(identityStatusTimerRef.current);
     };
-  }, [banned, user.profile_image, nextGuardHeaders]);
+  }, [banned, user.profile_image, nextGuardHeaders, sessionStarted]);
 
   // --- Tab / visibility (masofaviy nazorat) ---
   useEffect(() => {
@@ -1101,29 +1210,34 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
     };
 
     const onVis = () => {
-      if (bannedRef.current) return;
-      // Modal yopilgandan keyingi qisqa grace oynasi — xuddi `onBlur`dagi kabi (bir xil
-      // blurIgnoreUntilRef). Aks holda ogohlantirish modalini yopish paytidagi tasodifiy
-      // visibility tebranishi yolg'on TAB_SWITCH_SOFT chiqarardi.
+      if (bannedRef.current || !sessionStartedRef.current) return;
       if (Date.now() < blurIgnoreUntilRef.current) return;
       if (document.visibilityState === 'hidden') {
-        // Qisqa hidden holatlari false positive bermasligi uchun delay.
         clearHiddenTimer();
         hiddenViolationTimerRef.current = window.setTimeout(() => {
           hiddenViolationTimerRef.current = null;
-          if (bannedRef.current) return;
+          if (bannedRef.current || !sessionStartedRef.current) return;
           if (document.visibilityState === 'hidden') {
             void logViolationRef.current('TAB_SWITCH_SOFT');
           }
-        }, 1200);
+        }, 500);
       } else {
         clearHiddenTimer();
       }
     };
+
+    const onPageHide = () => {
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      if (Date.now() < blurIgnoreUntilRef.current) return;
+      void logViolationRef.current('TAB_SWITCH_SOFT');
+    };
+
     document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('pagehide', onPageHide);
     return () => {
       clearHiddenTimer();
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('pagehide', onPageHide);
     };
   }, []);
 
@@ -1189,17 +1303,73 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
 
   const handleSubmit = () => runSubmitCore(answersRef.current, flaggedRef.current);
 
+  const startExamSession = useCallback(async () => {
+    if (startingSession || sessionStartedRef.current) return;
+    setStartingSession(true);
+    setStartError('');
+    try {
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        requestExamFullscreen();
+      }
+      const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Student-Lang': lang,
+          ...examAuthHeaders(token),
+        },
+        body: JSON.stringify({ pin: exam.preExamPin || '', student_lang: lang }),
+      });
+      const data = await readJsonSafe<{
+        error?: string;
+        exam?: any;
+        studentExamId?: number;
+        startedAt?: string;
+        sessionKey?: string;
+        sessionSeqStart?: number;
+        sessionChallenge?: string;
+        deviceToken?: string;
+      }>(res);
+      if (!res.ok || !data?.exam || data.studentExamId == null) {
+        setStartError(data?.error || t.preExamStartError);
+        return;
+      }
+      if (data.deviceToken) {
+        setDeviceSessionToken(data.deviceToken);
+      }
+      const merged = {
+        ...data.exam,
+        startedAt: data.startedAt,
+        sessionKey: data.sessionKey,
+        sessionSeqStart: data.sessionSeqStart,
+        sessionChallenge: data.sessionChallenge,
+        preExamPin: exam.preExamPin,
+      };
+      setExam(merged);
+      setStudentExamId(data.studentExamId);
+      vacStateRef.current = {
+        seq: Number(data.sessionSeqStart || 1),
+        challengeSeed: data.sessionChallenge,
+      };
+      setTimeLeft(merged.duration_minutes * 60);
+    } catch {
+      setStartError(t.preExamNetworkError);
+    } finally {
+      setStartingSession(false);
+    }
+  }, [exam.id, exam.preExamPin, startingSession, t.preExamNetworkError, t.preExamStartError, token, requestExamFullscreen]);
+
   // Vaqt tugaganda darhol topshirish (sahifa yuklanganda ham)
   useEffect(() => {
-    if (banned || submittingRef.current) return;
+    if (banned || submittingRef.current || !sessionStarted) return;
     if (timeLeft <= 0) {
       void runSubmitCore(answersRef.current, flaggedRef.current);
     }
-  }, [banned, timeLeft, runSubmitCore]);
+  }, [banned, timeLeft, runSubmitCore, sessionStarted]);
 
   // --- Countdown (oxirgi javoblar ref orqali) ---
   useEffect(() => {
-    if (banned) return;
+    if (banned || !sessionStarted) return;
     const timer = window.setInterval(() => {
       setTimeLeft((prev) => {
         if (prev === 300) {
@@ -1215,7 +1385,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
       });
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [banned, runSubmitCore]);
+  }, [banned, runSubmitCore, sessionStarted]);
 
   // Bloklovchi modal (rasmiy ogohlantirish yoki ban) ochiq bo'lsa, navbatdagi xabar
   // ekranda ko'rinmaydi (ikkalasi ham markazda, balandroq z-index yopib qo'yadi) —
@@ -1256,14 +1426,13 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             <button
               type="button"
               onClick={() => {
-                // Xuddi rasmiy ogohlantirish modalidagi kabi — modal yopilgandan keyingi
-                // qisqa fokus/visibility tebranishi yolg'on TAB_SWITCH bermasin.
                 blurIgnoreUntilRef.current = Date.now() + 2000;
                 postWarningGraceUntilRef.current = Date.now() + 8000;
-                // Talaba "Tushundim" bosganda navbatda yig'ilib qolgan boshqa xabarlar
-                // ham birga tozalanadi — ketma-ket bir nechta modal chiqib, talabani
-                // charchatib qo'ymasin (masalan bir necha marta ketma-ket tarmoq xatosi).
                 setWarningQueue([]);
+                fullscreenSuppressRef.current = true;
+                needsFullscreenRef.current = false;
+                setNeedsFullscreen(false);
+                requestExamFullscreen();
               }}
               className="w-full py-3 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base bg-red-600 hover:bg-red-700 text-white transition-all active:scale-[0.98]"
             >
@@ -1353,18 +1522,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
           <div className="shrink-0 border-t border-black/5 p-4 sm:p-5 pt-3 sm:pt-4 bg-white rounded-b-2xl sm:rounded-b-3xl">
             <button
               type="button"
-              onClick={() => {
-                warningModalShowingRef.current = false;
-                // Modal yopilgandan keyin 2 soniya blur ignore — yolg'on TAB_SWITCH oldini oladi
-                blurIgnoreUntilRef.current = Date.now() + 2000;
-                // Davom etayotgan sabab (masalan xonadagi shovqin) darhol yana strike
-                // bermasin — talabaga tuzatish uchun 8 soniya beriladi.
-                postWarningGraceUntilRef.current = Date.now() + 8000;
-                // Navbatda yig'ilib qolgan boshqa (umumiy) xabarlar ham birga tozalanadi.
-                setWarningQueue([]);
-                setViolationWarning(null);
-                recoverCameraPreview();
-              }}
+              onClick={resumeAfterViolationAck}
               className={`w-full py-3 sm:py-3.5 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base transition-all active:scale-[0.98] text-white ${
                 isFinal ? 'bg-red-600 hover:bg-red-700' : 'bg-orange-500 hover:bg-orange-600'
               }`}
@@ -1410,6 +1568,15 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             <p className="text-sm text-red-800/90 font-medium mb-5">
               {t.banRecordCountHint.replace('{n}', String(banViolationsCount))}
             </p>
+          )}
+
+          {unblockReady && (
+            <div className="mb-5 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-left space-y-3">
+              <p className="text-sm text-emerald-800 font-medium">{t.unblockAllowedMsg}</p>
+              <AdminBtn variant="emerald" size="lg" className="w-full" onClick={continueAfterUnblock}>
+                {t.resumeExam}
+              </AdminBtn>
+            </div>
           )}
 
           <div className="space-y-2.5">
@@ -1567,111 +1734,145 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
 
       {/* ── Yuqori panel: sarlavha + progress + taymer + topshirish ── */}
       <header className="shrink-0 bg-white border-b border-gray-200 shadow-sm">
-        <div className="w-full max-w-7xl mx-auto px-3 sm:px-5 py-2.5 flex items-center gap-3 sm:gap-5">
-          <div className="min-w-0 flex-1">
-            <h1 className="text-sm sm:text-base font-bold tracking-tight text-gray-900 truncate">{exam.title}</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden max-w-[220px]">
-                <div className="h-full bg-indigo-500 transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
+        <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-[1.125rem] grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-5 min-h-[4.25rem]">
+          <div className="min-w-0 sm:justify-self-start">
+            <h1 className="text-base sm:text-lg font-bold tracking-tight text-gray-900 truncate leading-tight">{exam.title}</h1>
+            {sessionStarted && (
+              <div className="flex items-center gap-2 mt-1.5">
+                <div className="hidden sm:block flex-1 h-2 bg-gray-200 rounded-full overflow-hidden max-w-[220px]">
+                  <div className="h-full bg-indigo-500 transition-all duration-500 ease-out" style={{ width: `${progress}%` }} />
+                </div>
+                <span className="text-xs font-medium text-gray-500 whitespace-nowrap">
+                  {t.questionProgress
+                    .replace('{cur}', String(qIndex + 1))
+                    .replace('{total}', String(totalQuestions))
+                    .replace('{answered}', String(answeredCount))}
+                </span>
               </div>
-              <span className="text-[11px] font-medium text-gray-500 whitespace-nowrap">
-                {t.questionProgress
-                  .replace('{cur}', String(qIndex + 1))
-                  .replace('{total}', String(totalQuestions))
-                  .replace('{answered}', String(answeredCount))}
-              </span>
-            </div>
+            )}
           </div>
-          <div className={`flex flex-col items-end leading-none ${timeLeft < 300 ? 'text-red-600' : 'text-gray-700'}`}>
-            <span className="text-[9px] font-semibold uppercase tracking-wider opacity-70">{t.timeRemaining}</span>
-            <span className="font-mono text-xl sm:text-2xl font-bold tabular-nums">
-              {formatTime(timeLeft)}
+          <div className={`flex flex-col items-center justify-center leading-none sm:justify-self-center ${timeLeft < 300 && sessionStarted ? 'text-red-600' : 'text-gray-700'}`}>
+            <span className="text-[10px] font-semibold uppercase tracking-wider opacity-70 mb-1">{t.timeRemaining}</span>
+            <span className="font-mono text-2xl sm:text-[1.75rem] font-bold tabular-nums leading-none">
+              {sessionStarted ? formatTime(timeLeft) : formatTime(exam.duration_minutes * 60)}
             </span>
           </div>
-          <AdminBtn variant="blue" size="md" loading={submitting} onClick={handleSubmit} className="shrink-0 sm:px-6">
-            {submitting ? t.submitting : t.submitExam}
-          </AdminBtn>
+          <div className="hidden sm:block sm:justify-self-end" aria-hidden />
         </div>
       </header>
 
       {/* ── Asosiy tana: chapda savol, o'ngda proctoring paneli ── */}
-      <div className="flex-1 min-h-0 w-full max-w-7xl mx-auto flex flex-col lg:flex-row gap-3 p-2.5 sm:p-3 overflow-y-auto lg:overflow-hidden">
-        {/* Savol ustuni */}
-        <div className="flex-1 min-h-0 flex flex-col gap-2.5">
-          <AnimatePresence>
-            {timeLeft <= 0 && (
-              <motion.div
-                initial={{ opacity: 0, y: -12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -12 }}
-                className="shrink-0 bg-red-500/10 border border-red-400/30 text-red-800 px-4 py-2.5 rounded-lg shadow-sm text-sm font-medium"
-              >
-                {t.examTimeExpiredHint}
-              </motion.div>
-            )}
-            {showTimeWarning && (
-              <motion.div
-                initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="shrink-0 bg-orange-500/10 border border-orange-500/20 text-orange-700 px-4 py-2.5 rounded-lg relative flex items-center gap-3 shadow-sm"
-              >
-                <svg className="w-5 h-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <div>
-                  <strong className="font-semibold block text-sm">{t.timeWarningTitle}</strong>
-                  {t.timeWarningBody.trim() ? <span className="text-xs">{t.timeWarningBody}</span> : null}
-                </div>
-              </motion.div>
-            )}
-            {isOffline && (
-              <motion.div
-                initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="shrink-0 bg-yellow-500/10 border border-yellow-500/20 text-yellow-700 px-4 py-2.5 rounded-lg relative flex items-center gap-3 shadow-sm"
-              >
-                <svg className="w-5 h-5 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
-                <div>
-                  <strong className="font-semibold block text-sm">{t.connectionLostTitle}</strong>
-                  {t.connectionLostBody.trim() ? <span className="text-xs">{t.connectionLostBody}</span> : null}
-                </div>
-              </motion.div>
-            )}
-            {!isOffline && realtimeSyncOffline && !realtimeBannerDismissed && (
-              <motion.div
-                initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="shrink-0 bg-amber-50 border border-amber-200 text-amber-950 px-4 py-3 rounded-lg shadow-sm flex items-start gap-3"
-              >
-                <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                <div className="flex-1 min-w-0">
-                  <strong className="font-semibold block text-sm">{t.realtimeSyncOfflineTitle}</strong>
-                  <span className="text-xs text-amber-900/90">{t.realtimeSyncOfflineBodyShort}</span>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <button
-                      type="button"
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition"
-                      onClick={() => {
-                        setRealtimeBannerDismissed(false);
-                        setProctorRetryNonce((n) => n + 1);
-                      }}
-                    >
-                      {t.realtimeSyncRetry}
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs font-medium px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100 transition"
-                      onClick={() => setRealtimeBannerDismissed(true)}
-                    >
-                      {t.realtimeSyncDismiss}
-                    </button>
+      <div className="flex-1 min-h-0 w-full max-w-7xl mx-auto flex flex-col gap-2.5 p-3 sm:p-4 overflow-y-auto lg:overflow-hidden">
+        {sessionStarted && !banned && (
+          <div className="shrink-0 flex flex-col gap-2.5">
+            <AnimatePresence>
+              {timeLeft <= 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: -12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -12 }}
+                  className="shrink-0 bg-red-500/10 border border-red-400/30 text-red-800 px-4 py-2.5 rounded-lg shadow-sm text-sm font-medium"
+                >
+                  {t.examTimeExpiredHint}
+                </motion.div>
+              )}
+              {showTimeWarning && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="shrink-0 bg-orange-500/10 border border-orange-500/20 text-orange-700 px-4 py-2.5 rounded-lg relative flex items-center gap-3 shadow-sm"
+                >
+                  <svg className="w-5 h-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <div>
+                    <strong className="font-semibold block text-sm">{t.timeWarningTitle}</strong>
+                    {t.timeWarningBody.trim() ? <span className="text-xs">{t.timeWarningBody}</span> : null}
                   </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </motion.div>
+              )}
+              {isOffline && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="shrink-0 bg-yellow-500/10 border border-yellow-500/20 text-yellow-700 px-4 py-2.5 rounded-lg relative flex items-center gap-3 shadow-sm"
+                >
+                  <svg className="w-5 h-5 text-yellow-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                  <div>
+                    <strong className="font-semibold block text-sm">{t.connectionLostTitle}</strong>
+                    {t.connectionLostBody.trim() ? <span className="text-xs">{t.connectionLostBody}</span> : null}
+                  </div>
+                </motion.div>
+              )}
+              {!isOffline && realtimeSyncOffline && !realtimeBannerDismissed && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="shrink-0 bg-amber-50 border border-amber-200 text-amber-950 px-4 py-3 rounded-lg shadow-sm flex items-start gap-3"
+                >
+                  <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                  <div className="flex-1 min-w-0">
+                    <strong className="font-semibold block text-sm">{t.realtimeSyncOfflineTitle}</strong>
+                    <span className="text-xs text-amber-900/90">{t.realtimeSyncOfflineBodyShort}</span>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      <button
+                        type="button"
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition"
+                        onClick={() => {
+                          setRealtimeBannerDismissed(false);
+                          setProctorRetryNonce((n) => n + 1);
+                        }}
+                      >
+                        {t.realtimeSyncRetry}
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs font-medium px-3 py-1.5 rounded-lg border border-amber-300 text-amber-900 hover:bg-amber-100 transition"
+                        onClick={() => setRealtimeBannerDismissed(true)}
+                      >
+                        {t.realtimeSyncDismiss}
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
 
+        <div className="flex flex-col lg:flex-row lg:items-start gap-3 lg:flex-1 lg:min-h-0">
+        {/* Chap ustun: lobby yoki savollar */}
+        <div className={`flex flex-col gap-2.5 lg:flex-1 lg:min-h-0 min-w-0 ${!sessionStarted && !banned ? 'lg:justify-center' : 'lg:justify-start'}`}>
+          {!sessionStarted && !banned ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-6 lg:py-10">
+              <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-sm p-6 sm:p-8 text-center space-y-4">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
+                  <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                </div>
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{t.examLobbyTitle}</h2>
+                  <p className="mt-2 text-sm text-gray-500 leading-relaxed">{t.examLobbyHint}</p>
+                  <p className="mt-3 text-sm font-medium text-indigo-700 tabular-nums">
+                    {exam.duration_minutes} {t.minutesShort} · {totalQuestions} savol
+                  </p>
+                </div>
+                {startError && (
+                  <AdminAlert type="error">{startError}</AdminAlert>
+                )}
+                <AdminBtn
+                  variant="blue"
+                  size="lg"
+                  loading={startingSession}
+                  onClick={() => void startExamSession()}
+                  className="w-full sm:px-10"
+                >
+                  {startingSession ? t.preExamStarting : t.takeExam}
+                </AdminBtn>
+              </div>
+            </div>
+          ) : (
+          <>
           {warningMsgModal}
 
           {/* Savol kartasi — faqat variantlar ro'yxati ichida scroll bo'ladi */}
@@ -1682,7 +1883,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.2 }}
               id={`question-${currentQ.id}`}
-              className={`flex-1 min-h-0 flex flex-col rounded-xl border bg-white overflow-hidden shadow-sm transition-all ${flaggedQuestions.includes(currentQ.id) ? 'border-amber-300 ring-2 ring-amber-200' : 'border-gray-200'}`}
+              className={`flex flex-col rounded-xl border bg-white overflow-hidden shadow-sm transition-all lg:flex-1 lg:min-h-0 ${flaggedQuestions.includes(currentQ.id) ? 'border-amber-300 ring-2 ring-amber-200' : 'border-gray-200'}`}
             >
               <div className="shrink-0 bg-gray-50/80 border-b border-gray-100 px-4 sm:px-5 py-3 flex items-start justify-between gap-3">
                 <p className="text-[15px] font-medium leading-relaxed text-gray-900 flex-1">
@@ -1698,7 +1899,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                   <svg className="w-4.5 h-4.5" fill={flaggedQuestions.includes(currentQ.id) ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" /></svg>
                 </button>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3 sm:p-4 space-y-2.5">
+              <div className="p-3 sm:p-4 space-y-2.5 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain">
                 {currentQParsed.images.map((img, idx) => (
                   <div key={`${currentQ.id}-img-${idx}`} className="mb-3">
                     <img
@@ -1747,46 +1948,56 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                   <AdminAlert type="error">{t.examOptionsMissing}</AdminAlert>
                 )}
               </div>
+
+              {/* Navigatsiya — savol kartasi ichida, doim ko'rinib turadi */}
+              <div className="shrink-0 flex items-center justify-between gap-3 px-3 sm:px-4 py-2.5 border-t border-gray-100 bg-gray-50/60">
+                <AdminBtn
+                  variant="ghost"
+                  size="md"
+                  disabled={qIndex <= 0}
+                  onClick={() => setQIndex((i) => Math.max(0, i - 1))}
+                  icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>}
+                >
+                  {t.examNavPrev}
+                </AdminBtn>
+                <span className="text-[12px] font-medium text-gray-400 tabular-nums shrink-0">{qIndex + 1} / {totalQuestions}</span>
+                <AdminBtn
+                  variant="blue"
+                  size="md"
+                  disabled={qIndex >= totalQuestions - 1}
+                  onClick={() => setQIndex((i) => Math.min(totalQuestions - 1, i + 1))}
+                  iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
+                >
+                  {t.examNavNext}
+                </AdminBtn>
+              </div>
             </motion.div>
           )}
-
-          {/* Navigatsiya — har doim ko'rinib turadi */}
-          <div className="shrink-0 flex gap-3 justify-between items-center">
-            <AdminBtn
-              variant="ghost"
-              size="md"
-              disabled={qIndex <= 0}
-              onClick={() => setQIndex((i) => Math.max(0, i - 1))}
-              icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>}
-            >
-              {t.examNavPrev}
-            </AdminBtn>
-            <AdminBtn
-              variant="blue"
-              size="md"
-              disabled={qIndex >= totalQuestions - 1}
-              onClick={() => setQIndex((i) => Math.min(totalQuestions - 1, i + 1))}
-              iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
-            >
-              {t.examNavNext}
-            </AdminBtn>
-          </div>
+          </>
+          )}
         </div>
 
-        {/* Proctoring paneli — kamera, savollar tarmog'i, ogohlantirishlar */}
-        <aside className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-2.5 min-h-0">
+        {/* O'ng panel: kamera + (faqat boshlangandan keyin) savollar */}
+        <aside className="w-full lg:w-[17.5rem] xl:w-72 shrink-0 flex flex-col gap-2 lg:sticky lg:top-3">
           {(() => {
             const fsCfg = FACE_STATUS_CFG[faceStatus] ?? FACE_STATUS_CFG.WAITING;
             const isOk = faceStatus === 'OK';
             const isWaiting = faceStatus === 'WAITING';
             return (
-              <div className="shrink-0 bg-white rounded-lg border border-gray-200 overflow-hidden">
-                <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full shrink-0 ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelCamera}</span>
+              <div className="shrink-0 bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+                <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 truncate">{t.examPanelCamera}</span>
+                  </div>
+                  {!isWaiting && (
+                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${isOk ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
+                      {fsCfg.label}
+                    </span>
+                  )}
                 </div>
-                <div className="p-2">
-                  <div className={`rounded-lg overflow-hidden bg-black/5 border-2 shadow-inner relative aspect-video transition-colors duration-300 ${fsCfg.border}`}>
+                <div className="p-2 pb-2">
+                  <div className={`rounded-lg overflow-hidden bg-black/5 border-2 relative aspect-[4/3] max-h-[200px] mx-auto transition-colors duration-300 ${fsCfg.border}`}>
                     <video
                       ref={videoRef}
                       autoPlay
@@ -1806,33 +2017,15 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                       style={{ transform: 'scaleX(-1)' }}
                     />
                     {/* Real-time yuz pozitsiyasi + identity overlay */}
-                    {!cameraErrorHint && cameraPreviewOk && (
-                      <div className="absolute bottom-0 left-0 right-0 flex items-stretch">
-                        {!isWaiting && (
-                          <div className={`flex-1 flex items-center gap-1.5 px-2 py-1.5 ${fsCfg.bg} ${fsCfg.text} transition-all duration-200`}>
-                            <span className="text-sm font-bold leading-none">{fsCfg.icon}</span>
-                            <span className="text-[10px] font-semibold leading-snug truncate">{fsCfg.label}</span>
-                          </div>
-                        )}
-                        {identityStatus !== 'idle' && (
-                          <div className={`flex items-center gap-1 px-2 py-1.5 text-[10px] font-bold transition-all duration-200 shrink-0 ${
-                            identityStatus === 'checking' ? 'bg-blue-600/90 text-white' :
-                            identityStatus === 'ok'       ? 'bg-emerald-600/90 text-white' :
-                                                            'bg-red-600/90 text-white'
-                          }`}>
-                            {identityStatus === 'checking' && (
-                              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
-                              </svg>
-                            )}
-                            {identityStatus === 'ok'       && <span>✓</span>}
-                            {identityStatus === 'fail'     && <span>✗</span>}
-                            <span>
-                              {identityStatus === 'checking' ? 'ID...' :
-                               identityStatus === 'ok'       ? 'ID OK' : 'ID ✗'}
-                            </span>
-                          </div>
-                        )}
+                    {!cameraErrorHint && cameraPreviewOk && identityStatus !== 'idle' && (
+                      <div className="absolute top-2 right-2">
+                        <div className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[10px] font-bold ${
+                          identityStatus === 'checking' ? 'bg-blue-600/90 text-white' :
+                          identityStatus === 'ok'       ? 'bg-emerald-600/90 text-white' :
+                                                          'bg-red-600/90 text-white'
+                        }`}>
+                          {identityStatus === 'checking' ? 'ID…' : identityStatus === 'ok' ? 'ID ✓' : 'ID ✗'}
+                        </div>
                       </div>
                     )}
                     {(cameraErrorHint || !cameraPreviewOk) && (
@@ -1863,14 +2056,16 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
             );
           })()}
 
-          {/* Savollar tarmog'i — ko'p bo'lsa panel ichida scroll */}
-          <div className="flex-1 min-h-0 flex flex-col bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="shrink-0 px-3 py-2 border-b border-gray-100">
+          {sessionStarted && (
+          <>
+          <div className="flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="shrink-0 px-3 py-2 border-b border-gray-100 flex items-center justify-between">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelQuestions}</span>
+              <span className="text-[11px] font-semibold text-gray-400 tabular-nums">{answeredCount}/{totalQuestions}</span>
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-3">
-              <div className="grid grid-cols-5 gap-2">
-                {exam.questions.map((q: any, i: number) => {
+            <div className="p-2.5">
+              <div className="grid grid-cols-5 gap-1.5">
+                {examQuestions.map((q: any, i: number) => {
                   const isAnswered = !!answers[q.id];
                   const isFlagged = flaggedQuestions.includes(q.id);
                   const isCurrent = i === qIndex;
@@ -1879,7 +2074,7 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                       type="button"
                       key={q.id}
                       onClick={() => setQIndex(i)}
-                      className={`aspect-square w-full rounded-lg flex items-center justify-center text-sm font-medium transition-all ${
+                      className={`h-9 w-full rounded-md flex items-center justify-center text-xs font-semibold transition-all ${
                         isCurrent ? 'ring-2 ring-offset-1 ring-indigo-500' : ''
                       } ${
                         isFlagged ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' :
@@ -1892,25 +2087,44 @@ export function ExamRoom({ exam, studentExamId, token, user, lang, onFinish }: E
                   );
                 })}
               </div>
+              <div className="mt-2 pt-2 border-t border-gray-100 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] text-gray-500">
+                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-indigo-500" />{EXAM_L[lang].answered}</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-yellow-100 border border-yellow-400" />{EXAM_L[lang].flagged}</span>
+                <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded bg-white border border-gray-300" />{EXAM_L[lang].empty}</span>
+              </div>
             </div>
           </div>
 
-          <div className="shrink-0 bg-white rounded-lg border border-gray-200 overflow-hidden">
-            <div className="px-3 py-2 flex items-center justify-between">
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            <div className="px-3 py-2 flex items-center justify-between border-b border-gray-100">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">{t.examPanelWarnings}</span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1">
                 {[1, 2, 3].map(num => (
                   <div
                     key={num}
-                    className={`w-3 h-3 rounded-full transition-colors ${
-                      strikeLevel >= num ? 'bg-red-500 shadow-sm shadow-red-500/50' : 'bg-gray-200'
+                    className={`w-2.5 h-2.5 rounded-full transition-colors ${
+                      strikeLevel >= num ? 'bg-red-500' : 'bg-gray-200'
                     }`}
                   />
                 ))}
               </div>
             </div>
+            <div className="p-2.5">
+              <AdminBtn
+                variant="blue"
+                size="md"
+                loading={submitting}
+                onClick={handleSubmit}
+                className="w-full"
+              >
+                {submitting ? t.submitting : t.submitExam}
+              </AdminBtn>
+            </div>
           </div>
+          </>
+          )}
         </aside>
+        </div>
       </div>
       <Calculator />
     </div>

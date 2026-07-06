@@ -50,7 +50,7 @@ class Command(BaseCommand):
         ]
 
         for uid, role, name, profile in rows:
-            AppUser.objects.update_or_create(
+            user, created = AppUser.objects.get_or_create(
                 id=uid,
                 defaults={
                     "password": h,
@@ -60,6 +60,21 @@ class Command(BaseCommand):
                     "group_id": gid,
                     "profile_image": profile,
                 },
+            )
+            if created:
+                continue
+
+            # Mavjud demo userlarni yangilash — lekin admin panelda o'rnatilgan
+            # profil rasmini har restartda placeholder bilan ustiga yozmaymiz.
+            user.password = h
+            user.role = role
+            user.name = name
+            user.status = "Active"
+            user.group_id = gid
+            if profile and not (user.profile_image and len(user.profile_image) > 50):
+                user.profile_image = profile
+            user.save(
+                update_fields=["password", "role", "name", "status", "group_id", "profile_image"]
             )
 
         self.stdout.write(self.style.SUCCESS("3 ta demo user tayyor (bitta parol):"))

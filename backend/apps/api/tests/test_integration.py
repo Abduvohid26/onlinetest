@@ -673,7 +673,7 @@ class ExamFlowApiTests(TestCase):
         self.assertIsNotNone(se.started_at)
         self.assertGreaterEqual(se.started_at, old_started)
 
-    def test_violation_startup_grace_suppresses_warning(self):
+    def test_violation_counts_immediately_after_exam_start(self):
         hp = bcrypt.hashpw(b"vstudent6", bcrypt.gensalt(rounds=10)).decode("ascii")
         st6 = AppUser.objects.create(
             id="itest_student_viol6",
@@ -705,7 +705,47 @@ class ExamFlowApiTests(TestCase):
             format="json",
         )
         self.assertEqual(r.status_code, 200)
-        self.assertTrue(r.json().get("warningSuppressed"))
+        body = r.json()
+        self.assertFalse(body.get("startupGrace"))
+        self.assertFalse(body.get("warningSuppressed"))
+        self.assertEqual(body.get("warningNumber"), 1)
+        se.refresh_from_db()
+        self.assertEqual(se.proctor_official_warnings, 1)
+
+    @mock.patch.dict(os.environ, {"PROCTOR_STARTUP_GRACE_SECONDS": "40"})
+    def test_violation_startup_grace_suppresses_when_configured(self):
+        hp = bcrypt.hashpw(b"vstudent6b", bcrypt.gensalt(rounds=10)).decode("ascii")
+        st6 = AppUser.objects.create(
+            id="itest_student_viol6b",
+            password=hp,
+            role="student",
+            name="Viol Student 6b",
+            status="Active",
+            group_id=self.group.id,
+            profile_image=PROFILE,
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.admin_token}")
+        se = StudentExam.objects.create(
+            student_id=st6.id,
+            exam_id=self.exam_a.id,
+            status="In Progress",
+            started_at=dj_tz.now(),
+        )
+        self.client.credentials()
+        r0 = self.client.post(
+            "/api/auth/login",
+            {"id": "itest_student_viol6b", "password": "vstudent6b"},
+            format="json",
+        )
+        self.assertEqual(r0.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {r0.json()['token']}")
+        r = self.client.post(
+            "/api/student/violations",
+            {"exam_id": self.exam_a.id, "violation_type": "TAB_SWITCH_SOFT", "screenshot_url": ""},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json().get("startupGrace"))
         se.refresh_from_db()
         self.assertEqual(se.proctor_official_warnings, 0)
 

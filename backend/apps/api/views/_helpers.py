@@ -72,12 +72,16 @@ from apps.api.services import (
     bank_row_to_exam_dict,
     build_fallback_ai_summary,
     build_student_question_list,
+    exam_questions_add_translations,
+    apply_exam_language_to_questions,
+    effective_exam_language,
     extract_text_from_bank_upload,
     filter_bank_questions_for_group,
     integrity_code,
     next_result_public_id,
     parse_pdf_questions,
     public_base_url,
+    resolve_student_exam_language,
     shuffle_in_place,
 )
 from apps.api.vac_settings import (
@@ -208,11 +212,82 @@ def _device_session_token_from_request(request) -> str:
     return raw[:128] if raw else ""
 
 
+def _try_rebind_device_for_resume(se: StudentExam, request, new_token: str, device_fp: str) -> bool:
+    """Token yo'qolgan (logout), lekin bir xil qurilma — sessiyani davom ettirish."""
+    if not se or not se.started_at:
+        return False
+    if (se.device_session_token or "").strip():
+        got = _device_session_token_from_request(request)
+        if got and hmac.compare_digest((se.device_session_token or "").strip(), got):
+            return True
+    fp = (device_fp or "").strip()
+    bound_fp = (se.device_fingerprint or "").strip()
+    if fp and bound_fp and fp == bound_fp:
+        se.device_session_token = new_token
+        se.device_bound_at = dj_tz.now()
+        se.save(update_fields=["device_session_token", "device_bound_at"])
+        return True
+    return False
+
+
 def _device_fp_from_request(request) -> str:
     raw = (request.META.get("HTTP_X_DEVICE_FINGERPRINT") or "").strip()
     if not raw:
         return ""
     return raw[:128]
+
+
+def _request_has_exam_session_guard(request) -> bool:
+    """Imtihon davomidagi VAC imzoli so'rov (pre-exam identity emas)."""
+    return bool(
+        str(request.META.get("HTTP_X_EXAM_SEQ") or "").strip()
+        or str(request.META.get("HTTP_X_EXAM_SIGNATURE") or "").strip()
+    )
+
+
+def _student_exam_draft_is_empty(se: StudentExam | None) -> bool:
+    if not se:
+        return True
+    raw = (se.draft_answers_json or "").strip() or "{}"
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return True
+    if not isinstance(data, dict) or not data:
+        return True
+    return not any(str(v or "").strip() for v in data.values())
+
+
+def _reset_abandoned_in_progress(se: StudentExam) -> bool:
+    """
+    Pre-exam: status In Progress qolib ketgan, lekin imtihon haqiqatan boshlanmagan
+    (started_at yo'q). Haqiqiy boshlangan sessiyalarni hech qachon reset qilmaymiz.
+    """
+    if (se.status or "").strip() != "In Progress":
+        return False
+    if se.started_at:
+        return False
+    if not _student_exam_draft_is_empty(se):
+        return False
+    se.status = "Pending"
+    se.started_at = None
+    se.device_session_token = ""
+    se.device_fingerprint = ""
+    se.device_bound_at = None
+    se.proctor_official_warnings = 0
+    se.proctor_last_warning_at = None
+    se.save(
+        update_fields=[
+            "status",
+            "started_at",
+            "device_session_token",
+            "device_fingerprint",
+            "device_bound_at",
+            "proctor_official_warnings",
+            "proctor_last_warning_at",
+        ]
+    )
+    return True
 
 
 def _enforce_bound_device_or_403(se: StudentExam, request) -> Response | None:
@@ -612,7 +687,9 @@ def _admin_exams_create_impl(request):
     if not title or not start_time or not end_time or not duration_minutes:
         return Response({"error": "Missing required exam fields"}, status=400)
 
-    lang = d.get("language") or "uz"
+    lang = str(d.get("language") or "uz").lower().strip()[:10]
+    if lang not in ("uz", "ru", "en", "auto"):
+        lang = "uz"
     mode = "bank_mixed" if d.get("exam_mode") == "bank_mixed" else "static"
     bank_cats_json = "[]"
     bank_count = 0
@@ -663,6 +740,9 @@ def _admin_exams_create_impl(request):
             return Response({"error": "Invalid manual questions format"}, status=400)
     else:
         return Response({"error": "No questions provided"}, status=400)
+
+    if lang == "auto" and mode == "static" and questions:
+        questions = exam_questions_add_translations(questions)
 
     st = parse_iso_datetime(start_time)
     et = parse_iso_datetime(end_time)

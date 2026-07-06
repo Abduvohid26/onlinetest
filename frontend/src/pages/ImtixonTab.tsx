@@ -82,7 +82,7 @@ export function ImtixonTab({
   const [startLocal, setStartLocal] = useState(defaultExamStartLocal);
   const [endLocal, setEndLocal] = useState(() => defaultExamEndLocal(60));
   const [duration, setDuration] = useState(60);
-  const [language, setLanguage] = useState('uz');
+  const [language, setLanguage] = useState('auto');
   const [pin, setPin] = useState('');
   const [customRules, setCustomRules] = useState('');
   const [responsibleStaffId, setResponsibleStaffId] = useState('');
@@ -379,10 +379,14 @@ export function ImtixonTab({
               </AdminField>
               <AdminField label={t.language}>
                 <AdminSelect value={language} onChange={(e) => setLanguage(e.target.value)}>
+                  <option value="auto">{t.langAuto}</option>
                   <option value="uz">{t.langUzbek}</option>
                   <option value="ru">{t.langRussian}</option>
                   <option value="en">{t.langEnglish}</option>
                 </AdminSelect>
+                {language === 'auto' && (
+                  <p className="text-[12px] text-indigo-700 mt-1.5 leading-snug">{t.examLanguageAutoHint}</p>
+                )}
               </AdminField>
             </div>
 

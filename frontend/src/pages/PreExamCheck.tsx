@@ -1,16 +1,21 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { Card, CardContent } from '../components/ui';
 import { motion } from 'motion/react';
 import { translations, Language, formatPreExamMediaAccessFailure } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
-import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
+import { examAuthHeaders } from '../lib/deviceFingerprint';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { FacePositionChecker, type FacePositionStatus } from '../lib/facePositionCheck';
-import { InstituteLogo } from '../components/InstituteLogo';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
+
+/* Sahifa ichidagi qisqa matnlar (uz/ru/en) — katta i18n fayliga tegmasdan. */
+const PRE_L: Record<Language, Record<string, string>> = {
+  uz: { stepCamera: 'Kamera', stepRules: 'Qoidalar', stepIdentity: 'Shaxs', stepLiveness: 'Jonlilik', important: 'Muhim', rulesTitle: 'Imtihon qoidalari' },
+  ru: { stepCamera: 'Камера', stepRules: 'Правила', stepIdentity: 'Личность', stepLiveness: 'Живость', important: 'Важно', rulesTitle: 'Правила экзамена' },
+  en: { stepCamera: 'Camera', stepRules: 'Rules', stepIdentity: 'Identity', stepLiveness: 'Liveness', important: 'Important', rulesTitle: 'Exam rules' },
+};
 import {
   attachDefaultMicrophone,
   openCameraByTryingVideoInputs,
@@ -61,7 +66,6 @@ export function PreExamCheck({
   const [error, setError] = useState('');
   /** Kamera bor, mikrofon ochilmagan — qizil xato emas, ogohlantirish */
   const [mediaHint, setMediaHint] = useState('');
-  const [starting, setStarting] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
   const [verifyScore, setVerifyScore] = useState<number | null>(null);
@@ -502,60 +506,53 @@ export function PreExamCheck({
     }
   };
 
-  const handleStart = async () => {
+  const handleEnter = () => {
     if (exam.has_pin && !pin) {
       setError(t.enterPin);
       return;
     }
-    setStarting(true);
     setError('');
-    try {
-      const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...examAuthHeaders(token),
-        },
-        body: JSON.stringify({ pin }),
-      });
-      const data = await readJsonSafe<{
-        error?: string;
-        exam?: any;
-        studentExamId?: number;
-        startedAt?: string;
-        sessionKey?: string;
-        sessionSeqStart?: number;
-        sessionChallenge?: string;
-        deviceToken?: string;
-      }>(res);
-      if (!res.ok) {
-        setError(data?.error || t.preExamStartError);
-        setStarting(false);
-        return;
-      }
-      if (!data?.exam || data.studentExamId == null) {
-        setError(t.preExamServerError);
-        setStarting(false);
-        return;
-      }
-      if (data.deviceToken) {
-        setDeviceSessionToken(data.deviceToken);
-      }
-      onComplete(
-        {
-          ...data.exam,
-          startedAt: data.startedAt,
-          sessionKey: data.sessionKey,
-          sessionSeqStart: data.sessionSeqStart,
-          sessionChallenge: data.sessionChallenge,
-        },
-        data.studentExamId,
-      );
-    } catch {
-      setError(t.preExamNetworkError);
-      setStarting(false);
-    }
+    onComplete(
+      {
+        ...exam,
+        preExamPin: pin,
+      },
+      0,
+    );
   };
+
+  const positionLabel = (
+    {
+      WAITING: t.preExamPositionWaiting,
+      NO_FACE: t.preExamPositionNoFace,
+      MULTIPLE_FACES: t.preExamPositionMulti,
+      TOO_FAR: t.preExamPositionTooFar,
+      TOO_CLOSE: t.preExamPositionTooClose,
+      OFF_CENTER: t.preExamPositionOffCenter,
+      TURNED: t.preExamPositionTurned,
+      OK: t.preExamPositionOk,
+    } as Record<FacePositionStatus, string>
+  )[positionStatus];
+
+  // Progress qadamlari (localized label + bajarilgan holati).
+  const rulesDone = vacRulesScrolledEnd && agreed;
+  const steps = [
+    { label: PRE_L[lang].stepCamera, done: cameraReady },
+    { label: PRE_L[lang].stepRules, done: rulesDone },
+    { label: PRE_L[lang].stepIdentity, done: verified },
+    { label: PRE_L[lang].stepLiveness, done: livenessPassed },
+  ];
+  const activeStepIdx = steps.findIndex((s) => !s.done);
+
+  const blocked: string[] = [];
+  if (!cameraReady) blocked.push(t.preExamBlockedCamera);
+  if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
+  if (!agreed) blocked.push(t.preExamBlockedAgree);
+  if (exam.has_pin && !pin) blocked.push(t.preExamBlockedPin);
+  if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
+  if (!verified) blocked.push(t.preExamBlockedIdentity);
+  if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
+  const canStart = blocked.length === 0;
 
   return (
     <motion.div
@@ -563,314 +560,283 @@ export function PreExamCheck({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 8 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="w-full min-h-[calc(100dvh-4.5rem)] flex flex-col bg-gray-50 pb-4"
+      className="w-full min-h-[100dvh] lg:h-[100dvh] flex flex-col bg-gray-50 pt-[62px] sm:pt-[66px] lg:overflow-hidden"
     >
-      <div className="shrink-0 w-full max-w-6xl mx-auto px-3 sm:px-4 pt-3 pb-2">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <InstituteLogo size="sm" />
-            <div className="min-w-0">
-              <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight truncate">{t.preExamTitle}</h1>
-              <p className="text-xs sm:text-sm text-slate-500 truncate">{exam.title}</p>
-            </div>
+      <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex flex-col gap-3 lg:flex-1 lg:min-h-0">
+        {/* ── Sub-header: title + stepper ── */}
+        <div className="shrink-0 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-[19px] sm:text-[22px] font-bold text-gray-900 tracking-tight leading-tight">
+              {t.preExamTitle}
+            </h1>
+            <p className="text-[13px] text-gray-500 mt-0.5 truncate">{exam.title}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
-            <span className={`px-3 py-1 rounded-full transition-all ${cameraReady ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'bg-gray-100 text-gray-600'}`}>
-              {cameraReady ? '✓ Kamera' : '◯ Kamera'}
-            </span>
-            <span className={`px-3 py-1 rounded-full transition-all ${verified ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'bg-gray-100 text-gray-600'}`}>
-              {verified ? '✓ Yuz' : '◯ Yuz'}
-            </span>
-            <span className={`px-3 py-1 rounded-full transition-all ${livenessPassed ? 'bg-emerald-100 text-emerald-700 shadow-sm' : 'bg-gray-100 text-gray-600'}`}>
-              {livenessPassed ? '✓ Jonlilik' : '◯ Jonlilik'}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <Card className="flex flex-col w-full max-w-6xl mx-3 sm:mx-auto rounded-2xl border border-indigo-200 bg-white shadow-md overflow-hidden">
-        <CardContent className="flex flex-col p-3 sm:p-5 gap-4">
-          {(error || mediaHint) && (
-            <div className="shrink-0 space-y-2">
-              {error && <AdminAlert type="error">{error}</AdminAlert>}
-              {mediaHint && !error && <AdminAlert type="warning">{mediaHint}</AdminAlert>}
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 items-start">
-            <div className="flex flex-col overflow-hidden rounded-xl border border-amber-300 bg-amber-50 max-h-[46vh] lg:max-h-[440px] shadow-sm">
-              <div className="shrink-0 px-3 py-2.5 border-b border-amber-200 bg-gradient-to-r from-amber-100/80 to-amber-50">
-                <h3 className="font-bold text-amber-950 text-sm">{t.preExamVacRulesTitle}</h3>
-                <p className="text-[11px] text-amber-900/70 mt-0.5 leading-snug line-clamp-2">{t.preExamVacRulesIntro}</p>
-              </div>
-              <div
-                ref={vacRulesBoxRef}
-                className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-3 py-2.5 text-[13px] text-gray-900 leading-relaxed space-y-2"
-              >
-                  {t.preExamVacRulesItems.split('|||RULE|||').map((line, i) => (
-                    <div key={i} className="flex gap-2">
-                      <span className="shrink-0 font-bold text-amber-800 tabular-nums w-5 text-right text-xs">{i + 1}.</span>
-                      <p className="min-w-0 flex-1">{line.trim()}</p>
-                    </div>
-                  ))}
-                </div>
-                {!vacRulesScrolledEnd && (
-                  <p className="shrink-0 px-3 py-1.5 text-center text-[10px] font-medium text-amber-900 bg-amber-100/60 border-t border-amber-100">
-                    ↓ {t.preExamVacRulesScrollHint}
-                  </p>
-                )}
-            </div>
-
-            <div className="flex flex-col gap-3">
-              <div className="shrink-0 flex justify-center">
-                <div className="relative w-[min(64vw,260px)] sm:w-[280px] rounded-xl overflow-hidden border-2 border-indigo-300 bg-slate-900 aspect-[3/4] shadow-lg">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="w-full h-full object-cover"
-                    style={{
-                      transform: 'scaleX(-1)',
-                      filter: 'brightness(1.15) contrast(1.1) saturate(1.05)'
-                    }}
-                  />
-                  <canvas ref={canvasRef} className="hidden" aria-hidden />
-                  <canvas ref={livenessCanvasRef} className="hidden" aria-hidden />
-                  {!cameraReady && (
-                    <div className="absolute inset-0 flex items-center justify-center text-gray-500 text-xs bg-white/90 px-2 text-center">
-                      {t.preExamWaitCamera}
-                    </div>
-                  )}
-                  {showVerifyCelebration && (
-                    <IdentityVerifiedSuccess
-                      title={t.identityVerifySuccessTitle}
-                      subtitle={t.identityVerifySuccessSubtitle}
-                      scoreLabel={
-                        verifyScore != null
-                          ? t.identityVerifyScore.replace('{score}', String(Math.round(verifyScore * 100)))
-                          : undefined
-                      }
-                    />
-                  )}
-                  <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1.5 shadow-lg">
-                    <span className={`w-2 h-2 rounded-full ${cameraReady ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-                    <span className="text-white text-[11px] font-semibold">
-                      {cameraReady ? t.preExamCameraActive : t.preExamWaitCamera}
-                    </span>
-                  </div>
-                  <div className="absolute top-2.5 right-2.5 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm rounded-full px-2.5 py-1.5 shadow-lg">
-                    <span className={`w-2 h-2 rounded-full ${micReady ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                    <span className="text-white text-[11px] font-semibold">
-                      {micReady ? t.preExamMicActive : t.preExamMicInactive}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-2.5">
-                {exam.custom_rules && (
-                  <div className="p-2.5 border border-slate-300 bg-slate-50 rounded-lg text-xs text-slate-700 shadow-sm">
-                    <span className="font-semibold text-slate-900">{t.customRules}: </span>
-                    {exam.custom_rules}
-                  </div>
-                )}
-
-                {user.profile_image ? (
-                <div
-                  className={`p-3 border rounded-xl space-y-2.5 shadow-sm transition-all ${
-                    verified ? 'border-emerald-300 bg-emerald-50' : 'border-indigo-200 bg-indigo-50/40'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="relative shrink-0">
-                      <img
-                        src={user.profile_image}
-                        alt={t.profilePhotoLabel}
-                        className="w-11 h-11 rounded-lg object-cover border border-white shadow ring-1 ring-gray-200"
-                        referrerPolicy="no-referrer"
-                      />
-                      {verified && (
-                        <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white ring-2 ring-white">
-                          <Check className="h-3 w-3 stroke-[3]" aria-hidden />
-                        </span>
-                      )}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <h4 className="font-semibold text-slate-900 text-sm">{t.identityVerification}</h4>
-                      <p className="text-[11px] text-slate-500 truncate">{user.name || user.id}</p>
-                    </div>
-                  </div>
-
-                  {!verified && (
-                    <div
-                      className={`rounded-lg px-2.5 py-2 border flex items-center gap-2 shadow-sm transition-all ${
-                        positionOk ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300'
+          {/* Stepper */}
+          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto">
+            {steps.map((s, i) => {
+              const isActive = i === activeStepIdx;
+              return (
+                <React.Fragment key={s.label}>
+                  {i > 0 && <span className={`h-px w-4 sm:w-6 shrink-0 ${steps[i - 1].done ? 'bg-emerald-300' : 'bg-gray-200'}`} />}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-bold transition-colors ${
+                        s.done
+                          ? 'bg-emerald-500 text-white'
+                          : isActive
+                            ? 'bg-indigo-600 text-white'
+                            : 'bg-gray-200 text-gray-500'
                       }`}
                     >
-                      <span
-                        className={`inline-block h-2 w-2 rounded-full shrink-0 ${
-                          positionOk ? 'bg-green-500' : 'bg-amber-500 animate-pulse'
-                        }`}
-                      />
-                      <p className={`text-xs font-semibold leading-snug ${positionOk ? 'text-green-700' : 'text-amber-700'}`}>
-                        {(
-                          {
-                            WAITING: t.preExamPositionWaiting,
-                            NO_FACE: t.preExamPositionNoFace,
-                            MULTIPLE_FACES: t.preExamPositionMulti,
-                            TOO_FAR: t.preExamPositionTooFar,
-                            TOO_CLOSE: t.preExamPositionTooClose,
-                            OFF_CENTER: t.preExamPositionOffCenter,
-                            TURNED: t.preExamPositionTurned,
-                            OK: t.preExamPositionOk,
-                          } as Record<FacePositionStatus, string>
-                        )[positionStatus]}
-                      </p>
-                    </div>
-                  )}
+                      {s.done ? <Check className="w-3.5 h-3.5 stroke-[3]" /> : i + 1}
+                    </span>
+                    <span className={`text-[12px] font-semibold whitespace-nowrap ${isActive ? 'inline' : 'hidden sm:inline'} ${s.done ? 'text-emerald-700' : isActive ? 'text-gray-900' : 'text-gray-400'}`}>
+                      {s.label}
+                    </span>
+                  </div>
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
 
-                  <AdminBtn
-                    onClick={verifyIdentity}
-                    disabled={!cameraReady || verifying || verified || !positionOk}
-                    variant={verified ? 'emerald' : 'blue'}
-                    size="md"
-                    loading={verifying}
-                    className="w-full"
-                  >
-                    {verified ? t.identityVerified : t.identityVerifyBtn}
-                  </AdminBtn>
+        {(error || mediaHint) && (
+          <div className="space-y-2">
+            {error && <AdminAlert type="error">{error}</AdminAlert>}
+            {mediaHint && !error && <AdminAlert type="warning">{mediaHint}</AdminAlert>}
+          </div>
+        )}
 
-                  {(verified || livenessChecking || livenessPassed || livenessFailed) && (
-                    <div className="text-xs text-gray-600">
-                      {verified && !livenessPassed && !livenessChecking && !livenessFailed && (
-                        <p>{t.preExamLivenessSelfHint}</p>
-                      )}
-                      {livenessChecking && (
-                        <p className="text-indigo-700 flex items-center gap-1.5">
-                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                          {t.preExamLivenessWaiting}
-                        </p>
-                      )}
-                      {livenessPassed && (
-                        <p className="font-semibold text-green-700">{t.preExamLivenessPassed}</p>
-                      )}
-                      {verified && !livenessPassed && livenessFailed && !livenessChecking && (
-                        <AdminBtn
-                          variant="ghost"
-                          size="sm"
-                          className="w-full mt-1"
-                          onClick={() => {
-                            setLivenessFailed(false);
-                            setError('');
-                            setLivenessRetryKey((k) => k + 1);
-                          }}
-                        >
-                          {t.preExamLivenessRetryBtn}
-                        </AdminBtn>
-                      )}
-                    </div>
-                  )}
+        {/* ── Body grid ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:flex-1 lg:min-h-0 lg:items-stretch lg:overflow-hidden">
+          {/* Rules card */}
+          <section className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 lg:h-full">
+            <header className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-8 h-8 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                </span>
+                <h3 className="font-semibold text-[14px] text-gray-900 truncate">{PRE_L[lang].rulesTitle}</h3>
+              </div>
+              <span className="shrink-0 inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-md">
+                {PRE_L[lang].important}
+              </span>
+            </header>
+            <div
+              ref={vacRulesBoxRef}
+              className="px-4 py-3 text-[13px] text-gray-700 leading-relaxed space-y-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain"
+            >
+              <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntro}</p>
+              {t.preExamVacRulesItems.split('|||RULE|||').map((line, i) => (
+                <div key={i} className="flex gap-2.5">
+                  <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 font-bold text-[11px] tabular-nums mt-0.5">{i + 1}</span>
+                  <p className="min-w-0 flex-1">{line.trim()}</p>
                 </div>
-              ) : (
-                <div className="p-3 border border-red-300 bg-red-50 rounded-lg text-red-800 text-xs font-semibold shadow-sm">
-                  {t.profilePhotoMissingExam}
-                </div>
-              )}
+              ))}
+            </div>
+            {!vacRulesScrolledEnd && (
+              <p className="shrink-0 px-3 py-2 text-center text-[11px] font-medium text-gray-500 bg-gray-50 border-t border-gray-100">
+                ↓ {t.preExamVacRulesScrollHint}
+              </p>
+            )}
+          </section>
 
+          {/* Camera + identity */}
+          <section className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
+            <div className="shrink-0">
+              <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                  style={{ transform: 'scaleX(-1)', filter: 'brightness(1.12) contrast(1.08) saturate(1.03)' }}
+                />
+                <canvas ref={canvasRef} className="hidden" aria-hidden />
+                <canvas ref={livenessCanvasRef} className="hidden" aria-hidden />
+                {!cameraReady && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-gray-400 text-xs bg-slate-800 px-2 text-center">
+                    <svg className="w-8 h-8 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                    {t.preExamWaitCamera}
+                  </div>
+                )}
+                {showVerifyCelebration && (
+                  <IdentityVerifiedSuccess
+                    title={t.identityVerifySuccessTitle}
+                    subtitle={t.identityVerifySuccessSubtitle}
+                    scoreLabel={
+                      verifyScore != null
+                        ? t.identityVerifyScore.replace('{score}', String(Math.round(verifyScore * 100)))
+                        : undefined
+                    }
+                  />
+                )}
+                <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/55 backdrop-blur-sm rounded-full px-2 py-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${cameraReady ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+                  <span className="text-white text-[10.5px] font-medium">{cameraReady ? t.preExamCameraActive : t.preExamWaitCamera}</span>
+                </div>
+                <div className="absolute top-2 right-2 flex items-center gap-1.5 bg-black/55 backdrop-blur-sm rounded-full px-2 py-1">
+                  <span className={`w-1.5 h-1.5 rounded-full ${micReady ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                  <span className="text-white text-[10.5px] font-medium">{micReady ? t.preExamMicActive : t.preExamMicInactive}</span>
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="shrink-0 pt-2 border-t border-gray-200 space-y-2.5">
-            {exam.has_pin && (
-              <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-4 p-3.5 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-white shadow-sm">
-                <div className="flex items-center gap-2.5 shrink-0">
-                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-500/30">
-                    <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                  </span>
-                  <label htmlFor="exam-pin" className="min-w-0">
-                    <span className="block text-sm font-bold text-indigo-950 leading-tight">{t.enterPin}</span>
-                    <span className="block text-[11px] text-indigo-700/70 leading-tight mt-0.5">{t.preExamPinHint}</span>
-                  </label>
-                </div>
-                <AdminInput
-                  id="exam-pin"
-                  type="password"
-                  inputMode="numeric"
-                  value={pin}
-                  onChange={(e) => setPin(e.target.value)}
-                  placeholder="• • • • • •"
-                  className="text-center text-lg tracking-[0.4em] font-semibold h-11 sm:ml-auto sm:max-w-[220px] bg-white border-indigo-200 focus:border-indigo-400"
-                  autoComplete="off"
-                />
+            {exam.custom_rules && (
+              <div className="p-3 border border-gray-200 bg-gray-50 rounded-lg text-[12.5px] text-gray-600">
+                <span className="font-semibold text-gray-900">{t.customRules}: </span>
+                {exam.custom_rules}
               </div>
             )}
 
-          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            {user.profile_image ? (
+              <div className={`p-4 border rounded-xl space-y-3 transition-colors ${verified ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200 bg-white'}`}>
+                <div className="flex items-center gap-3">
+                  <div className="relative shrink-0">
+                    <img
+                      src={user.profile_image}
+                      alt={t.profilePhotoLabel}
+                      className="w-11 h-11 rounded-lg object-cover ring-1 ring-gray-200"
+                      referrerPolicy="no-referrer"
+                    />
+                    {verified && (
+                      <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white ring-2 ring-white">
+                        <Check className="h-3 w-3 stroke-[3]" aria-hidden />
+                      </span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="font-semibold text-gray-900 text-[14px] leading-tight">{t.identityVerification}</h4>
+                    <p className="text-[12px] text-gray-500 truncate mt-0.5">{user.name || user.id}</p>
+                  </div>
+                </div>
+
+                {!verified && (
+                  <div className={`rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors ${positionOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                    <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${positionOk ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+                    <p className={`text-[12.5px] font-medium leading-snug ${positionOk ? 'text-emerald-700' : 'text-amber-700'}`}>{positionLabel}</p>
+                  </div>
+                )}
+
+                <AdminBtn
+                  onClick={verifyIdentity}
+                  disabled={!cameraReady || verifying || verified || !positionOk}
+                  variant={verified ? 'emerald' : 'blue'}
+                  size="md"
+                  loading={verifying}
+                  className="w-full"
+                >
+                  {verified ? t.identityVerified : t.identityVerifyBtn}
+                </AdminBtn>
+
+                {(verified || livenessChecking || livenessPassed || livenessFailed) && (
+                  <div className="text-[12.5px] text-gray-600">
+                    {verified && !livenessPassed && !livenessChecking && !livenessFailed && (
+                      <p>{t.preExamLivenessSelfHint}</p>
+                    )}
+                    {livenessChecking && (
+                      <p className="text-indigo-700 flex items-center gap-1.5">
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        {t.preExamLivenessWaiting}
+                      </p>
+                    )}
+                    {livenessPassed && (
+                      <p className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                        <Check className="w-4 h-4 stroke-[3]" /> {t.preExamLivenessPassed}
+                      </p>
+                    )}
+                    {verified && !livenessPassed && livenessFailed && !livenessChecking && (
+                      <AdminBtn
+                        variant="ghost"
+                        size="sm"
+                        className="w-full mt-1"
+                        onClick={() => {
+                          setLivenessFailed(false);
+                          setError('');
+                          setLivenessRetryKey((k) => k + 1);
+                        }}
+                      >
+                        {t.preExamLivenessRetryBtn}
+                      </AdminBtn>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-3 border border-red-200 bg-red-50 rounded-lg text-red-700 text-[12.5px] font-medium">
+                {t.profilePhotoMissingExam}
+              </div>
+            )}
+          </section>
+        </div>
+
+        {/* ── Footer action bar ── */}
+        <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3">
+          {exam.has_pin && (
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
+              <div className="flex items-center gap-2.5 shrink-0">
+                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500">
+                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
+                </span>
+                <label htmlFor="exam-pin" className="min-w-0">
+                  <span className="block text-[13.5px] font-semibold text-gray-900 leading-tight">{t.enterPin}</span>
+                  <span className="block text-[11.5px] text-gray-500 leading-tight mt-0.5">{t.preExamPinHint}</span>
+                </label>
+              </div>
+              <AdminInput
+                id="exam-pin"
+                type="password"
+                inputMode="numeric"
+                value={pin}
+                onChange={(e) => setPin(e.target.value)}
+                placeholder="••••••"
+                className="text-center text-lg tracking-[0.4em] font-semibold h-11 sm:ml-auto sm:max-w-[220px]"
+                autoComplete="off"
+              />
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <label className="flex items-start gap-2.5 cursor-pointer flex-1 min-w-0">
               <input
                 type="checkbox"
                 checked={agreed}
                 onChange={(e) => setAgreed(e.target.checked)}
                 disabled={!vacRulesScrolledEnd}
-                className="w-4 h-4 mt-0.5 text-black rounded border-gray-300 shrink-0 disabled:opacity-40"
+                className="w-4 h-4 mt-0.5 accent-indigo-600 rounded border-gray-300 shrink-0 disabled:opacity-40"
               />
-              <span className="font-medium text-gray-800 text-xs sm:text-sm leading-snug">{t.preExamAgreeAllRules}</span>
+              <span className="font-medium text-gray-700 text-[12.5px] sm:text-[13px] leading-snug">{t.preExamAgreeAllRules}</span>
             </label>
-            <div className="flex flex-col gap-2 shrink-0 sm:items-end w-full sm:w-auto">
-              {/* Nima sabab tugma yopiq ekanini ko'rsatish */}
-              {(() => {
-                const blocked: string[] = [];
-                if (!cameraReady) blocked.push(t.preExamBlockedCamera);
-                if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
-                if (!agreed) blocked.push(t.preExamBlockedAgree);
-                if (exam.has_pin && !pin) blocked.push(t.preExamBlockedPin);
-                if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
-                if (!verified) blocked.push(t.preExamBlockedIdentity);
-                if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
-                if (blocked.length === 0) return null;
-                return (
-                  <div className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 sm:max-w-xs sm:text-right">
-                    <p className="font-semibold mb-0.5">{t.preExamStartChecklist}</p>
-                    <ul className="space-y-0.5">
-                      {blocked.slice(0, 4).map((b) => (
-                        <li key={b}>✗ {b}</li>
-                      ))}
-                      {blocked.length > 4 && <li>+{blocked.length - 4} …</li>}
-                    </ul>
-                  </div>
-                );
-              })()}
-              <div className="flex gap-2 w-full sm:w-auto">
-                <AdminBtn variant="ghost" size="md" onClick={onCancel} disabled={starting} className="flex-1 sm:flex-none">
-                  {t.cancel}
-                </AdminBtn>
-                <AdminBtn
-                  variant="blue"
-                  size="md"
-                  loading={starting}
-                  onClick={handleStart}
-                  disabled={
-                    !cameraReady ||
-                    !agreed ||
-                    !vacRulesScrolledEnd ||
-                    (exam.has_pin && !pin) ||
-                    !user.profile_image ||
-                    !verified ||
-                    !livenessPassed ||
-                    livenessChecking
-                  }
-                  className="flex-1 sm:flex-none sm:px-6"
-                >
-                  {starting ? t.preExamStarting : t.takeExam}
-                </AdminBtn>
-              </div>
+            <div className="flex gap-2 w-full sm:w-auto shrink-0">
+              <AdminBtn variant="ghost" size="lg" onClick={onCancel} className="flex-1 sm:flex-none">
+                {t.cancel}
+              </AdminBtn>
+              <AdminBtn
+                variant="blue"
+                size="lg"
+                onClick={handleEnter}
+                disabled={!canStart}
+                className="flex-1 sm:flex-none sm:px-8"
+              >
+                {t.preExamEnterExam}
+              </AdminBtn>
             </div>
           </div>
-          </div>
-        </CardContent>
-      </Card>
+
+          {!canStart && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-[11.5px] text-gray-500">
+              <span className="font-semibold text-gray-600">{t.preExamStartChecklist}</span>
+              {blocked.map((b) => (
+                <span key={b} className="inline-flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  {b}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </motion.div>
   );
 }

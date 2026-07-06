@@ -29,6 +29,32 @@ def _notify_banned(student_id: str, student_name: str, student_exam_id: int, exa
         pass  # WS xatosi ban jarayonini to'xtatmasin
 
 
+def _notify_student_unblocked(
+    student_id: str,
+    student_exam_id: int,
+    exam_id: int,
+    *,
+    can_retake: bool = True,
+    unblocked_by: str | None = None,
+) -> None:
+    """Admin ban yechganda talabaga WebSocket orqali xabar."""
+    try:
+        layer = get_channel_layer()
+        if layer:
+            payload: dict = {
+                "type": "exam.student_unblocked",
+                "student_id": str(student_id),
+                "student_exam_id": student_exam_id,
+                "exam_id": exam_id,
+                "can_retake": can_retake,
+            }
+            if unblocked_by:
+                payload["unblocked_by"] = str(unblocked_by)
+            async_to_sync(layer.group_send)(f"exam_{exam_id}", payload)
+    except Exception:
+        pass
+
+
 @api_view(["POST"])
 @throttle_classes([FaceVerifyThrottle])
 @permission_classes([IsAuthenticated])
@@ -80,16 +106,20 @@ def student_identity_compare(request):
             )
         se = StudentExam.objects.filter(student_id=u.id, exam_id=eid).first()
         if se and (se.status or "").strip() == "In Progress":
-            mismatch = _enforce_bound_device_or_403(se, request)
-            if mismatch is not None:
-                body = getattr(mismatch, "data", None) or {}
-                if isinstance(body, dict) and "code" not in body:
-                    body = {**body, "code": "DEVICE_MISMATCH"}
-                    return Response(body, status=mismatch.status_code)
-                return mismatch
-            sig_err = _verify_exam_hmac_or_403(se, request)
-            if sig_err is not None:
-                return sig_err
+            if not _request_has_exam_session_guard(request):
+                _reset_abandoned_in_progress(se)
+                se.refresh_from_db()
+            else:
+                mismatch = _enforce_bound_device_or_403(se, request)
+                if mismatch is not None:
+                    body = getattr(mismatch, "data", None) or {}
+                    if isinstance(body, dict) and "code" not in body:
+                        body = {**body, "code": "DEVICE_MISMATCH"}
+                        return Response(body, status=mismatch.status_code)
+                    return mismatch
+                sig_err = _verify_exam_hmac_or_403(se, request)
+                if sig_err is not None:
+                    return sig_err
     elif identity_verify_required():
         return Response(
             {"error": "exam_id is required for identity verification", "code": "EXAM_ID_REQUIRED"},
@@ -177,19 +207,19 @@ def student_exams_list(request):
     assigned_ids = list(
         ExamGroup.objects.filter(group_id=u.group_id).values_list("exam_id", flat=True).distinct()
     )
-    exams_by_id = {e.id: e for e in Exam.objects.filter(pk__in=assigned_ids)}
+    if not assigned_ids:
+        return Response([])
+    exams_qs = Exam.objects.filter(pk__in=assigned_ids).order_by("-id")
     ses_by_exam = {
         se.exam_id: se
         for se in StudentExam.objects.filter(student_id=u.id, exam_id__in=assigned_ids)
     }
     out = []
-    for eid in assigned_ids:
-        e = exams_by_id.get(eid)
-        if not e:
-            continue
-        se = ses_by_exam.get(eid)
+    for e in exams_qs:
+        se = ses_by_exam.get(e.id)
         if se is not None and se.status in ("Completed", "Banned"):
             continue
+        in_progress = se is not None and (se.status or "").strip() == "In Progress" and bool(se.started_at)
         out.append(
             {
                 "id": e.id,
@@ -202,6 +232,8 @@ def student_exams_list(request):
                 "custom_rules": e.custom_rules,
                 "exam_mode": e.exam_mode,
                 "bank_question_count": e.bank_question_count,
+                "in_progress": in_progress,
+                "started_at": se.started_at.isoformat() if in_progress and se.started_at else None,
             }
         )
     return Response(out)
@@ -264,7 +296,16 @@ def student_exams_start(request, pk: int):
         )
 
     pending_se = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
-    if identity_verify_required() and not _identity_verification_fresh(pending_se, now):
+    resuming = bool(
+        pending_se
+        and (pending_se.status or "").strip() == "In Progress"
+        and pending_se.started_at
+    )
+    if (
+        identity_verify_required()
+        and not resuming
+        and not _identity_verification_fresh(pending_se, now)
+    ):
         return Response(
             {
                 "error": "Yuz tekshiruvi talab qilinadi. Pre-exam bosqichini yakunlang.",
@@ -327,6 +368,22 @@ def student_exams_start(request, pk: int):
                 ]
             )
         elif se.status == "In Progress":
+            if vac_device_lock:
+                mismatch = _enforce_bound_device_or_403(se, request)
+                if mismatch is not None:
+                    if se.started_at and _try_rebind_device_for_resume(se, request, device_token, device_fp):
+                        device_token = se.device_session_token or device_token
+                        mismatch = None
+                    elif not se.started_at and _student_exam_draft_is_empty(se):
+                        se.device_fingerprint = device_fp or ""
+                        se.device_session_token = device_token
+                        se.device_bound_at = dj_tz.now()
+                        se.started_at = now
+                        se.proctor_official_warnings = 0
+                        se.proctor_last_warning_at = None
+                        mismatch = None
+                    else:
+                        return mismatch
             if not se.session_signing_key:
                 se.session_signing_key = secrets.token_hex(32)
             if not se.session_request_seq:
@@ -348,6 +405,9 @@ def student_exams_start(request, pk: int):
                     "device_session_token",
                     "device_fingerprint",
                     "device_bound_at",
+                    "started_at",
+                    "proctor_official_warnings",
+                    "proctor_last_warning_at",
                 ]
             )
 
@@ -372,6 +432,8 @@ def student_exams_start(request, pk: int):
             se.save(update_fields=retake_update_fields)
 
     full_questions: list[dict]
+    student_lang = resolve_student_exam_language(request, exam)
+    ex_lang = effective_exam_language(exam, student_lang)
     if exam.exam_mode == "bank_mixed":
         if se.session_questions_json:
             full_questions = safe_json_loads(se.session_questions_json, [])
@@ -402,7 +464,6 @@ def student_exams_start(request, pk: int):
                     status=400,
                 )
             picked_rows = list(base_qs.order_by("?")[:n_bank])
-            ex_lang = exam.language or "uz"
             picked = [bank_row_to_exam_dict(row, ex_lang) for row in picked_rows]
             if track == "bachelor" and picked:
                 n_para = max(1, int(len(picked) * 0.25))
@@ -453,6 +514,9 @@ def student_exams_start(request, pk: int):
     else:
         full_questions = safe_json_loads(exam.questions_json, [])
 
+    full_questions = apply_exam_language_to_questions(
+        full_questions, exam.language or "uz", student_lang
+    )
     shuffled = build_student_question_list(full_questions)
     deadline = submission_deadline(exam, se)
     exam_out = {
@@ -462,7 +526,8 @@ def student_exams_start(request, pk: int):
         "start_time": exam.start_time.isoformat() if exam.start_time else None,
         "end_time": exam.end_time.isoformat() if exam.end_time else None,
         "duration_minutes": exam.duration_minutes,
-        "language": exam.language,
+        "language": ex_lang,
+        "language_mode": exam.language,
         "pin": exam.pin,
         "custom_rules": exam.custom_rules,
         "exam_mode": exam.exam_mode,
@@ -478,6 +543,7 @@ def student_exams_start(request, pk: int):
             "sessionSeqStart": int(se.session_request_seq or 1),
             "sessionChallenge": se.session_challenge,
             "deviceToken": device_token if vac_device_lock else None,
+            "resumed": resuming,
         }
     )
 @api_view(["POST"])
@@ -844,7 +910,7 @@ def student_violations(request):
     WARN_SUPPRESS_SECONDS = max(5, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "10")))
     EVENT_MIN_INTERVAL_SECONDS = max(1, int(os.environ.get("PROCTOR_EVENT_MIN_INTERVAL_SECONDS", "5")))
     # Imtihon startida texnik tebranishlar (kamera/GPU) uchun grace — yozuvsiz.
-    STARTUP_GRACE_SECONDS = max(0, int(os.environ.get("PROCTOR_STARTUP_GRACE_SECONDS", "40")))
+    STARTUP_GRACE_SECONDS = max(0, int(os.environ.get("PROCTOR_STARTUP_GRACE_SECONDS", "0")))
     MAX_WARNINGS_BEFORE_BAN = 3  # 3-chi rasmiy ogohlantirishda darhol ban
     HARDENED_MODE = str(os.environ.get("PROCTOR_HARDENED_MODE", "1")).strip() not in ("0", "false", "False")
     HARDENED_WINDOW_MIN = max(3, int(os.environ.get("PROCTOR_HARD_WINDOW_MIN", "10")))

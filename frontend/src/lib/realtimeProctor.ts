@@ -63,7 +63,7 @@ const STREAK = {
   gaze: 6, // ~0.8s uzoq qaragan
   movement: 5,
   hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
-  mouth: 3, // ~0.4s gapirish naqshi (tezroq aniqlash)
+  mouth: 2,
   tooFar: 10, // ~1.3s juda uzoq
   tooClose: 8, // ~1s juda yaqin
   offCenter: 10, // ~1.3s markazdan chetda
@@ -393,7 +393,7 @@ export class RealtimeProctor {
       if ((hist[i - 1] - mean) * (hist[i] - mean) < 0) crossings++;
     }
     // Gapirish: og'iz bir necha marta ochilib-yopiladi + amplituda yetarli.
-    const talking = crossings >= 2 && amp >= 0.03;
-    if (this.streak('mouth', talking, STREAK.mouth)) this.emit('MOUTH_MOVEMENT_TALKING');
+    const talking = crossings >= 1 && amp >= 0.022;
+    if (this.streak('mouth', talking, 2)) this.emit('MOUTH_MOVEMENT_TALKING');
   }
 }

@@ -3,8 +3,7 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 
-from asgiref.sync import async_to_sync
-from channels.layers import get_channel_layer
+from apps.api.views.student import _notify_student_unblocked
 
 
 @api_view(["GET", "POST"])
@@ -271,22 +270,13 @@ def admin_student_exams_unblock(request, pk: int):
             proctor_last_warning_at=None,
         )
 
-    try:
-        layer = get_channel_layer()
-        if layer:
-            async_to_sync(layer.group_send)(
-                f"exam_{exam_id}",
-                {
-                    "type": "exam.student_unblocked",
-                    "student_id": student_id,
-                    "student_exam_id": pk,
-                    "exam_id": exam_id,
-                    "can_retake": can_retake,
-                    "unblocked_by": str(u.id),
-                },
-            )
-    except Exception:
-        pass
+    _notify_student_unblocked(
+        student_id,
+        pk,
+        exam_id,
+        can_retake=can_retake,
+        unblocked_by=str(u.id),
+    )
 
     audit(request, "unblock_student", "student_exam", pk, student_name,
           f"exam_id={exam_id}, can_retake={can_retake}")
@@ -343,7 +333,18 @@ def admin_ban_appeal_resolve(request, pk: int):
     with transaction.atomic():
         if decision == "approve":
             AppUser.objects.filter(pk=row.student_id).update(status="Active")
-            StudentExam.objects.filter(student_id=row.student_id, status="Banned").update(
+            banned_qs = StudentExam.objects.filter(student_id=row.student_id, status="Banned")
+            if row.exam_id:
+                banned_qs = banned_qs.filter(exam_id=row.exam_id)
+            resumed = list(
+                banned_qs.filter(started_at__isnull=False).values_list("pk", "exam_id")
+            )
+            banned_qs.filter(started_at__isnull=False).update(
+                status="In Progress",
+                proctor_official_warnings=0,
+                proctor_last_warning_at=None,
+            )
+            banned_qs.filter(started_at__isnull=True).update(
                 status="Pending",
                 proctor_official_warnings=0,
                 proctor_last_warning_at=None,
@@ -362,6 +363,16 @@ def admin_ban_appeal_resolve(request, pk: int):
             note=note[:1000],
             meta_json=json.dumps({"status": row.status}),
         )
+    if decision == "approve":
+        for se_pk, ex_id in resumed:
+            _notify_student_unblocked(
+                row.student_id,
+                se_pk,
+                ex_id,
+                can_retake=True,
+                unblocked_by=str(request.user.id),
+            )
+
     action_key = "approve_appeal" if decision == "approve" else "reject_appeal"
     audit(request, action_key, "appeal", row.id, row.student.name, f"decision={decision}, note={note[:80]}")
     return Response({"success": True, "status": row.status})
@@ -1032,7 +1043,7 @@ def admin_exams(request):
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "GET":
         out = []
-        for e in Exam.objects.select_related("teacher").all():
+        for e in Exam.objects.select_related("teacher").order_by("-id"):
             out.append(_exam_row_dict(e, e.teacher.name))
         return Response(out)
     return _admin_exams_create_impl(request)

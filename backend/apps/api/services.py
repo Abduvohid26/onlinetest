@@ -241,6 +241,161 @@ def _coerce_exam_options(opts_raw: list, opts_en: list) -> list[str]:
     return out
 
 
+def resolve_student_exam_language(request, exam) -> str:
+    """Imtihon `auto` bo'lsa — talaba UI tili (header/body), aks holda imtihon tili."""
+    exam_lang = (getattr(exam, "language", None) or "uz").lower()
+    if exam_lang in ("uz", "ru", "en"):
+        return exam_lang
+    header = str(request.META.get("HTTP_X_STUDENT_LANG") or "").lower().strip()[:2]
+    if header in ("uz", "ru", "en"):
+        return header
+    body = getattr(request, "data", None)
+    if isinstance(body, dict):
+        for key in ("student_lang", "lang"):
+            sl = str(body.get(key) or "").lower().strip()[:2]
+            if sl in ("uz", "ru", "en"):
+                return sl
+    return "uz"
+
+
+def effective_exam_language(exam, student_lang: str) -> str:
+    exam_lang = (getattr(exam, "language", None) or "uz").lower()
+    if exam_lang == "auto":
+        return student_lang if student_lang in ("uz", "ru", "en") else "uz"
+    return exam_lang if exam_lang in ("uz", "ru", "en") else "uz"
+
+
+def localize_exam_question(q: dict, lang: str) -> dict:
+    """Ko'p tilli savol dict → bitta til (talaba ko'radi)."""
+    lang = (lang or "uz").lower()
+    opts_en = q.get("options") or []
+    if not isinstance(opts_en, list):
+        opts_en = []
+    if lang == "en":
+        text = (q.get("text_en") or q.get("text") or "").strip()
+        opts = q.get("options_en") if isinstance(q.get("options_en"), list) else opts_en
+        ca = (q.get("correct_answer_en") or q.get("correctAnswer") or "").strip()
+    elif lang == "ru":
+        text = (q.get("text_ru") or q.get("text") or "").strip()
+        opts = q.get("options_ru") if isinstance(q.get("options_ru"), list) else opts_en
+        ca = (q.get("correct_answer_ru") or q.get("correctAnswer") or "").strip()
+    else:
+        text = (q.get("text_uz") or q.get("text") or "").strip()
+        opts = q.get("options_uz") if isinstance(q.get("options_uz"), list) else opts_en
+        ca = (q.get("correct_answer_uz") or q.get("correctAnswer") or "").strip()
+    opts = _coerce_exam_options(
+        [str(x) for x in opts] if isinstance(opts, list) else [],
+        [str(x) for x in opts_en],
+    )
+    ca = str(ca or "").strip()
+    if ca not in opts:
+        for o in opts:
+            if ca and (ca in o or o.endswith(ca)):
+                ca = o
+                break
+        else:
+            ca = opts[0] if opts else ca
+    out = dict(q)
+    out["text"] = text
+    out["options"] = opts
+    out["correctAnswer"] = ca
+    return out
+
+
+def exam_question_with_translations(q: dict, tr: dict, source_lang: str) -> dict:
+    """Bitta savol + AI tarjima natijasini imtihon JSON formatiga birlashtiradi."""
+    tr = tr or {}
+    src = (source_lang or "uz").lower()
+    out = {
+        "id": q.get("id"),
+        "text": q.get("text"),
+        "options": list(q.get("options") or []),
+        "correctAnswer": q.get("correctAnswer"),
+    }
+
+    def _lst(key: str, fallback: list) -> list:
+        v = tr.get(key)
+        return list(v) if isinstance(v, list) else list(fallback)
+
+    if src == "en":
+        out.update(
+            {
+                "text_en": out["text"],
+                "text_uz": str(tr.get("text_uz") or ""),
+                "text_ru": str(tr.get("text_ru") or ""),
+                "options_en": out["options"],
+                "options_uz": _lst("options_uz", out["options"]),
+                "options_ru": _lst("options_ru", out["options"]),
+                "correct_answer_en": out["correctAnswer"],
+                "correct_answer_uz": str(tr.get("correct_answer_uz") or ""),
+                "correct_answer_ru": str(tr.get("correct_answer_ru") or ""),
+            }
+        )
+    elif src == "ru":
+        out.update(
+            {
+                "text_ru": out["text"],
+                "text_uz": str(tr.get("text_uz") or ""),
+                "text_en": str(tr.get("text_en") or ""),
+                "options_ru": out["options"],
+                "options_uz": _lst("options_uz", out["options"]),
+                "options_en": _lst("options_en", out["options"]),
+                "correct_answer_ru": out["correctAnswer"],
+                "correct_answer_uz": str(tr.get("correct_answer_uz") or ""),
+                "correct_answer_en": str(tr.get("correct_answer_en") or ""),
+            }
+        )
+    else:
+        out.update(
+            {
+                "text_uz": out["text"],
+                "text_ru": str(tr.get("text_ru") or ""),
+                "text_en": str(tr.get("text_en") or ""),
+                "options_uz": out["options"],
+                "options_ru": _lst("options_ru", out["options"]),
+                "options_en": _lst("options_en", out["options"]),
+                "correct_answer_uz": out["correctAnswer"],
+                "correct_answer_ru": str(tr.get("correct_answer_ru") or ""),
+                "correct_answer_en": str(tr.get("correct_answer_en") or ""),
+            }
+        )
+    return out
+
+
+def exam_questions_add_translations(questions: list[dict], source_language: str | None = None) -> list[dict]:
+    """Manual/PDF savollarini UZ+RU+EN ga tarjima qilib saqlash (imtihon yaratish — auto til)."""
+    if not questions:
+        return []
+    from apps.api.gemini_tools import detect_question_language, translate_questions_batch
+
+    src = (source_language or "").lower()
+    if src not in ("uz", "ru", "en"):
+        sample = " ".join(str(q.get("text") or "") for q in questions[:8])
+        src = detect_question_language(sample)
+    payload = [
+        {
+            "text": str(q.get("text") or ""),
+            "options": list(q.get("options") or []),
+            "correctAnswer": str(q.get("correctAnswer") or ""),
+        }
+        for q in questions
+    ]
+    try:
+        translations = translate_questions_batch(payload, src)
+    except Exception:
+        translations = [{} for _ in questions]
+    return [
+        exam_question_with_translations(q, translations[i] if i < len(translations) else {}, src)
+        for i, q in enumerate(questions)
+    ]
+
+
+def apply_exam_language_to_questions(full: list[dict], exam_lang: str, student_lang: str) -> list[dict]:
+    if (exam_lang or "uz").lower() != "auto":
+        return full
+    return [localize_exam_question(q, student_lang) for q in full]
+
+
 def bank_row_to_exam_dict(row, exam_lang: str) -> dict:
     """TestBankQuestion qatoridan imtihon tili bo'yicha savol dict (to'g'ri javob bilan)."""
     opts_en = safe_json_loads(row.options_json, [])

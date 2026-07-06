@@ -12,8 +12,9 @@ import { ExamRoom } from './pages/ExamRoom';
 import { Button } from './components/ui';
 import { translations, Language } from './i18n';
 import { InstituteLogo } from './components/InstituteLogo';
-import { clearDeviceSessionToken } from './lib/deviceFingerprint';
+import { clearDeviceSessionToken, examAuthHeaders, setDeviceSessionToken } from './lib/deviceFingerprint';
 import { apiUrl } from './lib/apiUrl';
+import { readJsonSafe } from './lib/http';
 
 const SUPPORTED_LANGS: Language[] = ['uz', 'ru', 'en'];
 
@@ -150,6 +151,51 @@ function AppContent() {
     setExamStatus('taking');
   };
 
+  const resumeExam = async (exam: any, pin = '') => {
+    if (!token) return;
+    try {
+      const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Student-Lang': lang,
+          ...examAuthHeaders(token),
+        },
+        body: JSON.stringify({ pin, student_lang: lang }),
+      });
+      const data = await readJsonSafe<{
+        error?: string;
+        exam?: any;
+        studentExamId?: number;
+        startedAt?: string;
+        sessionKey?: string;
+        sessionSeqStart?: number;
+        sessionChallenge?: string;
+        deviceToken?: string;
+      }>(res);
+      if (!res.ok || !data?.exam || data.studentExamId == null) {
+        window.alert(data?.error || translations[lang].preExamStartError);
+        return;
+      }
+      if (data.deviceToken) {
+        setDeviceSessionToken(data.deviceToken);
+      }
+      beginExam(
+        {
+          ...data.exam,
+          startedAt: data.startedAt,
+          sessionKey: data.sessionKey,
+          sessionSeqStart: data.sessionSeqStart,
+          sessionChallenge: data.sessionChallenge,
+          preExamPin: pin,
+        },
+        data.studentExamId,
+      );
+    } catch {
+      window.alert(translations[lang].preExamNetworkError);
+    }
+  };
+
   const finishExam = (submitPayload?: ExamResultPayload | null) => {
     setExamStatus('finished');
     setActiveExam(null);
@@ -282,7 +328,7 @@ function AppContent() {
             {user.role === 'staff' && <StaffDashboard token={token} lang={lang} />}
             {user.role === 'student' && examStatus === 'pending' && (
               <div>
-                <StudentDashboard token={token} user={user} onStartExam={startExamCheck} lang={lang} />
+                <StudentDashboard token={token} user={user} onStartExam={startExamCheck} onResumeExam={resumeExam} lang={lang} />
               </div>
             )}
             {user.role === 'student' && examStatus === 'checking' && activeExam && (
@@ -298,7 +344,7 @@ function AppContent() {
             {user.role === 'student' && examStatus === 'taking' && activeExam && (
               <ExamRoom 
                 exam={activeExam} 
-                studentExamId={studentExamId!} 
+                studentExamId={studentExamId ?? 0} 
                 token={token} 
                 user={user}
                 lang={lang}
@@ -330,6 +376,8 @@ function AppContent() {
         </AnimatePresence>
       </main>
 
+      {/* Kiosk (imtihonga kirish/topshirish) paytida footer yashiriladi — ekranga to'liq sig'sin, scroll bo'lmasin. */}
+      {!fullBleed && (
       <footer className="w-full mt-auto py-2 px-4 border-t border-gray-200/40 bg-white/20">
         <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 max-w-3xl mx-auto">
           <InstituteLogo size="xs" className="opacity-90" />
@@ -338,6 +386,7 @@ function AppContent() {
           </p>
         </div>
       </footer>
+      )}
     </div>
   );
 }
