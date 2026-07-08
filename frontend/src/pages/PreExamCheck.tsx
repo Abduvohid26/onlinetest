@@ -105,7 +105,8 @@ export function PreExamCheck({
       const end =
         el.scrollHeight <= el.clientHeight + 12 ||
         el.scrollTop + el.clientHeight >= el.scrollHeight - 12;
-      setVacRulesScrolledEnd(end);
+      // Bir marta oxirigacha o'qilgach, tepaga qaytganda ham checkbox ishlashi uchun latch.
+      if (end) setVacRulesScrolledEnd(true);
     };
     measure();
     el.addEventListener('scroll', measure, { passive: true });
@@ -560,9 +561,9 @@ export function PreExamCheck({
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: 8 }}
       transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-      className="w-full min-h-[100dvh] lg:h-[100dvh] flex flex-col bg-gray-50 pt-[62px] sm:pt-[66px] lg:overflow-hidden"
+      className="w-full h-[calc(100dvh-62px)] sm:h-[calc(100dvh-66px)] flex flex-col bg-gray-50 overflow-hidden"
     >
-      <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex flex-col gap-3 lg:flex-1 lg:min-h-0">
+      <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex flex-col gap-3 flex-1 min-h-0">
         {/* ── Sub-header: title + stepper ── */}
         <div className="shrink-0 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="min-w-0">
@@ -607,10 +608,12 @@ export function PreExamCheck({
           </div>
         )}
 
-        {/* ── Body grid ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:flex-1 lg:min-h-0 lg:items-stretch lg:overflow-hidden">
+        {/* ── Body (mobilda bitta scroll, desktopda ikki ustun) ── */}
+        <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0">
           {/* Rules card */}
-          <section className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 lg:h-full">
+          <section className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 max-h-[min(52dvh,520px)] lg:max-h-none lg:h-full">
             <header className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="w-8 h-8 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
@@ -624,7 +627,7 @@ export function PreExamCheck({
             </header>
             <div
               ref={vacRulesBoxRef}
-              className="px-4 py-3 text-[13px] text-gray-700 leading-relaxed space-y-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto lg:overscroll-y-contain"
+              className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-3 text-[13px] text-gray-700 leading-relaxed space-y-3 touch-pan-y"
             >
               <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntro}</p>
               {t.preExamVacRulesItems.split('|||RULE|||').map((line, i) => (
@@ -642,7 +645,7 @@ export function PreExamCheck({
           </section>
 
           {/* Camera + identity */}
-          <section className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
+          <section className="flex flex-col gap-3 min-h-0 lg:overflow-y-auto lg:overscroll-y-contain">
             <div className="shrink-0">
               <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">
                 <video
@@ -769,10 +772,11 @@ export function PreExamCheck({
               </div>
             )}
           </section>
-        </div>
+            </div>
+          </div>
 
-        {/* ── Footer action bar ── */}
-        <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3">
+        {/* ── Footer action bar (doim ko'rinadi, scroll ustida emas) ── */}
+        <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
           {exam.has_pin && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
               <div className="flex items-center gap-2.5 shrink-0">
@@ -835,6 +839,7 @@ export function PreExamCheck({
               ))}
             </div>
           )}
+        </div>
         </div>
       </div>
     </motion.div>

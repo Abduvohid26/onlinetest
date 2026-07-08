@@ -229,6 +229,7 @@ function AppContent() {
   // Imtihon topshirish paytida sahifa to'liq ekran (kiosk): header yashiriladi,
   // hech qanday chetki bo'shliq/scroll qolmaydi.
   const fullBleed = preExamFullBleed || examTaking;
+  const preExamLayout = preExamFullBleed;
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-x-clip">
@@ -306,7 +307,9 @@ function AppContent() {
       <main
         className={`flex-1 min-h-0 w-full relative z-10 ${
           fullBleed
-            ? 'max-w-none px-0 pt-0'
+            ? preExamLayout
+              ? 'max-w-none px-0 pt-[62px] sm:pt-[66px] overflow-hidden'
+              : 'max-w-none px-0 pt-0'
             : user.role === 'admin'
               ? 'max-w-none px-0 pt-[62px] sm:pt-[66px]'
               : 'max-w-7xl mx-auto px-3 sm:px-6 pt-24 sm:pt-28 pb-6 sm:pb-8'

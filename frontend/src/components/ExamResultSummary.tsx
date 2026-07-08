@@ -92,48 +92,47 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
   const ringColor = passed ? '#059669' : '#dc2626';
 
   return (
-    <div className="w-full max-w-4xl mx-auto min-h-0 px-2 sm:px-4 py-4 sm:py-6 md:py-8 space-y-4 sm:space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+    <div className="w-full max-w-4xl mx-auto min-h-0 px-2 sm:px-4 py-2 sm:py-4 space-y-4 sm:space-y-5 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+        className="relative overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg shadow-slate-200/60"
       >
-        {/* Pass/fail accent bar */}
-        <div className={`h-1.5 w-full ${passed ? 'bg-emerald-500' : 'bg-red-500'}`} />
-        <div className="p-5 sm:p-8">
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-5">
-            <div className="flex items-start gap-3 sm:gap-4 min-w-0 flex-1">
-              <InstituteLogo size="md" className="shrink-0" />
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-500">
+        <div className={`h-2 w-full ${passed ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' : 'bg-gradient-to-r from-red-500 to-rose-400'}`} />
+        <div className="p-5 sm:p-8 bg-gradient-to-br from-white via-white to-slate-50/80">
+          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
+            <div className="flex items-start gap-4 sm:gap-5 min-w-0 flex-1">
+              <InstituteLogo size="xl" className="shrink-0 shadow-lg ring-2 ring-white" />
+              <div className="min-w-0 pt-1">
+                <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
                   Farg‘ona jamoat salomatligi tibbiyot instituti
                 </p>
-                <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight mt-1">
+                <h1 className="text-2xl sm:text-[2rem] font-bold text-slate-900 tracking-tight mt-1.5 leading-tight">
                   {t.resultPageTitle}
                 </h1>
                 {data.exam_title && (
-                  <p className="text-slate-600 mt-1 font-medium text-sm sm:text-base break-words">{data.exam_title}</p>
+                  <p className="text-slate-600 mt-1.5 font-semibold text-sm sm:text-base break-words">{data.exam_title}</p>
                 )}
                 {data.student_name && (
-                  <p className="text-xs sm:text-sm text-slate-500 mt-0.5">{t.userFullName}: {data.student_name}</p>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-1">{t.userFullName}: <span className="font-medium text-slate-700">{data.student_name}</span></p>
                 )}
               </div>
             </div>
-            <div className="flex flex-col items-center gap-2 bg-white rounded-xl p-3 sm:p-4 border border-slate-200 shrink-0 mx-auto sm:mx-0">
-              <QRCodeSVG value={data.verify_url} size={96} level="M" includeMargin={false} />
-              <span className="text-[10px] text-slate-500 text-center">{t.resultQrHint}</span>
+            <div className="flex flex-col items-center gap-2.5 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm shrink-0 mx-auto lg:mx-0">
+              <QRCodeSVG value={data.verify_url} size={132} level="M" includeMargin={false} />
+              <span className="text-[11px] font-medium text-slate-500 text-center">{t.resultQrHint}</span>
             </div>
           </div>
 
           {/* Score focal */}
-          <div className="mt-6 flex items-center gap-4 sm:gap-5 rounded-xl border border-gray-200 bg-gray-50 p-4 sm:p-5">
-            <div className="relative w-20 h-20 shrink-0">
-              <svg viewBox="0 0 36 36" className="w-20 h-20 -rotate-90">
+          <div className="mt-6 flex items-center gap-4 sm:gap-6 rounded-2xl border border-slate-200 bg-white/90 p-4 sm:p-6 shadow-inner">
+            <div className="relative w-24 h-24 shrink-0">
+              <svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90">
                 <circle cx="18" cy="18" r="16" fill="none" stroke="#e5e7eb" strokeWidth="3" />
                 <circle cx="18" cy="18" r="16" fill="none" stroke={ringColor} strokeWidth="3" strokeDasharray={ringDash} strokeLinecap="round" />
               </svg>
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className={`text-[19px] font-bold tabular-nums ${passed ? 'text-emerald-600' : 'text-red-600'}`}>{pct}%</span>
+                <span className={`text-[22px] font-bold tabular-nums ${passed ? 'text-emerald-600' : 'text-red-600'}`}>{pct}%</span>
               </div>
             </div>
             <div className="min-w-0">

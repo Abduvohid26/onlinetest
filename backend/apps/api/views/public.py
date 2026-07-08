@@ -135,17 +135,25 @@ def public_verify_certificate_pdf(request, result_id: str):
     base = public_base_url(request)
     verify_url = f"{base}/verify/result/{result_id}?k={k}"
     icode = integrity_code(result_id, completed_iso, se.score, total, k)
-    rows = []
-    for i, q in enumerate(questions):
+    per_q = []
+    for q in questions:
         st = answers.get(str(q["id"]), "")
         ok = st == q.get("correctAnswer")
-        rows.append({
-            "index": i + 1,
-            "text": q.get("text"),
-            "isCorrect": ok,
-            "studentAnswer": st or "",
-            "correctAnswer": q.get("correctAnswer") or "",
-        })
+        ai_row = next((i for i in ai.get("items", []) if i.get("questionId") == q["id"]), None)
+        per_q.append(
+            {
+                "id": q["id"],
+                "text": q.get("text"),
+                "options": q.get("options"),
+                "studentAnswer": st or None,
+                "correctAnswer": q.get("correctAnswer"),
+                "isCorrect": ok,
+                "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
+                "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),
+                "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
+            }
+        )
+    rows = result_questions_to_pdf_rows(per_q)
     pdf = build_certificate_pdf(
         result_id=result_id,
         student_name=se.student.name,

@@ -50,7 +50,7 @@ from apps.api.throttles import (
     PublicVerifyThrottle,
     ViolationThrottle,
 )
-from apps.api.certificate_pdf import build_ban_report_pdf, build_certificate_pdf, PASS_PERCENT_THRESHOLD
+from apps.api.certificate_pdf import build_ban_report_pdf, build_certificate_pdf, PASS_PERCENT_THRESHOLD, result_questions_to_pdf_rows
 from apps.api.identity_log import log_identity
 from apps.api.face_embedding import analyze_proctor_frame_local
 from apps.api.gemini_tools import (

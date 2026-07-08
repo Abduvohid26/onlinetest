@@ -26,6 +26,38 @@ _LOGO_CANDIDATES = [
 # O'tish mezoni: to'g'ri javoblar foizi (ball / jami savollar * 100).
 PASS_PERCENT_THRESHOLD = max(1, min(100, int(os.environ.get("EXAM_PASS_PERCENT", "50"))))
 
+# Dizayn ranglari
+C_NAVY = colors.HexColor("#1e3a5f")
+C_NAVY_LIGHT = colors.HexColor("#eef3f9")
+C_RED = colors.HexColor("#c0392b")
+C_RED_LIGHT = colors.HexColor("#fdf0ef")
+C_GREEN = colors.HexColor("#1e9e5a")
+C_GREEN_LIGHT = colors.HexColor("#ecfdf3")
+C_SLATE = colors.HexColor("#334155")
+C_MUTED = colors.HexColor("#64748b")
+C_BORDER = colors.HexColor("#e2e8f0")
+LOGO_PDF_SIZE = 78
+QR_PDF_SIZE = 108
+HEADER_BAND_H = 4
+
+
+def result_questions_to_pdf_rows(questions: list[dict]) -> list[dict]:
+    """Natija API dagi savollarni PDF uchun to'liq qatorlarga aylantiradi."""
+    return [
+        {
+            "index": i + 1,
+            "text": q.get("text"),
+            "isCorrect": bool(q.get("isCorrect")),
+            "studentAnswer": q.get("studentAnswer") or "",
+            "correctAnswer": q.get("correctAnswer") or "",
+            "commentCorrect": q.get("commentCorrect") or "",
+            "whyStudentWrong": q.get("whyStudentWrong") or "",
+            "whyCorrectIsRight": q.get("whyCorrectIsRight") or "",
+            "options": q.get("options") or [],
+        }
+        for i, q in enumerate(questions)
+    ]
+
 # Kirill (rus) va lotin harflarini to'g'ri chizish uchun Unicode shrift.
 # Standart PDF bazaviy shriftlari (Helvetica) faqat Latin-1 ni qo'llaydi — rus tilidagi
 # savol/xulosa matnlari qora to'rtburchaklar sifatida chiqib qolardi.
@@ -245,66 +277,63 @@ def _ban_reason_text(
     return headline, f"{detail} {extra}"
 
 
-def _draw_header(c, w: float, h: float, title: str, subtitle: str, hint: str):
-    """Institut logosi va sarlavha chizish."""
-    logo_path = _get_logo_path()
-    logo_x = 40
-    logo_y = h - 95
-    logo_size = 55
+def _draw_header(c, w: float, h: float, title: str, subtitle: str, hint: str, *, accent: str = "cert"):
+    """Institut logosi, sarlavha va QR — yangilangan professional ko'rinish."""
+    accent_color = C_RED if accent == "ban" else C_NAVY
+    band_y = h - 36
+    c.setFillColor(accent_color)
+    c.rect(18, band_y, w - 36, HEADER_BAND_H, stroke=0, fill=1)
 
+    logo_path = _get_logo_path()
+    logo_x = 42
+    logo_y = h - 38 - LOGO_PDF_SIZE
     if logo_path:
         try:
             from reportlab.lib.utils import ImageReader
             c.drawImage(
                 ImageReader(logo_path),
                 logo_x, logo_y,
-                width=logo_size, height=logo_size,
+                width=LOGO_PDF_SIZE, height=LOGO_PDF_SIZE,
                 preserveAspectRatio=True, mask="auto",
             )
         except Exception:
-            _draw_logo_placeholder(c, logo_x + logo_size // 2, logo_y + logo_size // 2, logo_size // 2)
+            _draw_logo_placeholder(c, logo_x + LOGO_PDF_SIZE // 2, logo_y + LOGO_PDF_SIZE // 2, LOGO_PDF_SIZE // 2)
     else:
-        _draw_logo_placeholder(c, logo_x + logo_size // 2, logo_y + logo_size // 2, logo_size // 2)
+        _draw_logo_placeholder(c, logo_x + LOGO_PDF_SIZE // 2, logo_y + LOGO_PDF_SIZE // 2, LOGO_PDF_SIZE // 2)
 
-    text_x = logo_x + logo_size + 12
+    text_x = logo_x + LOGO_PDF_SIZE + 16
+    text_max_w = w - text_x - QR_PDF_SIZE - 55
+    c.setFont(FONT_BOLD, 12)
+    c.setFillColor(C_NAVY)
+    inst_lines = _wrap_text(c, "Farg\u2019ona jamoat salomatligi tibbiyot instituti", FONT_BOLD, 12, text_max_w)[:2]
+    inst_y = h - 52
+    for il in inst_lines:
+        c.drawString(text_x, inst_y, il)
+        inst_y -= 13
     c.setFont(FONT_BOLD, 13)
-    c.setFillColor(colors.HexColor("#1a1a2e"))
-    c.drawString(text_x, h - 55, "Farg\u2019ona jamoat salomatligi tibbiyot instituti")
-    c.setFont(FONT_BOLD, 11)
-    c.setFillColor(colors.HexColor("#c0392b"))
+    c.setFillColor(accent_color)
     c.drawString(text_x, h - 72, title)
-    c.setFont(FONT_REGULAR, 8)
-    c.setFillColor(colors.HexColor("#555555"))
+    c.setFont(FONT_REGULAR, 8.5)
+    c.setFillColor(C_MUTED)
     c.drawString(text_x, h - 86, subtitle)
     if hint:
-        c.setFont(FONT_OBLIQUE, 8)
-        c.setFillColor(colors.HexColor("#888888"))
-        c.drawString(text_x, h - 98, hint)
+        for i, hl in enumerate(_wrap_text(c, hint, FONT_REGULAR, 7.5, text_max_w)[:2]):
+            c.drawString(text_x, h - 98 - i * 10, hl)
 
-    # Ajratuvchi chiziq
-    c.setStrokeColor(colors.HexColor("#c0392b"))
-    c.setLineWidth(1.5)
-    c.line(40, h - 108, w - 40, h - 108)
+    c.setStrokeColor(C_BORDER)
+    c.setLineWidth(0.8)
+    c.line(40, h - 118, w - 40, h - 118)
     c.setFillColor(colors.black)
 
 
-def _draw_logo_placeholder(c, cx: float, cy: float, r: float):
-    """Logo topilmasa doira ichida FJSTI yozuvi."""
-    c.setStrokeColor(colors.HexColor("#1a1a2e"))
-    c.setLineWidth(1.5)
-    c.circle(cx, cy, r, stroke=1, fill=0)
-    c.setFont(FONT_BOLD, 9)
-    c.setFillColor(colors.HexColor("#1a1a2e"))
-    c.drawCentredString(cx, cy - 4, "FJSTI")
-
-
-def _draw_qr(c, verify_url: str, w: float, h: float):
+def _draw_qr(c, verify_url: str, w: float, h: float, *, size: int | None = None):
     """QR kod chizish."""
+    qr_size = size or QR_PDF_SIZE
     try:
         import qrcode
         from reportlab.lib.utils import ImageReader
 
-        qr = qrcode.QRCode(version=2, box_size=3, border=1,
+        qr = qrcode.QRCode(version=2, box_size=4, border=1,
                            error_correction=qrcode.constants.ERROR_CORRECT_M)
         qr.add_data(verify_url)
         qr.make(fit=True)
@@ -312,14 +341,27 @@ def _draw_qr(c, verify_url: str, w: float, h: float):
         qbuf = BytesIO()
         img.save(qbuf, format="PNG")
         qbuf.seek(0)
-        qr_size = 85
-        c.drawImage(ImageReader(qbuf), w - qr_size - 35, h - qr_size - 35,
-                    width=qr_size, height=qr_size)
-        c.setFont(FONT_REGULAR, 6)
-        c.setFillColor(colors.HexColor("#888888"))
-        c.drawCentredString(w - 35 - qr_size // 2, h - qr_size - 42, "QR tekshiruv")
+        qr_x = w - qr_size - 42
+        qr_y = h - qr_size - 42
+        c.setFillColor(colors.white)
+        c.setStrokeColor(C_BORDER)
+        c.roundRect(qr_x - 6, qr_y - 6, qr_size + 12, qr_size + 18, 6, stroke=1, fill=1)
+        c.drawImage(ImageReader(qbuf), qr_x, qr_y, width=qr_size, height=qr_size)
+        c.setFont(FONT_REGULAR, 7)
+        c.setFillColor(C_MUTED)
+        c.drawCentredString(qr_x + qr_size / 2, qr_y - 11, "QR tekshiruv")
     except Exception:
         pass
+
+
+def _draw_logo_placeholder(c, cx: float, cy: float, r: float):
+    """Logo topilmasa doira ichida FJSTI yozuvi."""
+    c.setStrokeColor(C_NAVY)
+    c.setLineWidth(1.5)
+    c.circle(cx, cy, r, stroke=1, fill=0)
+    c.setFont(FONT_BOLD, 9)
+    c.setFillColor(C_NAVY)
+    c.drawCentredString(cx, cy - 4, "FJSTI")
 
 
 def _wrap_text(c, text: str, font: str, size: float, max_width: float) -> list[str]:
@@ -389,16 +431,17 @@ def build_certificate_pdf(
     _draw_header(c, w, h,
                  title="Onlayn imtihon sertifikati",
                  subtitle="Hujjat raqamli QR orqali tekshiriladi",
-                 hint="")
+                 hint="",
+                 accent="cert")
 
     pct = round((score / total) * 100) if total else 0
     threshold = pass_threshold if pass_threshold is not None else PASS_PERCENT_THRESHOLD
     passed = pct >= threshold
-    badge_color = colors.HexColor("#1e9e5a") if passed else colors.HexColor("#c0392b")
-    badge_bg = colors.HexColor("#e8f8ef") if passed else colors.HexColor("#fdecea")
+    badge_color = C_GREEN if passed else C_RED
+    badge_bg = C_GREEN_LIGHT if passed else C_RED_LIGHT
     badge_label = "MUVAFFAQIYATLI O'TDI" if passed else "O'TA OLMADI"
 
-    y = h - 128
+    y = h - 138
 
     # --- Ma'lumotlar bloki (chegaralangan karta) ---
     box_top = y
@@ -411,9 +454,9 @@ def build_certificate_pdf(
         ("Tekshiruv havolasi", verify_url),
     ]
     box_height = 18 + len(fields) * 15 + 6
-    c.setFillColor(colors.HexColor("#fafbfc"))
-    c.setStrokeColor(colors.HexColor("#e3e6ea"))
-    c.roundRect(40, box_top - box_height + 10, w - 80, box_height, 6, stroke=1, fill=1)
+    c.setFillColor(C_NAVY_LIGHT)
+    c.setStrokeColor(C_BORDER)
+    c.roundRect(40, box_top - box_height + 10, w - 80, box_height, 8, stroke=1, fill=1)
     c.setFillColor(colors.black)
 
     fy = box_top
@@ -485,57 +528,97 @@ def build_certificate_pdf(
         y -= 10
         c.setFillColor(colors.black)
 
-    # --- Savollar ---
-    c.setFont(FONT_BOLD, 11)
-    c.setFillColor(colors.HexColor("#1a1a2e"))
-    c.drawString(50, y, "Savollar bo'yicha natija")
-    y -= 16
+    # --- Savollar (batafsil) ---
+    c.setFont(FONT_BOLD, 12)
+    c.setFillColor(C_NAVY)
+    c.drawString(50, y, "Savollar bo'yicha batafsil natija")
+    y -= 18
 
     for r in rows:
         is_correct = bool(r.get("isCorrect"))
-        mark_color = colors.HexColor("#1e9e5a") if is_correct else colors.HexColor("#c0392b")
-        mark = "\u2713" if is_correct else "\u2717"
+        mark_color = C_GREEN if is_correct else C_RED
+        card_bg = C_GREEN_LIGHT if is_correct else C_RED_LIGHT
         idx = r.get("index")
         text = str(r.get("text") or "")
         student_ans = str(r.get("studentAnswer") or "").strip()
         correct_ans = str(r.get("correctAnswer") or "").strip()
-        lines = _wrap_text(c, f"{idx}. {text}", FONT_REGULAR, 9, w - 120) or [f"{idx}."]
-        for li, line in enumerate(lines[:3]):
-            if y < 70:
-                y = new_page()
-            c.setFont(FONT_REGULAR, 9)
-            c.setFillColor(colors.HexColor("#1a1a2e"))
-            c.drawString(50, y, line)
-            if li == 0:
-                c.setFont(FONT_BOLD, 10)
-                c.setFillColor(mark_color)
-                c.drawRightString(w - 50, y, mark)
-            y -= 12
+        comment_ok = str(r.get("commentCorrect") or "").strip()
+        why_wrong = str(r.get("whyStudentWrong") or "").strip()
+        why_right = str(r.get("whyCorrectIsRight") or "").strip()
+        options = r.get("options") or []
 
-        # Javoblar — kichik shrift
-        if student_ans or correct_ans:
-            if y < 70:
-                y = new_page()
-            c.setFont(FONT_REGULAR, 7)
-            if student_ans:
-                c.setFillColor(colors.HexColor("#555555"))
-                ans_lines = _wrap_text(c, f"Javobingiz: {student_ans}", FONT_REGULAR, 7, w - 100)
-                for al in ans_lines[:2]:
-                    c.drawString(58, y, al)
-                    y -= 10
-            if correct_ans:
-                c.setFillColor(colors.HexColor("#1e9e5a") if is_correct else colors.HexColor("#0d6b3f"))
-                corr_lines = _wrap_text(
-                    c,
-                    f"To'g'ri javob: {correct_ans}",
-                    FONT_REGULAR,
-                    7,
-                    w - 100,
-                )
-                for cl in corr_lines[:2]:
-                    c.drawString(58, y, cl)
-                    y -= 10
-        y -= 3
+        q_lines = _wrap_text(c, f"{idx}. {text}", FONT_REGULAR, 9, w - 130) or [f"{idx}."]
+        detail_blocks: list[tuple[str, str]] = []
+        if student_ans:
+            detail_blocks.append(("Javobingiz", student_ans))
+        if correct_ans:
+            detail_blocks.append(("To'g'ri javob", correct_ans))
+        if is_correct and comment_ok:
+            detail_blocks.append(("Izoh", comment_ok))
+        if not is_correct and why_wrong:
+            detail_blocks.append(("Nima uchun noto'g'ri", why_wrong))
+        if not is_correct and why_right:
+            detail_blocks.append(("To'g'ri javob tushuntirishi", why_right))
+
+        block_lines = 0
+        for label, body in detail_blocks:
+            block_lines += 1 + len(_wrap_text(c, body, FONT_REGULAR, 8, w - 120)[:6])
+        if options:
+            block_lines += 1 + min(len(options), 8)
+        card_h = 16 + len(q_lines[:4]) * 12 + block_lines * 11 + 12
+
+        if y - card_h < 70:
+            y = new_page()
+            c.setFont(FONT_BOLD, 12)
+            c.setFillColor(C_NAVY)
+            c.drawString(50, y, "Savollar (davomi)")
+            y -= 18
+
+        card_top = y
+        c.setFillColor(card_bg)
+        c.setStrokeColor(mark_color)
+        c.roundRect(42, card_top - card_h, w - 84, card_h, 8, stroke=1, fill=1)
+
+        cy = card_top - 14
+        for li, line in enumerate(q_lines[:4]):
+            c.setFont(FONT_REGULAR if li else FONT_BOLD, 9 if li else 10)
+            c.setFillColor(C_SLATE)
+            c.drawString(52, cy, line)
+            if li == 0:
+                c.setFont(FONT_BOLD, 11)
+                c.setFillColor(mark_color)
+                mark = "\u2713" if is_correct else "\u2717"
+                c.drawRightString(w - 52, cy, mark)
+            cy -= 12
+
+        if options:
+            c.setFont(FONT_BOLD, 7.5)
+            c.setFillColor(C_MUTED)
+            c.drawString(52, cy, "Variantlar:")
+            cy -= 10
+            c.setFont(FONT_REGULAR, 7.5)
+            for opt_i, opt in enumerate(options[:8], start=1):
+                opt_mark = ""
+                if student_ans and str(opt) == student_ans:
+                    opt_mark = " \u2190 siz"
+                elif correct_ans and str(opt) == correct_ans:
+                    opt_mark = " \u2190 to'g'ri"
+                for ol in _wrap_text(c, f"{opt_i}) {opt}{opt_mark}", FONT_REGULAR, 7.5, w - 120)[:2]:
+                    c.drawString(58, cy, ol)
+                    cy -= 9
+
+        for label, body in detail_blocks:
+            c.setFont(FONT_BOLD, 8)
+            c.setFillColor(C_SLATE)
+            c.drawString(52, cy, f"{label}:")
+            cy -= 10
+            c.setFont(FONT_REGULAR, 8)
+            c.setFillColor(C_MUTED if label != "To'g'ri javob" else C_GREEN)
+            for bl in _wrap_text(c, body, FONT_REGULAR, 8, w - 120)[:8]:
+                c.drawString(58, cy, bl)
+                cy -= 10
+
+        y = card_top - card_h - 10
 
     _draw_footer(c, w, f"{page_no}-bet")
     c.showPage()
@@ -557,133 +640,159 @@ def build_ban_report_pdf(
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=A4)
     w, h = A4
+    page_no = 1
+
+    def new_page():
+        nonlocal page_no
+        _draw_footer(c, w, f"{page_no}-bet")
+        c.showPage()
+        page_no += 1
+        _draw_page_frame(c, w, h)
+        return h - 50
 
     _draw_page_frame(c, w, h)
     _draw_qr(c, verify_url, w, h)
     _draw_header(c, w, h,
                  title="Rasmiy intizomiy bayonnoma (BAN hisobot)",
                  subtitle="Hujjat raqamli QR orqali tekshiriladi",
-                 hint="Ushbu hujjat instituting ichki nazorat tizimi tomonidan avtomatik shakllantirildi")
+                 hint="Ushbu hujjat institut ichki nazorat tizimi tomonidan avtomatik shakllantirildi",
+                 accent="ban")
 
-    y = h - 128
-    c.setFont(FONT_REGULAR, 10)
-    c.setFillColor(colors.HexColor("#1a1a2e"))
-
+    y = h - 138
     fields = [
-        ("Talaba ID",        student_id),
-        ("Talaba F.I.Sh.",   student_name),
-        ("Imtihon",          exam_title),
-        ("Berilgan sana",    issued_at[:19].replace("T", " ")),
-        ("QR tekshiruv",     verify_url[:85] + ("..." if len(verify_url) > 85 else "")),
+        ("Talaba ID", student_id),
+        ("Talaba F.I.Sh.", student_name),
+        ("Imtihon", exam_title),
+        ("Berilgan sana", issued_at[:19].replace("T", " ")),
     ]
+    box_h = 14 + len(fields) * 16 + 8
+    c.setFillColor(C_NAVY_LIGHT)
+    c.setStrokeColor(C_BORDER)
+    c.roundRect(40, y - box_h + 8, w - 80, box_h, 8, stroke=1, fill=1)
+    fy = y - 6
     for label, val in fields:
         c.setFont(FONT_BOLD, 9)
-        c.drawString(50, y, f"{label}:")
+        c.setFillColor(C_MUTED)
+        c.drawString(52, fy, f"{label}:")
         c.setFont(FONT_REGULAR, 9)
-        c.drawString(160, y, str(val)[:100])
-        y -= 14
+        c.setFillColor(C_SLATE)
+        for vl in _wrap_text(c, str(val), FONT_REGULAR, 9, w - 200)[:1]:
+            c.drawString(165, fy, vl)
+        fy -= 16
+    y -= box_h + 10
 
-    # Ban sababi — muhim qism
-    y -= 8
     ban_headline, ban_detail = _ban_reason_text(
         violations,
         official_warnings=official_warnings,
         last_violation_type=last_violation_type,
     )
-    box_h = 72
-    c.setStrokeColor(colors.HexColor("#e74c3c"))
-    c.setLineWidth(0.5)
-    c.rect(40, y - box_h + 10, w - 80, box_h + 10, stroke=1, fill=0)
+    headline_lines = _wrap_text(c, ban_headline, FONT_BOLD, 9.5, w - 110)[:4]
+    detail_lines: list[str] = []
+    for dl in _wrap_text(c, ban_detail, FONT_REGULAR, 8.5, w - 110):
+        detail_lines.append(dl)
+        if len(detail_lines) >= 8:
+            break
+    reason_h = 28 + len(headline_lines) * 12 + len(detail_lines) * 11 + 34
 
-    c.setFont(FONT_BOLD, 10)
-    c.setFillColor(colors.HexColor("#c0392b"))
-    c.drawString(50, y, "Nima uchun bloklandi:")
-    y -= 14
+    c.setFillColor(C_RED_LIGHT)
+    c.setStrokeColor(C_RED)
+    c.roundRect(40, y - reason_h, w - 80, reason_h, 8, stroke=1, fill=1)
+    c.setFont(FONT_BOLD, 11)
+    c.setFillColor(C_RED)
+    c.drawString(52, y - 16, "Nima uchun bloklandi")
+    ry = y - 30
+    c.setFont(FONT_BOLD, 9.5)
+    c.setFillColor(C_SLATE)
+    for line in headline_lines:
+        c.drawString(52, ry, line)
+        ry -= 12
+    c.setFont(FONT_REGULAR, 8.5)
+    c.setFillColor(C_MUTED)
+    for line in detail_lines:
+        c.drawString(52, ry, line)
+        ry -= 11
 
-    c.setFont(FONT_BOLD, 9)
-    c.setFillColor(colors.HexColor("#1a1a2e"))
-    for line in _wrap_text(c, ban_headline, FONT_BOLD, 9, w - 100)[:3]:
-        c.drawString(50, y, line)
-        y -= 12
-
-    c.setFont(FONT_REGULAR, 8)
-    c.setFillColor(colors.HexColor("#444444"))
-    for line in _wrap_text(c, ban_detail, FONT_REGULAR, 8, w - 100)[:4]:
-        c.drawString(50, y, line)
-        y -= 11
-
-    # Ogohlantirish bosqichlari (1 → 2 → 3 → BAN)
-    y -= 6
+    # Ogohlantirish bosqichlari
     warn_n = max(0, int(official_warnings or 0))
     instant_ban = (last_violation_type or "") in {"IDENTITY_SUBSTITUTION"}
     steps = ["1", "2", "3", "BAN"]
-    step_x = 50
+    step_x = 52
+    step_y = y - reason_h + 14
     for i, step in enumerate(steps):
         if instant_ban:
             active = i == 3
         else:
             active = (i < 3 and warn_n >= i + 1) or (i == 3 and warn_n >= 3)
-        c.setFillColor(colors.HexColor("#c0392b") if active else colors.HexColor("#e0e0e0"))
-        c.circle(step_x + 8, y, 7, stroke=0, fill=1)
-        c.setFont(FONT_BOLD, 7)
-        c.setFillColor(colors.white if active else colors.HexColor("#888888"))
-        c.drawCentredString(step_x + 8, y - 2, step)
+        c.setFillColor(C_RED if active else colors.HexColor("#e2e8f0"))
+        c.circle(step_x + 10, step_y, 9, stroke=0, fill=1)
+        c.setFont(FONT_BOLD, 8)
+        c.setFillColor(colors.white if active else C_MUTED)
+        c.drawCentredString(step_x + 10, step_y - 3, step)
         if i < len(steps) - 1:
-            c.setStrokeColor(colors.HexColor("#cccccc"))
-            c.setLineWidth(0.8)
-            c.line(step_x + 16, y, step_x + 28, y)
-        step_x += 32
-    c.setFont(FONT_REGULAR, 7)
-    c.setFillColor(colors.HexColor("#888888"))
-    c.drawString(50, y - 14, f"Rasmiy ogohlantirishlar: {warn_n} / 3")
-    y -= 28
-    c.setFillColor(colors.HexColor("#1a1a2e"))
+            c.setStrokeColor(colors.HexColor("#cbd5e1"))
+            c.setLineWidth(1)
+            c.line(step_x + 20, step_y, step_x + 34, step_y)
+        step_x += 38
+    c.setFont(FONT_REGULAR, 7.5)
+    c.setFillColor(C_MUTED)
+    c.drawString(52, step_y - 16, f"Rasmiy ogohlantirishlar: {warn_n} / 3")
+    y -= reason_h + 14
 
-    # Qoidabuzarliklar ro'yxati
-    c.setFont(FONT_BOLD, 10)
-    c.drawString(50, y, "Qayd etilgan qoidabuzarliklar:")
-    y -= 14
+    c.setFont(FONT_BOLD, 11)
+    c.setFillColor(C_NAVY)
+    c.drawString(50, y, "Qayd etilgan qoidabuzarliklar")
+    y -= 16
 
-    c.setFont(FONT_REGULAR, 9)
     warn_win = max(15, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "30")))
     grouped = _group_violation_rows_for_pdf(violations, window_sec=warn_win) if violations else []
     if not grouped:
+        c.setFont(FONT_REGULAR, 9)
+        c.setFillColor(C_MUTED)
         c.drawString(50, y, "- Qoidabuzarlik loglari topilmadi.")
         y -= 12
     else:
-        c.setFont(FONT_REGULAR, 8)
-        c.setFillColor(colors.HexColor("#666666"))
-        c.drawString(50, y, f"Eslatma: ketma-kelgan hodisalar {warn_win}s oynasida 1 rasmiy ogohlantirish bilan PDF da bitta qator sifatida ko'rsatiladi.")
-        y -= 12
-        c.setFont(FONT_REGULAR, 9)
-        c.setFillColor(colors.HexColor("#1a1a2e"))
-        for idx, line in enumerate(grouped[:40], start=1):
-            line_txt = f"{idx}) {line}"
-            c.drawString(50, y, line_txt[:118])
-            y -= 11
-            if y < 80:
-                c.showPage()
-                y = h - 50
-                c.setFont(FONT_REGULAR, 9)
+        c.setFont(FONT_REGULAR, 7.5)
+        c.setFillColor(C_MUTED)
+        for note in _wrap_text(
+            c,
+            f"Eslatma: ketma-kelgan hodisalar {warn_win}s oynasida 1 rasmiy ogohlantirish bilan bitta qator sifatida ko'rsatiladi.",
+            FONT_REGULAR,
+            7.5,
+            w - 100,
+        )[:2]:
+            c.drawString(50, y, note)
+            y -= 10
+        y -= 4
+        for idx, line in enumerate(grouped, start=1):
+            if y < 90:
+                y = new_page()
+            row_bg = C_NAVY_LIGHT if idx % 2 == 0 else colors.white
+            row_lines = _wrap_text(c, f"{idx}) {line}", FONT_REGULAR, 8.5, w - 110)[:3]
+            row_h = max(18, len(row_lines) * 11 + 8)
+            c.setFillColor(row_bg)
+            c.roundRect(42, y - row_h, w - 84, row_h, 4, stroke=0, fill=1)
+            c.setFont(FONT_REGULAR, 8.5)
+            c.setFillColor(C_SLATE)
+            ly = y - 12
+            for rl in row_lines:
+                c.drawString(50, ly, rl)
+                ly -= 11
+            y -= row_h + 4
 
-    # Pastki qism
-    y -= 16
-    c.setStrokeColor(colors.HexColor("#cccccc"))
-    c.setLineWidth(0.5)
-    c.line(40, y + 4, w - 40, y + 4)
-
+    y -= 12
+    c.setStrokeColor(C_BORDER)
+    c.setLineWidth(0.8)
+    c.line(40, y, w - 40, y)
+    y -= 18
     c.setFont(FONT_REGULAR, 8)
-    c.setFillColor(colors.HexColor("#555555"))
-    c.drawString(50, y - 8,
-                 "Ushbu hujjat Farg\u2019ona jamoat salomatligi tibbiyot instituti")
-    c.drawString(50, y - 20,
-                 "ichki nazorat siyosati asosida avtomatik shakllantirildi.")
-
+    c.setFillColor(C_MUTED)
+    c.drawString(50, y, "Ushbu hujjat Farg\u2019ona jamoat salomatligi tibbiyot instituti ichki nazorat siyosati asosida shakllantirildi.")
     c.setFont(FONT_BOLD, 9)
-    c.setFillColor(colors.HexColor("#1a1a2e"))
-    c.drawString(50, y - 38, "Mas\u2019ul shaxs imzosi: ____________________________")
-    c.drawString(320, y - 38, "Sana: _______________")
+    c.setFillColor(C_SLATE)
+    c.drawString(50, y - 28, "Mas\u2019ul shaxs imzosi: ____________________________")
+    c.drawString(320, y - 28, "Sana: _______________")
 
+    _draw_footer(c, w, f"{page_no}-bet")
     c.showPage()
     c.save()
     return buf.getvalue()

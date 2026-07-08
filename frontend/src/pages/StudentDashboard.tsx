@@ -307,22 +307,26 @@ export function StudentDashboard({
     <div className="px-3 sm:px-6 py-4 sm:py-6 max-w-6xl mx-auto relative">
       {/* Result detail overlay — createPortal orqali document.body ga chiqariladi. */}
       {detailPayload && createPortal(
-        <div className="fixed inset-0 z-[100] flex flex-col overflow-y-auto overscroll-y-contain bg-slate-900/50 backdrop-blur-sm px-3 py-[max(0.75rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <button
-            type="button"
-            onClick={() => setDetailPayload(null)}
-            aria-label={t.studentDash}
-            className="fixed top-[max(0.75rem,env(safe-area-inset-top))] right-3 z-[110] w-9 h-9 rounded-full bg-white shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center justify-center transition-colors"
-          >
-            <svg className="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-          </button>
-          <div className="flex-1 min-h-0 w-full max-w-4xl mx-auto py-2">
-            <ExamResultSummary
-              data={detailPayload}
-              token={token}
-              lang={lang}
-              onBack={() => setDetailPayload(null)}
-            />
+        <div className="fixed inset-0 z-[100] bg-slate-900/50 backdrop-blur-sm">
+          <div className="h-full overflow-y-auto overscroll-y-contain">
+            <div className="sticky top-0 z-20 flex justify-end px-3 sm:px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 bg-gradient-to-b from-slate-900/80 via-slate-900/40 to-transparent pointer-events-none">
+              <button
+                type="button"
+                onClick={() => setDetailPayload(null)}
+                aria-label={t.studentDash}
+                className="pointer-events-auto w-10 h-10 rounded-full bg-white shadow-lg border border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-gray-900 flex items-center justify-center transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="px-3 sm:px-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-w-4xl mx-auto -mt-2">
+              <ExamResultSummary
+                data={detailPayload}
+                token={token}
+                lang={lang}
+                onBack={() => setDetailPayload(null)}
+              />
+            </div>
           </div>
         </div>,
         document.body,

@@ -178,16 +178,7 @@ def student_certificate_pdf(request, exam_id: int):
     b = _result_details_bundle(se, request)
     if not b:
         return HttpResponse("Not found", status=404)
-    rows = [
-        {
-            "index": i + 1,
-            "text": q.get("text"),
-            "isCorrect": q.get("isCorrect"),
-            "studentAnswer": q.get("studentAnswer") or "",
-            "correctAnswer": q.get("correctAnswer") or "",
-        }
-        for i, q in enumerate(b["questions"])
-    ]
+    rows = result_questions_to_pdf_rows(b["questions"])
     pdf = build_certificate_pdf(
         result_id=b["result_public_id"],
         student_name=b["student_name"],
