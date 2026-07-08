@@ -153,6 +153,18 @@ def _group_violation_rows_for_pdf(
     return [c["summary"] for c in _violation_chunks_for_pdf(rows, texts, window_sec=window_sec)]
 
 
+def _sorted_violation_logs(rows: list[dict]) -> list[dict]:
+    """Vaqt bo'yicha eski → yangi."""
+    with_ts = [r for r in rows if r.get("timestamp") is not None]
+    return sorted(with_ts, key=lambda x: x["timestamp"])
+
+
+def _violation_log_line(v: dict, texts: PdfTexts) -> str:
+    ts = str(v.get("timestamp") or "")[:19].replace("T", " ")
+    vt = str(v.get("violation_type") or "UNKNOWN")
+    return texts.t("chunk_single", ts=ts, label=_violation_label(vt, texts))
+
+
 def _ban_timeline_items(
     violations: list[dict],
     texts: PdfTexts,
@@ -162,29 +174,36 @@ def _ban_timeline_items(
     last_violation_type: str,
 ) -> list[dict]:
     """
-    Raqamli ro'yxat: 1, 2, 3 … ogohlantirishlar va oxirida BAN.
-    Har element: {n, title, lines, is_ban}
+    Raqamli ro'yxat: har bir rasmiy ogohlantirish = bitta log yozuvi, oxirida BAN.
+    Vaqt oynasida birlashtirish faqat izoh uchun; ogohlantirishlar loglar bilan 1:1.
     """
+    del window_sec  # timeline uchun loglar ishlatiladi
+    logs = _sorted_violation_logs(violations)
     last_type = (last_violation_type or "").strip()
+    if not last_type and logs:
+        last_type = str(logs[-1].get("violation_type") or "")
+
     instant = last_type == "IDENTITY_SUBSTITUTION"
     if instant:
         label = _violation_label(last_type, texts)
         detail = texts.ban_reason(last_type)
+        line = _violation_log_line(logs[-1], texts) if logs else f"{label}."
         return [{
             "n": 1,
             "title": texts.t("ban_instant_title"),
-            "lines": [f"{label}.", detail],
+            "lines": [line, detail],
             "is_ban": True,
         }]
 
     warn_n = max(0, int(official_warnings or 0))
-    chunks = _violation_chunks_for_pdf(violations, texts, window_sec=window_sec)
     items: list[dict] = []
 
     for i in range(warn_n):
         num = i + 1
-        ch = chunks[i] if i < len(chunks) else None
-        lines = [ch["summary"]] if ch else [texts.t("violation_recorded")]
+        if i < len(logs):
+            lines = [_violation_log_line(logs[i], texts)]
+        else:
+            lines = [texts.t("violation_recorded")]
         items.append({
             "n": num,
             "title": texts.t("warning_title", n=num),
@@ -223,7 +242,9 @@ def _ban_reason_text(
     """
     last_type = (last_violation_type or "").strip()
     if not last_type and violations:
-        last_type = str(violations[0].get("violation_type") or "")
+        sorted_logs = _sorted_violation_logs(violations)
+        if sorted_logs:
+            last_type = str(sorted_logs[-1].get("violation_type") or "")
 
     instant_types = {"IDENTITY_SUBSTITUTION"}
     if last_type in instant_types:
@@ -356,7 +377,7 @@ def _draw_section_title(c, x: float, y: float, title: str, *, color=None) -> flo
     c.setFont(FONT_BOLD, 10.5)
     c.setFillColor(color or C_NAVY)
     c.drawString(x, y, title)
-    return y - 14
+    return y - 18
 
 
 def _draw_kv_panel(c, x: float, y: float, width: float, fields: list[tuple[str, str]], *, fill=None) -> float:
@@ -763,14 +784,17 @@ def build_ban_report_pdf(
             break
 
     y = _draw_section_title(c, margin_x + 4, y, texts.t("why_blocked"), color=C_RED)
+    y -= 4
     reason_pad = 14
-    reason_h = reason_pad * 2 + 20 + len(headline_lines) * 13 + len(detail_lines) * 11
+    inner_h = 18 + len(headline_lines) * 13 + len(detail_lines) * 11
+    reason_h = reason_pad * 2 + inner_h
+    box_top = y
     c.setFillColor(C_RED_LIGHT)
     c.setStrokeColor(C_RED)
     c.setLineWidth(0.6)
-    c.roundRect(margin_x, y - reason_h, content_w, reason_h, 10, stroke=1, fill=1)
+    c.roundRect(margin_x, box_top - reason_h, content_w, reason_h, 10, stroke=1, fill=1)
 
-    ry = y - reason_pad - 2
+    ry = box_top - reason_pad
     c.setFont(FONT_BOLD, 10)
     c.setFillColor(C_RED)
     c.drawString(margin_x + 14, ry, texts.t("block_reason_title"))
@@ -785,7 +809,7 @@ def build_ban_report_pdf(
     for line in detail_lines:
         c.drawString(margin_x + 14, ry, line)
         ry -= 11
-    y -= reason_h + 6
+    y = box_top - reason_h - 20
 
     warn_n = max(0, int(official_warnings or 0))
     warn_win = max(15, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "30")))
@@ -798,17 +822,17 @@ def build_ban_report_pdf(
     )
 
     y = _draw_section_title(c, margin_x + 4, y, texts.t("timeline_title"), color=C_RED)
+    y -= 6
     c.setFont(FONT_REGULAR, 7.5)
     c.setFillColor(C_MUTED)
-    note_y = y
     for note in _wrap_text(
         c,
         texts.t("timeline_note", win=warn_win),
         FONT_REGULAR, 7.5, content_w - 8,
     )[:1]:
-        c.drawString(margin_x + 4, note_y, note)
-        note_y -= 10
-    y = note_y - 4
+        c.drawString(margin_x + 4, y, note)
+        y -= 12
+    y -= 8
 
     for item in timeline:
         item_lines: list[str] = []

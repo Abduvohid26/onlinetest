@@ -1155,7 +1155,18 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         if (type === 'IDENTITY_SUBSTITUTION') setIdentityTerminated(true);
         setViolationWarning(null);
         setStrikeLevel(MAX_OFFICIAL_WARNINGS);
-        setBanLastReason(data.violationReason || type);
+        const reasonText = data.violationReason || type;
+        setBanLastReason(reasonText);
+        const warnNum =
+          typeof data.warningNumber === 'number' && data.warningNumber > 0
+            ? data.warningNumber
+            : typeof data.officialWarnings === 'number' && data.officialWarnings > 0
+              ? data.officialWarnings
+              : MAX_OFFICIAL_WARNINGS;
+        setWarningHistory((prev) => {
+          if (prev.some((w) => w.number === warnNum)) return prev;
+          return [...prev, { number: warnNum, reason: reasonText }].sort((a, b) => a.number - b.number);
+        });
         if (typeof data.violationsCount === 'number') {
           setBanViolationsCount(data.violationsCount);
         } else {
