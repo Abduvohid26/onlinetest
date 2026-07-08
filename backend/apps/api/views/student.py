@@ -642,6 +642,7 @@ def student_exams_submit(request, pk: int):
         verify_secret = secrets.token_hex(32)
         total = len(questions)
         percentage = round((score / total) * 100) if total else 0
+        from apps.api.certificate_pdf import PASS_PERCENT_THRESHOLD
         ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
         se.status = "Completed"
         se.score = score
@@ -687,6 +688,8 @@ def student_exams_submit(request, pk: int):
                 "score": score,
                 "total": total,
                 "percentage": percentage,
+                "pass_threshold": PASS_PERCENT_THRESHOLD,
+                "passed": percentage >= PASS_PERCENT_THRESHOLD,
                 "exam_id": pk,
                 "result_public_id": result_public_id,
                 "verify_secret": verify_secret,
@@ -920,7 +923,7 @@ def student_violations(request):
         "GAZE_AWAY_RIGHT": "To'g'ri qarang! O'ngga emas, ekranga qarang.",
         "GAZE_AWAY_UP": "To'g'ri qarang! Tepaga emas, ekranga qarang.",
         "GAZE_AWAY_DOWN": "To'g'ri qarang! Pastga emas, ekranga qarang.",
-        "WHISPER_OR_CONVERSATION_SUSPECTED": "Ovoz aniqlandi! Gapirmang, jimlik saqlang.",
+        "WHISPER_OR_CONVERSATION_SUSPECTED": "Gapirish aniqlandi! O'zingiz yoki atrofingizda ovoz chiqmasin, jimlik saqlang.",
         "CAMERA_MIC_ACCESS_FAILED": "Kamera yoki mikrofon ishlamayapti! Ruxsat bering.",
         "VIRTUAL_WEBCAM_SUSPECTED": "Virtual kamera aniqlandi! Haqiqiy kamerani ishlating.",
         "FACE_TURNED_AWAY": "To'g'ri qarang! Yuzingizni kameradan burmang.",

@@ -178,7 +178,16 @@ def student_certificate_pdf(request, exam_id: int):
     b = _result_details_bundle(se, request)
     if not b:
         return HttpResponse("Not found", status=404)
-    rows = [{"index": i + 1, "text": q.get("text"), "isCorrect": q.get("isCorrect")} for i, q in enumerate(b["questions"])]
+    rows = [
+        {
+            "index": i + 1,
+            "text": q.get("text"),
+            "isCorrect": q.get("isCorrect"),
+            "studentAnswer": q.get("studentAnswer") or "",
+            "correctAnswer": q.get("correctAnswer") or "",
+        }
+        for i, q in enumerate(b["questions"])
+    ]
     pdf = build_certificate_pdf(
         result_id=b["result_public_id"],
         student_name=b["student_name"],
@@ -190,6 +199,7 @@ def student_certificate_pdf(request, exam_id: int):
         integrity_code=b["integrity_code"],
         overview=b["overview"],
         rows=rows,
+        pass_threshold=PASS_PERCENT_THRESHOLD,
     )
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="{b["result_public_id"]}.pdf"'
@@ -248,6 +258,8 @@ def student_ban_report_pdf(request):
     ) if ex_id else list(
         ViolationLog.objects.filter(student_id=sid).order_by("-timestamp").values("violation_type", "timestamp")[:60]
     )
+    last_vtype = str(violations[0].get("violation_type") or "") if violations else ""
+    official_warnings = int(getattr(se, "proctor_official_warnings", 0) or 0) if se else 0
     pdf = build_ban_report_pdf(
         student_id=sid,
         student_name=u.name,
@@ -255,6 +267,8 @@ def student_ban_report_pdf(request):
         issued_at=dj_tz.now().isoformat(),
         violations=violations,
         verify_url=verify_url,
+        official_warnings=official_warnings,
+        last_violation_type=last_vtype,
     )
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="BAN_REPORT_{sid}.pdf"'

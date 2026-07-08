@@ -63,7 +63,7 @@ const STREAK = {
   gaze: 6, // ~0.8s uzoq qaragan
   movement: 5,
   hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
-  mouth: 2,
+  mouth: 5, // ~0.65s barqaror og'iz harakati (stul/qimirlash emas)
   tooFar: 10, // ~1.3s juda uzoq
   tooClose: 8, // ~1s juda yaqin
   offCenter: 10, // ~1.3s markazdan chetda
@@ -397,9 +397,9 @@ export class RealtimeProctor {
           if ((jawHist[i - 1] - mean) * (jawHist[i] - mean) < 0) crossings++;
         }
         talking =
-          (crossings >= 2 && amp >= 0.045) ||
-          (jaw.score >= 0.18 && amp >= 0.03) ||
-          jawHist.filter((s) => s >= 0.12).length >= 4;
+          (crossings >= 3 && amp >= 0.055) ||
+          (jaw.score >= 0.22 && amp >= 0.04) ||
+          jawHist.filter((s) => s >= 0.15).length >= 5;
       }
     }
 
@@ -423,7 +423,7 @@ export class RealtimeProctor {
           for (let i = 1; i < hist.length; i++) {
             if ((hist[i - 1] - mean) * (hist[i] - mean) < 0) crossings++;
           }
-          talking = crossings >= 2 && amp >= 0.012;
+          talking = crossings >= 3 && amp >= 0.016;
         }
       }
     }

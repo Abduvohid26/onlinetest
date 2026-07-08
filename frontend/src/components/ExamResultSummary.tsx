@@ -29,6 +29,8 @@ export type ExamResultPayload = {
   total: number;
   integrity_code: string;
   percentage?: number;
+  pass_threshold?: number;
+  passed?: boolean;
   completed_at?: string;
   exam_title?: string;
   student_name?: string;
@@ -77,7 +79,8 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
   };
 
   const pct = data.percentage ?? (data.total > 0 ? Math.round((data.score / data.total) * 100) : 0);
-  const passed = pct >= 50;
+  const passThreshold = data.pass_threshold ?? 50;
+  const passed = data.passed ?? pct >= passThreshold;
   const RES_L = {
     uz: { passed: 'O‘tdi', failed: 'O‘tmadi' },
     ru: { passed: 'Сдал', failed: 'Не сдал' },
@@ -142,6 +145,13 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
               </div>
               <p className="text-2xl sm:text-3xl font-bold text-slate-900 tabular-nums mt-1">
                 {data.score} <span className="text-slate-400 font-semibold text-xl">/ {data.total}</span>
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                {lang === 'ru'
+                  ? `Зачёт: минимум ${passThreshold}% правильных ответов`
+                  : lang === 'en'
+                    ? `Passing score: at least ${passThreshold}% correct`
+                    : `O'tish mezoni: kamida ${passThreshold}% to'g'ri javob`}
               </p>
             </div>
           </div>
@@ -221,6 +231,11 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
               </p>
               {!q.isCorrect && (
                 <p className="text-emerald-800 font-medium">
+                  {t.resultCorrectAnswerLabel}: {q.correctAnswer}
+                </p>
+              )}
+              {q.isCorrect && q.correctAnswer && (
+                <p className="text-emerald-700 text-xs">
                   {t.resultCorrectAnswerLabel}: {q.correctAnswer}
                 </p>
               )}

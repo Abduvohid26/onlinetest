@@ -20,7 +20,11 @@ _LOGO_CANDIDATES = [
     _BASE / "frontend" / "dist" / "institute-logo.png",
     _BASE / "frontend" / "public" / "institute-logo.png",
     _BASE / "frontend" / "src" / "assets" / "institute-logo.png",
+    _BASE / "backend" / "static" / "institute-logo.png",
 ]
+
+# O'tish mezoni: to'g'ri javoblar foizi (ball / jami savollar * 100).
+PASS_PERCENT_THRESHOLD = max(1, min(100, int(os.environ.get("EXAM_PASS_PERCENT", "50"))))
 
 # Kirill (rus) va lotin harflarini to'g'ri chizish uchun Unicode shrift.
 # Standart PDF bazaviy shriftlari (Helvetica) faqat Latin-1 ni qo'llaydi — rus tilidagi
@@ -59,6 +63,7 @@ VIOLATION_LABELS: dict[str, str] = {
     "FORBIDDEN_OBJECT_CELL_PHONE_DETECTED": "Telefon aniqlandi",
     "COPY_PASTE_ATTEMPT":           "Nusxa ko'chirish urinishi",
     "PRINT_SCREEN_ATTEMPT":         "Ekran suratga olish urinishi",
+    "PRINT_SCREEN":                 "Ekran suratga olish urinishi",
     "DEVTOOLS_OPEN":                "Dasturchi vositalari ochildi",
     "CLIPBOARD_ATTEMPT":            "Nusxa / buferga urinish (clipboard)",
     "CLIPBOARD_ACCESS":             "Bufer xotirasiga kirish",
@@ -68,16 +73,48 @@ VIOLATION_LABELS: dict[str, str] = {
     "GAZE_AWAY_DOWN":               "Pastga uzoq qarash",
     "WHISPER_OR_CONVERSATION_SUSPECTED": "Gapirish / suhbat shubhasi",
     "TAB_SWITCH_SOFT":              "Boshqa varaqqa o'tish",
+    "FACE_TURNED_AWAY":             "Yuz kameradan burilgan",
+    "EXCESSIVE_MOVEMENT":           "Haddan tashqari qimirlash",
+    "HAND_GESTURE_SUSPECTED":       "Qo'l ko'tarish / shubhali harakat",
+    "MOUTH_MOVEMENT_TALKING":       "Og'iz harakati / gapirish aniqlandi",
+    "FACE_TOO_FAR":                 "Kameradan juda uzoq",
+    "FACE_TOO_CLOSE":               "Kameraga juda yaqin",
+    "FACE_OFF_CENTER":              "Yuz kadr markazida emas",
+    "PROCTOR_FEED_LOST":            "Kamera oqimi to'xtadi",
+    "CAMERA_MIC_ACCESS_FAILED":     "Kamera yoki mikrofon ishlamadi",
+    "VIRTUAL_WEBCAM_SUSPECTED":     "Virtual kamera aniqlandi",
 }
 
-# Ban sabablari — violation type bo'yicha
+# Ban sabablari — violation type bo'yicha (qisqa tushuntirish)
 BAN_REASONS: dict[str, str] = {
-    "TAB_SWITCH_HARD":              "Imtihon davomida boshqa brauzer oynasiga yoki varaqqa o'tildi. Bu qoidabuzarlik hisoblanadi va imtihon darhol to'xtatildi.",
-    "FULLSCREEN_EXIT_HARD":         "Imtihon davomida to'liq ekran rejimidan chiqildi. Bu qoidabuzarlik hisoblanadi va imtihon darhol to'xtatildi.",
-    "IDENTITY_SUBSTITUTION":        "Kamera orqali amalga oshirilgan yuz taqqoslashida profil rasmi bilan mos kelmaydigan shaxs aniqlandi. Imtihon darhol to'xtatildi.",
-    "REMOTE_CONTROL_SUSPECTED":     "Kompyuterda masofadan boshqarish dasturi (AnyDesk, TeamViewer va boshqalar) aniqlandi. Bu qoidabuzarlik hisoblanadi.",
+    "TAB_SWITCH_HARD":              "Imtihon davomida boshqa brauzer oynasiga yoki varaqqa o'tildi.",
+    "FULLSCREEN_EXIT_HARD":         "Imtihon davomida to'liq ekran rejimidan chiqildi.",
+    "IDENTITY_SUBSTITUTION":        "Kamera orqali yuz taqqoslashda profil rasmi bilan mos kelmaydigan shaxs aniqlandi — darhol bloklash.",
+    "REMOTE_CONTROL_SUSPECTED":     "Kompyuterda masofadan boshqarish dasturi (AnyDesk, TeamViewer va boshqalar) aniqlandi.",
     "FACE_NOT_VISIBLE":             "Talaba kamera oldidan uzoq vaqt ketdi yoki yuzini yashirdi.",
     "MULTIPLE_FACES":               "Imtihon davomida kadrda bir nechta shaxs aniqlandi.",
+    "SUSPICIOUS_AUDIO":             "Imtihon davomida shubhali ovoz yoki gapirish aniqlandi.",
+    "WHISPER_OR_CONVERSATION_SUSPECTED": "Imtihon davomida suhbat yoki pichirlash aniqlandi.",
+    "FORBIDDEN_OBJECT_CELL_PHONE":  "Imtihon davomida telefon aniqlandi.",
+    "FORBIDDEN_OBJECT_LAPTOP":      "Imtihon davomida ruxsatsiz noutbuk aniqlandi.",
+    "FORBIDDEN_OBJECT_BOOK":        "Imtihon davomida ruxsatsiz kitob/materiallar aniqlandi.",
+    "CLIPBOARD_ATTEMPT":            "Nusxa ko'chirish yoki buferga urinish aniqlandi.",
+    "PRINT_SCREEN":                 "Ekran suratga olish urinishi aniqlandi.",
+    "DEVTOOLS_OPEN":                "Dasturchi vositalarini ochish urinishi aniqlandi.",
+    "FACE_TURNED_AWAY":             "Yuz kameradan burilgan holda imtihon qoidalari buzildi.",
+    "EXCESSIVE_MOVEMENT":           "Haddan tashqari qimirlash aniqlandi.",
+    "HAND_GESTURE_SUSPECTED":       "Qo'l ko'tarish yoki shubhali harakat aniqlandi.",
+    "MOUTH_MOVEMENT_TALKING":       "Og'iz harakati / gapirish aniqlandi.",
+    "FACE_TOO_FAR":                 "Kameradan juda uzoq o'tirilgan.",
+    "FACE_TOO_CLOSE":               "Kameraga juda yaqin o'tirilgan.",
+    "FACE_OFF_CENTER":              "Yuz kadr markazida emas edi.",
+    "PROCTOR_FEED_LOST":            "Kamera oqimi to'xtab qoldi.",
+    "CAMERA_MIC_ACCESS_FAILED":     "Kamera yoki mikrofon ishlamadi.",
+    "VIRTUAL_WEBCAM_SUSPECTED":     "Virtual kamera ishlatilgani aniqlandi.",
+    "GAZE_AWAY_LEFT":               "Ekrandan uzoq vaqt chapga qaraldi.",
+    "GAZE_AWAY_RIGHT":              "Ekrandan uzoq vaqt o'ngga qaraldi.",
+    "GAZE_AWAY_UP":                 "Ekrandan uzoq vaqt tepaga qaraldi.",
+    "GAZE_AWAY_DOWN":               "Ekrandan uzoq vaqt pastga qaraldi.",
 }
 
 DEFAULT_BAN_REASON = (
@@ -142,29 +179,70 @@ def _group_violation_rows_for_pdf(
     return out
 
 
-def _ban_reason_text(violations: list[dict]) -> str:
-    """Asosiy ban sababini aniqlaydi."""
-    if not violations:
-        return DEFAULT_BAN_REASON
-    # Eng og'ir violation ni topish
+def _ban_reason_text(
+    violations: list[dict],
+    *,
+    official_warnings: int = 0,
+    last_violation_type: str = "",
+) -> tuple[str, str]:
+    """
+    (asosiy_sabab, qo'shimcha_tushuntirish) qaytaradi.
+    """
+    last_type = (last_violation_type or "").strip()
+    if not last_type and violations:
+        last_type = str(violations[0].get("violation_type") or "")
+
+    instant_types = {"IDENTITY_SUBSTITUTION"}
+    if last_type in instant_types:
+        detail = BAN_REASONS.get(last_type, DEFAULT_BAN_REASON)
+        headline = (
+            f"Darhol bloklash: {_violation_label(last_type)}. "
+            "Yuz almashtirish yoki shaxsni almashtirish aniqlandi — ogohlantirishsiz to'xtatildi."
+        )
+        return headline, detail
+
     priority = [
         "IDENTITY_SUBSTITUTION",
         "REMOTE_CONTROL_SUSPECTED",
         "TAB_SWITCH_HARD",
         "FULLSCREEN_EXIT_HARD",
         "MULTIPLE_FACES",
+        "WHISPER_OR_CONVERSATION_SUSPECTED",
+        "MOUTH_MOVEMENT_TALKING",
         "FACE_NOT_VISIBLE",
     ]
     vtypes = [str(v.get("violation_type") or "") for v in violations]
-    for p in priority:
-        if p in vtypes:
-            return BAN_REASONS.get(p, DEFAULT_BAN_REASON)
-    # Eng ko'p takrorlangan violation
-    from collections import Counter
-    most_common = Counter(vtypes).most_common(1)
-    if most_common:
-        return BAN_REASONS.get(most_common[0][0], DEFAULT_BAN_REASON)
-    return DEFAULT_BAN_REASON
+    trigger_type = last_type
+    if not trigger_type:
+        for p in priority:
+            if p in vtypes:
+                trigger_type = p
+                break
+        if not trigger_type and vtypes:
+            from collections import Counter
+            trigger_type = Counter(vtypes).most_common(1)[0][0]
+
+    trigger_label = _violation_label(trigger_type) if trigger_type else "noma'lum qoidabuzarlik"
+    detail = BAN_REASONS.get(trigger_type, DEFAULT_BAN_REASON)
+
+    warn_n = max(0, int(official_warnings or 0))
+    if warn_n >= 3:
+        headline = (
+            f"3 ta rasmiy ogohlantirishdan keyin bloklandi. "
+            f"Oxirgi qoidabuzarlik: {trigger_label}."
+        )
+        extra = (
+            f"Intizomiy tartib: 1-ogohlantirish → 2-ogohlantirish → 3-ogohlantirish → BAN. "
+            f"Ushbu talaba {warn_n} ta rasmiy ogohlantirish olganidan so'ng imtihon to'xtatildi."
+        )
+        return headline, f"{detail} {extra}"
+
+    headline = f"Bloklash sababi: {trigger_label}."
+    extra = (
+        "Imtihon qoidalari buzilgani sababli tizim tomonidan avtomatik bloklash qo'llanildi. "
+        f"Jami qayd etilgan hodisalar: {len(violations)}."
+    )
+    return headline, f"{detail} {extra}"
 
 
 def _draw_header(c, w: float, h: float, title: str, subtitle: str, hint: str):
@@ -291,6 +369,7 @@ def build_certificate_pdf(
     integrity_code: str,
     overview: str,
     rows: list[dict],
+    pass_threshold: int | None = None,
 ) -> bytes:
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=A4)
@@ -313,7 +392,8 @@ def build_certificate_pdf(
                  hint="")
 
     pct = round((score / total) * 100) if total else 0
-    passed = pct >= 50
+    threshold = pass_threshold if pass_threshold is not None else PASS_PERCENT_THRESHOLD
+    passed = pct >= threshold
     badge_color = colors.HexColor("#1e9e5a") if passed else colors.HexColor("#c0392b")
     badge_bg = colors.HexColor("#e8f8ef") if passed else colors.HexColor("#fdecea")
     badge_label = "MUVAFFAQIYATLI O'TDI" if passed else "O'TA OLMADI"
@@ -369,7 +449,20 @@ def build_certificate_pdf(
     c.setFillColor(badge_color)
     c.drawCentredString(w - 50 - badge_w / 2, y + 3, badge_label)
     c.setFillColor(colors.black)
-    y -= 30
+    y -= 16
+
+    # O'tish mezoni va hisoblash qoidasi
+    c.setFont(FONT_REGULAR, 8)
+    c.setFillColor(colors.HexColor("#666666"))
+    rule_line = (
+        f"Hisoblash: har bir to'g'ri javob 1 ball ({score} / {total}). "
+        f"O'tish mezoni: kamida {threshold}%."
+    )
+    for line in _wrap_text(c, rule_line, FONT_REGULAR, 8, w - 100):
+        c.drawString(50, y, line)
+        y -= 11
+    y -= 8
+    c.setFillColor(colors.black)
 
     # --- Xulosa ---
     if (overview or "").strip():
@@ -398,12 +491,14 @@ def build_certificate_pdf(
     c.drawString(50, y, "Savollar bo'yicha natija")
     y -= 16
 
-    for r in rows[:60]:
+    for r in rows:
         is_correct = bool(r.get("isCorrect"))
         mark_color = colors.HexColor("#1e9e5a") if is_correct else colors.HexColor("#c0392b")
         mark = "\u2713" if is_correct else "\u2717"
         idx = r.get("index")
         text = str(r.get("text") or "")
+        student_ans = str(r.get("studentAnswer") or "").strip()
+        correct_ans = str(r.get("correctAnswer") or "").strip()
         lines = _wrap_text(c, f"{idx}. {text}", FONT_REGULAR, 9, w - 120) or [f"{idx}."]
         for li, line in enumerate(lines[:3]):
             if y < 70:
@@ -416,6 +511,30 @@ def build_certificate_pdf(
                 c.setFillColor(mark_color)
                 c.drawRightString(w - 50, y, mark)
             y -= 12
+
+        # Javoblar — kichik shrift
+        if student_ans or correct_ans:
+            if y < 70:
+                y = new_page()
+            c.setFont(FONT_REGULAR, 7)
+            if student_ans:
+                c.setFillColor(colors.HexColor("#555555"))
+                ans_lines = _wrap_text(c, f"Javobingiz: {student_ans}", FONT_REGULAR, 7, w - 100)
+                for al in ans_lines[:2]:
+                    c.drawString(58, y, al)
+                    y -= 10
+            if correct_ans:
+                c.setFillColor(colors.HexColor("#1e9e5a") if is_correct else colors.HexColor("#0d6b3f"))
+                corr_lines = _wrap_text(
+                    c,
+                    f"To'g'ri javob: {correct_ans}",
+                    FONT_REGULAR,
+                    7,
+                    w - 100,
+                )
+                for cl in corr_lines[:2]:
+                    c.drawString(58, y, cl)
+                    y -= 10
         y -= 3
 
     _draw_footer(c, w, f"{page_no}-bet")
@@ -432,6 +551,8 @@ def build_ban_report_pdf(
     issued_at: str,
     violations: list[dict],
     verify_url: str,
+    official_warnings: int = 0,
+    last_violation_type: str = "",
 ) -> bytes:
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=A4)
@@ -464,34 +585,58 @@ def build_ban_report_pdf(
 
     # Ban sababi — muhim qism
     y -= 8
+    ban_headline, ban_detail = _ban_reason_text(
+        violations,
+        official_warnings=official_warnings,
+        last_violation_type=last_violation_type,
+    )
+    box_h = 72
     c.setStrokeColor(colors.HexColor("#e74c3c"))
     c.setLineWidth(0.5)
-    c.rect(40, y - 42, w - 80, 52, stroke=1, fill=0)
+    c.rect(40, y - box_h + 10, w - 80, box_h + 10, stroke=1, fill=0)
 
     c.setFont(FONT_BOLD, 10)
     c.setFillColor(colors.HexColor("#c0392b"))
-    c.drawString(50, y, "Bloklash sababi:")
+    c.drawString(50, y, "Nima uchun bloklandi:")
     y -= 14
 
-    ban_reason = _ban_reason_text(violations)
-    c.setFont(FONT_REGULAR, 9)
+    c.setFont(FONT_BOLD, 9)
     c.setFillColor(colors.HexColor("#1a1a2e"))
-    # Uzun matnni qatorlarga bo'lish
-    words = ban_reason.split()
-    line = ""
-    for word in words:
-        test = (line + " " + word).strip()
-        if len(test) > 90:
-            c.drawString(50, y, line)
-            y -= 12
-            line = word
-        else:
-            line = test
-    if line:
+    for line in _wrap_text(c, ban_headline, FONT_BOLD, 9, w - 100)[:3]:
         c.drawString(50, y, line)
         y -= 12
 
-    y -= 18
+    c.setFont(FONT_REGULAR, 8)
+    c.setFillColor(colors.HexColor("#444444"))
+    for line in _wrap_text(c, ban_detail, FONT_REGULAR, 8, w - 100)[:4]:
+        c.drawString(50, y, line)
+        y -= 11
+
+    # Ogohlantirish bosqichlari (1 → 2 → 3 → BAN)
+    y -= 6
+    warn_n = max(0, int(official_warnings or 0))
+    instant_ban = (last_violation_type or "") in {"IDENTITY_SUBSTITUTION"}
+    steps = ["1", "2", "3", "BAN"]
+    step_x = 50
+    for i, step in enumerate(steps):
+        if instant_ban:
+            active = i == 3
+        else:
+            active = (i < 3 and warn_n >= i + 1) or (i == 3 and warn_n >= 3)
+        c.setFillColor(colors.HexColor("#c0392b") if active else colors.HexColor("#e0e0e0"))
+        c.circle(step_x + 8, y, 7, stroke=0, fill=1)
+        c.setFont(FONT_BOLD, 7)
+        c.setFillColor(colors.white if active else colors.HexColor("#888888"))
+        c.drawCentredString(step_x + 8, y - 2, step)
+        if i < len(steps) - 1:
+            c.setStrokeColor(colors.HexColor("#cccccc"))
+            c.setLineWidth(0.8)
+            c.line(step_x + 16, y, step_x + 28, y)
+        step_x += 32
+    c.setFont(FONT_REGULAR, 7)
+    c.setFillColor(colors.HexColor("#888888"))
+    c.drawString(50, y - 14, f"Rasmiy ogohlantirishlar: {warn_n} / 3")
+    y -= 28
     c.setFillColor(colors.HexColor("#1a1a2e"))
 
     # Qoidabuzarliklar ro'yxati

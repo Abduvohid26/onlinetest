@@ -4,7 +4,7 @@ import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive } from '../lib/realtimeProctor';
-import { analyzeVoiceFrame, VoiceActivityTracker } from '../lib/voiceActivity';
+import { analyzeVoiceFrame, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -304,6 +304,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Kamera oqimi video elementga ulangach +1 (async setup va ref vaqti sinxroni). */
   const [proctorStreamRevision, setProctorStreamRevision] = useState(0);
   const [faceStatus, setFaceStatus] = useState<FaceStatusLive>('WAITING');
+  const faceStatusRef = useRef<FaceStatusLive>('WAITING');
   const [identityStatus, setIdentityStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
   const identityStatusTimerRef = useRef<number | null>(null);
   const [proctorRetryNonce, setProctorRetryNonce] = useState(0);
@@ -621,6 +622,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   useEffect(() => {
     bannedRef.current = banned;
   }, [banned]);
+  useEffect(() => {
+    faceStatusRef.current = faceStatus;
+  }, [faceStatus]);
 
   // Ban ekranida WebSocket ishlamasa ham admin yechganda "Davom etish" chiqishi uchun polling.
   useEffect(() => {
@@ -1047,17 +1051,26 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
+  const talkingCoordinatorRef = useRef<TalkingViolationCoordinator | null>(null);
 
   useEffect(() => {
     if (banned) return;
     const analyser = analyserRef.current;
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
+    if (!talkingCoordinatorRef.current) talkingCoordinatorRef.current = new TalkingViolationCoordinator();
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
+      const now = Date.now();
+      const speechCtx = { faceOk: faceStatusRef.current === 'OK' };
       const signal = voiceTrackerRef.current?.push(frame);
-      if (signal) void logViolationRef.current(signal);
+      if (signal) {
+        const coordinated = talkingCoordinatorRef.current?.onSpeechSignal(now, speechCtx);
+        if (coordinated) void logViolationRef.current(coordinated);
+      }
+      const deferred = talkingCoordinatorRef.current?.tick(now, speechCtx);
+      if (deferred) void logViolationRef.current(deferred);
     }, 200);
     return () => clearInterval(id);
   }, [banned, analyserRef.current]);
@@ -1198,7 +1211,17 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     videoRef,
     streamRevision: proctorStreamRevision,
     disabled: banned,
-    onViolation: (type) => void logViolationRef.current(type),
+    onViolation: (type) => {
+      if (type === 'MOUTH_MOVEMENT_TALKING') {
+        if (!talkingCoordinatorRef.current) {
+          talkingCoordinatorRef.current = new TalkingViolationCoordinator();
+        }
+        const coordinated = talkingCoordinatorRef.current.onMouthSignal();
+        if (coordinated) void logViolationRef.current(coordinated);
+        return;
+      }
+      void logViolationRef.current(type);
+    },
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
     onFaceStatus: setFaceStatus,
   });

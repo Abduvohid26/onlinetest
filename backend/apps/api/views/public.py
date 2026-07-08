@@ -139,7 +139,13 @@ def public_verify_certificate_pdf(request, result_id: str):
     for i, q in enumerate(questions):
         st = answers.get(str(q["id"]), "")
         ok = st == q.get("correctAnswer")
-        rows.append({"index": i + 1, "text": q.get("text"), "isCorrect": ok})
+        rows.append({
+            "index": i + 1,
+            "text": q.get("text"),
+            "isCorrect": ok,
+            "studentAnswer": st or "",
+            "correctAnswer": q.get("correctAnswer") or "",
+        })
     pdf = build_certificate_pdf(
         result_id=result_id,
         student_name=se.student.name,
@@ -151,6 +157,7 @@ def public_verify_certificate_pdf(request, result_id: str):
         integrity_code=icode,
         overview=ai.get("overview", ""),
         rows=rows,
+        pass_threshold=PASS_PERCENT_THRESHOLD,
     )
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="{result_id}.pdf"'

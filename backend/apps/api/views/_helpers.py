@@ -50,7 +50,7 @@ from apps.api.throttles import (
     PublicVerifyThrottle,
     ViolationThrottle,
 )
-from apps.api.certificate_pdf import build_ban_report_pdf, build_certificate_pdf
+from apps.api.certificate_pdf import build_ban_report_pdf, build_certificate_pdf, PASS_PERCENT_THRESHOLD
 from apps.api.identity_log import log_identity
 from apps.api.face_embedding import analyze_proctor_frame_local
 from apps.api.gemini_tools import (
@@ -841,6 +841,7 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False):
                 "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
             }
         )
+    pct = round((se.score / total) * 100) if total else 0
     return {
         "result_public_id": se.result_public_id,
         "verify_secret": se.result_verify_secret,
@@ -849,7 +850,9 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False):
         "overview": ai.get("overview", ""),
         "score": se.score,
         "total": total,
-        "percentage": round((se.score / total) * 100) if total else 0,
+        "percentage": pct,
+        "pass_threshold": PASS_PERCENT_THRESHOLD,
+        "passed": pct >= PASS_PERCENT_THRESHOLD,
         "completed_at": completed_iso,
         "exam_title": exam.title,
         "student_name": se.student.name,

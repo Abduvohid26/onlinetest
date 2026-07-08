@@ -1,27 +1,41 @@
 /**
- * Real-time ovoz faolligi (VAD) — nutqqa o'xshash spektr + vaqt-domeni signallari.
+ * Real-time ovoz faolligi (VAD) — faqat inson nutqi.
  *
- * Oddiy RMS/ZCR yetarli emas (klaviatura, stul, shovqin ham "voiced" bo'lib qolardi).
- * Nutq diapazoni (180–3600 Hz) energiya ulushi + ZCR + spektr tekisligi ishlatiladi.
+ * Stul, klaviatura, eshik qarshiligi kabi qisqa impuls shovqinlarni filtrlash:
+ * - past chastota ulushi (thud/scrape)
+ * - yuqori crest factor (impuls)
+ * - harmonik struktura (nutqda bor, shovqinda yo'q)
+ *
+ * Ikki holat:
+ * 1) Talaba gapirsa — mikrofonda nutq + kamerada og'iz harakati.
+ * 2) Orqada/yonda boshqa odam gapirsa — mikrofonda nutq, lekin talaba og'izi jim.
  */
 
 export interface VoiceFrame {
   rms: number;
   zcr: number;
-  /** Inson nutqiga o'xshash freym (shovqin emas). */
+  /** Inson nutqiga o'xshash freym (impuls shovqin emas). */
   humanVoice: boolean;
   speechRatio: number;
+  lowFreqRatio: number;
+  crestFactor: number;
+  harmonicity: number;
 }
 
-const RMS_VOICE = 0.038;
-const ZCR_MIN = 0.022;
-const ZCR_MAX = 0.19;
-/** Nutq energiyasi umumiy spektrdagi minimal ulushi. */
-const SPEECH_BAND_RATIO_MIN = 0.5;
-/** Oq shovqin ko'proq tekis spektrga ega; nutq torroq diapazonda jamlanadi. */
-const SPEECH_FLATNESS_MAX = 0.62;
+const RMS_VOICE = 0.042;
+const ZCR_MIN = 0.024;
+const ZCR_MAX = 0.17;
+const SPEECH_BAND_RATIO_MIN = 0.52;
+const SPEECH_FLATNESS_MAX = 0.58;
+const LOW_FREQ_RATIO_MAX = 0.55;
+const CREST_IMPULSE_MIN = 7.5;
+const HARMONICITY_MIN = 0.3;
 
-function speechBandMetrics(analyser: AnalyserNode): { speechRatio: number; flatness: number } {
+function speechBandMetrics(analyser: AnalyserNode): {
+  speechRatio: number;
+  flatness: number;
+  lowFreqRatio: number;
+} {
   const n = analyser.frequencyBinCount;
   const freq = new Uint8Array(n);
   analyser.getByteFrequencyData(freq);
@@ -30,6 +44,7 @@ function speechBandMetrics(analyser: AnalyserNode): { speechRatio: number; flatn
 
   let total = 0;
   let speech = 0;
+  let low = 0;
   let geo = 0;
   let arith = 0;
   let used = 0;
@@ -41,11 +56,34 @@ function speechBandMetrics(analyser: AnalyserNode): { speechRatio: number; flatn
     arith += e;
     geo += Math.log(e + 1e-7);
     const hz = i * binHz;
+    if (hz < 180) low += e;
     if (hz >= 180 && hz <= 3600) speech += e;
   }
   const speechRatio = total > 0 ? speech / total : 0;
+  const lowFreqRatio = total > 0 ? low / total : 0;
   const flatness = used > 0 && arith > 0 ? Math.exp(geo / used) / (arith / used) : 1;
-  return { speechRatio, flatness };
+  return { speechRatio, flatness, lowFreqRatio };
+}
+
+/** 80–400 Hz oralig'ida harmonik signal bormi (nutq fundamental). */
+function estimateHarmonicity(samples: Float32Array, sampleRate: number): number {
+  const minLag = Math.floor(sampleRate / 400);
+  const maxLag = Math.floor(sampleRate / 80);
+  if (maxLag <= minLag + 2) return 0;
+
+  let energy = 0;
+  for (let i = 0; i < samples.length; i++) energy += samples[i] * samples[i];
+  if (energy < 1e-6) return 0;
+
+  let best = 0;
+  for (let lag = minLag; lag <= maxLag && lag < samples.length - 1; lag++) {
+    let corr = 0;
+    const len = samples.length - lag;
+    for (let i = 0; i < len; i++) corr += samples[i] * samples[i + lag];
+    const norm = corr / len;
+    if (norm > best) best = norm;
+  }
+  return Math.min(1, best / (energy / samples.length + 1e-7));
 }
 
 export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
@@ -53,37 +91,50 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
   const buf = new Uint8Array(n);
   analyser.getByteTimeDomainData(buf);
 
+  const floats = new Float32Array(n);
   let sumSq = 0;
+  let peak = 0;
   let crossings = 0;
   let prevSign = 0;
   for (let i = 0; i < n; i++) {
     const v = (buf[i] - 128) / 128;
+    floats[i] = v;
     sumSq += v * v;
+    peak = Math.max(peak, Math.abs(v));
     const sign = v >= 0 ? 1 : -1;
     if (prevSign !== 0 && sign !== prevSign) crossings++;
     prevSign = sign;
   }
   const rms = Math.sqrt(sumSq / n);
   const zcr = crossings / n;
-  const { speechRatio, flatness } = speechBandMetrics(analyser);
+  const crestFactor = peak / (rms + 1e-7);
+  const { speechRatio, flatness, lowFreqRatio } = speechBandMetrics(analyser);
+  const harmonicity = estimateHarmonicity(floats, analyser.context.sampleRate);
+
+  const notImpulse =
+    lowFreqRatio <= LOW_FREQ_RATIO_MAX &&
+    !(crestFactor >= CREST_IMPULSE_MIN && rms < 0.2);
 
   const humanVoice =
     rms >= RMS_VOICE &&
     zcr >= ZCR_MIN &&
     zcr <= ZCR_MAX &&
     speechRatio >= SPEECH_BAND_RATIO_MIN &&
-    flatness <= SPEECH_FLATNESS_MAX;
+    flatness <= SPEECH_FLATNESS_MAX &&
+    harmonicity >= HARMONICITY_MIN &&
+    notImpulse;
 
-  return { rms, zcr, humanVoice, speechRatio };
+  return { rms, zcr, humanVoice, speechRatio, lowFreqRatio, crestFactor, harmonicity };
 }
 
 /**
- * Faqat barqaror inson nutqi uchun ogohlantirish (tahrirlangan shovqin emas).
+ * Faqat barqaror inson nutqi uchun signal (stul/klaviatura impulslari emas).
  */
 export class VoiceActivityTracker {
   private voiceStreak = 0;
   private noiseFloor = 0.018;
-  private calibrateLeft = 40;
+  private calibrateLeft = 45;
+  private prevRms = 0;
 
   push(frame: VoiceFrame): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
     if (this.calibrateLeft > 0) {
@@ -91,19 +142,109 @@ export class VoiceActivityTracker {
       this.calibrateLeft -= 1;
     }
 
-    const aboveFloor = frame.rms > this.noiseFloor * 1.35;
+    const spike = this.prevRms > 0.015 && frame.rms > this.prevRms * 3.2;
+    this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
+    if (spike) {
+      this.voiceStreak = 0;
+      return null;
+    }
+
+    const aboveFloor = frame.rms > this.noiseFloor * 1.45;
     const isSpeech = frame.humanVoice && aboveFloor;
 
     if (isSpeech) {
       this.voiceStreak += 1;
-      // ~1.2s barqaror nutq (200ms freym, 6 streak)
-      if (this.voiceStreak >= 6) {
+      if (this.voiceStreak >= 9) {
         this.voiceStreak = 0;
         return 'WHISPER_OR_CONVERSATION_SUSPECTED';
       }
     } else {
-      this.voiceStreak = Math.max(0, this.voiceStreak - 1);
+      this.voiceStreak = 0;
     }
     return null;
+  }
+}
+
+export type SpeechViolationContext = {
+  /** Talaba yuzi kamerada va holati normal (og'iz kuzatiladi). */
+  faceOk: boolean;
+};
+
+const TALK_CROSS_WINDOW_MS = 3000;
+const MOUTH_QUIET_MS = 1400;
+const SPEECH_MOUTH_WAIT_MS = 1300;
+const TALK_EMIT_COOLDOWN_MS = 12_000;
+
+/**
+ * Nutq qoidabuzarligini ikki yo'l bilan aniqlaydi:
+ * - talaba og'zi + mikrofon nutqi
+ * - talaba og'izi jim, lekin atrofda inson nutqi (orqadagi odam)
+ */
+export class TalkingViolationCoordinator {
+  private lastSpeechAt = 0;
+  private lastMouthAt = 0;
+  private lastEmitAt = 0;
+  private pendingSpeechAt = 0;
+
+  onSpeechSignal(
+    now = Date.now(),
+    ctx: SpeechViolationContext = { faceOk: false },
+  ): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+    this.lastSpeechAt = now;
+
+    const mouthRecent =
+      this.lastMouthAt > 0 && now - this.lastMouthAt <= TALK_CROSS_WINDOW_MS;
+    if (mouthRecent) {
+      this.pendingSpeechAt = 0;
+      return this.emitIfCooldown(now);
+    }
+
+    // Og'iz uzoq vaqt jim bo'lsa — orqada gapirish (darhol).
+    if (ctx.faceOk && this.lastMouthAt > 0 && now - this.lastMouthAt >= MOUTH_QUIET_MS) {
+      this.pendingSpeechAt = 0;
+      return this.emitIfCooldown(now);
+    }
+
+    // Talaba ham gapirishi mumkin — qisqa kutish, keyin tick() orqa fonni aniqlaydi.
+    if (ctx.faceOk) {
+      this.pendingSpeechAt = now;
+    }
+    return null;
+  }
+
+  onMouthSignal(now = Date.now()): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+    this.lastMouthAt = now;
+    this.pendingSpeechAt = 0;
+    if (
+      this.lastSpeechAt > 0 &&
+      now - this.lastSpeechAt <= TALK_CROSS_WINDOW_MS
+    ) {
+      return this.emitIfCooldown(now);
+    }
+    return null;
+  }
+
+  /** Nutq keldi, og'iz kelmadi — fon suhbat ekanini tekshirish. */
+  tick(
+    now = Date.now(),
+    ctx: SpeechViolationContext = { faceOk: false },
+  ): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+    if (!this.pendingSpeechAt) return null;
+    if (now - this.pendingSpeechAt < SPEECH_MOUTH_WAIT_MS) return null;
+
+    const mouthQuiet =
+      !this.lastMouthAt || now - this.lastMouthAt >= MOUTH_QUIET_MS;
+    this.pendingSpeechAt = 0;
+    if (!ctx.faceOk || !mouthQuiet) return null;
+    return this.emitIfCooldown(now);
+  }
+
+  private emitIfCooldown(now: number): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+    if (now - this.lastEmitAt < TALK_EMIT_COOLDOWN_MS) return null;
+    this.lastEmitAt = now;
+    this.lastSpeechAt = 0;
+    this.lastMouthAt = 0;
+    this.pendingSpeechAt = 0;
+    return 'WHISPER_OR_CONVERSATION_SUSPECTED';
   }
 }
