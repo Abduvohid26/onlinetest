@@ -227,7 +227,7 @@ export function StudentDashboard({
     setPdfDownloadingId(examId);
     try {
       const res = await fetch(apiUrl(`/api/student/exams/${examId}/certificate.pdf`), {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'X-Student-Lang': lang },
       });
       if (!res.ok) throw new Error('PDF');
       const blob = await res.blob();

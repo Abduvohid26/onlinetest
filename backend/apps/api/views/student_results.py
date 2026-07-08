@@ -175,7 +175,8 @@ def student_certificate_pdf(request, exam_id: int):
     )
     if not se or se.status != "Completed":
         return HttpResponse("Not found", status=404)
-    b = _result_details_bundle(se, request)
+    lang = resolve_pdf_language(request, se.exam)
+    b = _result_details_bundle(se, request, lang=lang)
     if not b:
         return HttpResponse("Not found", status=404)
     rows = result_questions_to_pdf_rows(b["questions"])
@@ -191,6 +192,7 @@ def student_certificate_pdf(request, exam_id: int):
         overview=b["overview"],
         rows=rows,
         pass_threshold=PASS_PERCENT_THRESHOLD,
+        lang=lang,
     )
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="{b["result_public_id"]}.pdf"'
@@ -251,6 +253,7 @@ def student_ban_report_pdf(request):
     )
     last_vtype = str(violations[0].get("violation_type") or "") if violations else ""
     official_warnings = int(getattr(se, "proctor_official_warnings", 0) or 0) if se else 0
+    lang = resolve_pdf_language(request, se.exam if se else None)
     pdf = build_ban_report_pdf(
         student_id=sid,
         student_name=u.name,
@@ -260,6 +263,7 @@ def student_ban_report_pdf(request):
         verify_url=verify_url,
         official_warnings=official_warnings,
         last_violation_type=last_vtype,
+        lang=lang,
     )
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="BAN_REPORT_{sid}.pdf"'

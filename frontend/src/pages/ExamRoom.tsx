@@ -1734,7 +1734,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 try {
                   setBanPdfBusy(true);
                   const res = await fetch(apiUrl(`/api/student/ban-report.pdf?exam_id=${exam.id}`), {
-                    headers: examAuthHeaders(token),
+                    headers: { ...examAuthHeaders(token), 'X-Student-Lang': langRef.current },
                   });
                   if (!res.ok) throw new Error('yuklab bo\'lmadi');
                   const blob = await res.blob();

@@ -51,6 +51,7 @@ from apps.api.throttles import (
     ViolationThrottle,
 )
 from apps.api.certificate_pdf import build_ban_report_pdf, build_certificate_pdf, PASS_PERCENT_THRESHOLD, result_questions_to_pdf_rows
+from apps.api.pdf_i18n import resolve_pdf_language
 from apps.api.identity_log import log_identity
 from apps.api.face_embedding import analyze_proctor_frame_local
 from apps.api.gemini_tools import (
@@ -803,10 +804,12 @@ def _admin_exams_create_impl(request):
     audit(request, "create_exam", "exam", eid, title, f"mode={mode}, groups={len(gids)}")
     return Response({"id": eid})
 
-def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False):
+def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang: str | None = None):
     if se.status != "Completed" or not se.result_public_id or not se.result_verify_secret:
         return None
     exam = se.exam
+    if lang is None:
+        lang = resolve_pdf_language(request, exam)
     if se.session_questions_json:
         questions = safe_json_loads(se.session_questions_json, [])
     else:
@@ -825,16 +828,17 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False):
     verify_url = f"{base}/verify/result/{se.result_public_id}?k={se.result_verify_secret}"
     per_q = []
     for q in questions:
+        q_loc = localize_exam_question(q, lang)
         st = answers.get(str(q["id"]), "")
-        ok = st == q.get("correctAnswer")
+        ok = st == q_loc.get("correctAnswer")
         ai_row = next((i for i in ai["items"] if i.get("questionId") == q["id"]), None)
         per_q.append(
             {
                 "id": q["id"],
-                "text": q.get("text"),
-                "options": q.get("options"),
+                "text": q_loc.get("text"),
+                "options": q_loc.get("options"),
                 "studentAnswer": st or None,
-                "correctAnswer": q.get("correctAnswer"),
+                "correctAnswer": q_loc.get("correctAnswer"),
                 "isCorrect": ok,
                 "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
                 "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),

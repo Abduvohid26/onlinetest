@@ -136,17 +136,22 @@ def public_verify_certificate_pdf(request, result_id: str):
     verify_url = f"{base}/verify/result/{result_id}?k={k}"
     icode = integrity_code(result_id, completed_iso, se.score, total, k)
     per_q = []
+    from apps.api.pdf_i18n import resolve_pdf_language
+    from apps.api.services import localize_exam_question
+
+    lang = resolve_pdf_language(request, se.exam)
     for q in questions:
+        q_loc = localize_exam_question(q, lang)
         st = answers.get(str(q["id"]), "")
-        ok = st == q.get("correctAnswer")
+        ok = st == q_loc.get("correctAnswer")
         ai_row = next((i for i in ai.get("items", []) if i.get("questionId") == q["id"]), None)
         per_q.append(
             {
                 "id": q["id"],
-                "text": q.get("text"),
-                "options": q.get("options"),
+                "text": q_loc.get("text"),
+                "options": q_loc.get("options"),
                 "studentAnswer": st or None,
-                "correctAnswer": q.get("correctAnswer"),
+                "correctAnswer": q_loc.get("correctAnswer"),
                 "isCorrect": ok,
                 "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
                 "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),
@@ -166,6 +171,7 @@ def public_verify_certificate_pdf(request, result_id: str):
         overview=ai.get("overview", ""),
         rows=rows,
         pass_threshold=PASS_PERCENT_THRESHOLD,
+        lang=lang,
     )
     resp = HttpResponse(pdf, content_type="application/pdf")
     resp["Content-Disposition"] = f'attachment; filename="{result_id}.pdf"'

@@ -55,9 +55,14 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
       const headers: HeadersInit = {};
       if (publicPdfUrl) {
         url = publicPdfUrl.startsWith('http') ? publicPdfUrl : publicPdfUrl;
+        if (!url.includes('lang=')) {
+          const sep = url.includes('?') ? '&' : '?';
+          url = `${url}${sep}lang=${lang}`;
+        }
       } else if (token && data.exam_id != null) {
         url = apiUrl(`/api/student/exams/${data.exam_id}/certificate.pdf`);
         headers.Authorization = `Bearer ${token}`;
+        headers['X-Student-Lang'] = lang;
       } else {
         return;
       }

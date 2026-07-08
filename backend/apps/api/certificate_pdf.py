@@ -36,9 +36,10 @@ C_GREEN_LIGHT = colors.HexColor("#ecfdf3")
 C_SLATE = colors.HexColor("#334155")
 C_MUTED = colors.HexColor("#64748b")
 C_BORDER = colors.HexColor("#e2e8f0")
-LOGO_PDF_SIZE = 78
-QR_PDF_SIZE = 108
-HEADER_BAND_H = 4
+LOGO_PDF_SIZE = 92
+QR_PDF_SIZE = 100
+HEADER_CARD_H = 118
+HEADER_BOTTOM_Y = 40 + HEADER_CARD_H + 18  # kontent boshlanishi: h - HEADER_BOTTOM_Y
 
 
 def result_questions_to_pdf_rows(questions: list[dict]) -> list[dict]:
@@ -80,80 +81,7 @@ for _reg_path, _bold_path in _FONT_CANDIDATES:
         except Exception:
             pass
 
-# Violation type larni o'zbek tiliga tarjima
-VIOLATION_LABELS: dict[str, str] = {
-    "TAB_SWITCH_HARD":              "Boshqa oynaga/varaqqa o'tish (qat'iy)",
-    "FULLSCREEN_EXIT_HARD":         "To'liq ekrandan chiqish (qat'iy)",
-    "IDENTITY_SUBSTITUTION":        "Boshqa shaxs aniqlandi (yuz almashtirildi)",
-    "REMOTE_CONTROL_SUSPECTED":     "Masofadan boshqarish dasturi aniqlandi",
-    "FACE_NOT_VISIBLE":             "Yuz kamerada ko'rinmadi",
-    "MULTIPLE_FACES":               "Kadrda bir nechta shaxs aniqlandi",
-    "SUSPICIOUS_AUDIO":             "Shubhali ovoz/shovqin aniqlandi",
-    "FORBIDDEN_OBJECT_CELL_PHONE":  "Telefon aniqlandi",
-    "FORBIDDEN_OBJECT_LAPTOP":      "Noutbuk aniqlandi",
-    "FORBIDDEN_OBJECT_BOOK":        "Kitob aniqlandi",
-    "FORBIDDEN_OBJECT_CELL_PHONE_DETECTED": "Telefon aniqlandi",
-    "COPY_PASTE_ATTEMPT":           "Nusxa ko'chirish urinishi",
-    "PRINT_SCREEN_ATTEMPT":         "Ekran suratga olish urinishi",
-    "PRINT_SCREEN":                 "Ekran suratga olish urinishi",
-    "DEVTOOLS_OPEN":                "Dasturchi vositalari ochildi",
-    "CLIPBOARD_ATTEMPT":            "Nusxa / buferga urinish (clipboard)",
-    "CLIPBOARD_ACCESS":             "Bufer xotirasiga kirish",
-    "GAZE_AWAY_LEFT":               "Kameradan chapga uzoq qarash",
-    "GAZE_AWAY_RIGHT":              "Kameradan o'ngga uzoq qarash",
-    "GAZE_AWAY_UP":                 "Tepaga uzoq qarash",
-    "GAZE_AWAY_DOWN":               "Pastga uzoq qarash",
-    "WHISPER_OR_CONVERSATION_SUSPECTED": "Gapirish / suhbat shubhasi",
-    "TAB_SWITCH_SOFT":              "Boshqa varaqqa o'tish",
-    "FACE_TURNED_AWAY":             "Yuz kameradan burilgan",
-    "EXCESSIVE_MOVEMENT":           "Haddan tashqari qimirlash",
-    "HAND_GESTURE_SUSPECTED":       "Qo'l ko'tarish / shubhali harakat",
-    "MOUTH_MOVEMENT_TALKING":       "Og'iz harakati / gapirish aniqlandi",
-    "FACE_TOO_FAR":                 "Kameradan juda uzoq",
-    "FACE_TOO_CLOSE":               "Kameraga juda yaqin",
-    "FACE_OFF_CENTER":              "Yuz kadr markazida emas",
-    "PROCTOR_FEED_LOST":            "Kamera oqimi to'xtadi",
-    "CAMERA_MIC_ACCESS_FAILED":     "Kamera yoki mikrofon ishlamadi",
-    "VIRTUAL_WEBCAM_SUSPECTED":     "Virtual kamera aniqlandi",
-}
-
-# Ban sabablari — violation type bo'yicha (qisqa tushuntirish)
-BAN_REASONS: dict[str, str] = {
-    "TAB_SWITCH_HARD":              "Imtihon davomida boshqa brauzer oynasiga yoki varaqqa o'tildi.",
-    "FULLSCREEN_EXIT_HARD":         "Imtihon davomida to'liq ekran rejimidan chiqildi.",
-    "IDENTITY_SUBSTITUTION":        "Kamera orqali yuz taqqoslashda profil rasmi bilan mos kelmaydigan shaxs aniqlandi — darhol bloklash.",
-    "REMOTE_CONTROL_SUSPECTED":     "Kompyuterda masofadan boshqarish dasturi (AnyDesk, TeamViewer va boshqalar) aniqlandi.",
-    "FACE_NOT_VISIBLE":             "Talaba kamera oldidan uzoq vaqt ketdi yoki yuzini yashirdi.",
-    "MULTIPLE_FACES":               "Imtihon davomida kadrda bir nechta shaxs aniqlandi.",
-    "SUSPICIOUS_AUDIO":             "Imtihon davomida shubhali ovoz yoki gapirish aniqlandi.",
-    "WHISPER_OR_CONVERSATION_SUSPECTED": "Imtihon davomida suhbat yoki pichirlash aniqlandi.",
-    "FORBIDDEN_OBJECT_CELL_PHONE":  "Imtihon davomida telefon aniqlandi.",
-    "FORBIDDEN_OBJECT_LAPTOP":      "Imtihon davomida ruxsatsiz noutbuk aniqlandi.",
-    "FORBIDDEN_OBJECT_BOOK":        "Imtihon davomida ruxsatsiz kitob/materiallar aniqlandi.",
-    "CLIPBOARD_ATTEMPT":            "Nusxa ko'chirish yoki buferga urinish aniqlandi.",
-    "PRINT_SCREEN":                 "Ekran suratga olish urinishi aniqlandi.",
-    "DEVTOOLS_OPEN":                "Dasturchi vositalarini ochish urinishi aniqlandi.",
-    "FACE_TURNED_AWAY":             "Yuz kameradan burilgan holda imtihon qoidalari buzildi.",
-    "EXCESSIVE_MOVEMENT":           "Haddan tashqari qimirlash aniqlandi.",
-    "HAND_GESTURE_SUSPECTED":       "Qo'l ko'tarish yoki shubhali harakat aniqlandi.",
-    "MOUTH_MOVEMENT_TALKING":       "Og'iz harakati / gapirish aniqlandi.",
-    "FACE_TOO_FAR":                 "Kameradan juda uzoq o'tirilgan.",
-    "FACE_TOO_CLOSE":               "Kameraga juda yaqin o'tirilgan.",
-    "FACE_OFF_CENTER":              "Yuz kadr markazida emas edi.",
-    "PROCTOR_FEED_LOST":            "Kamera oqimi to'xtab qoldi.",
-    "CAMERA_MIC_ACCESS_FAILED":     "Kamera yoki mikrofon ishlamadi.",
-    "VIRTUAL_WEBCAM_SUSPECTED":     "Virtual kamera ishlatilgani aniqlandi.",
-    "GAZE_AWAY_LEFT":               "Ekrandan uzoq vaqt chapga qaraldi.",
-    "GAZE_AWAY_RIGHT":              "Ekrandan uzoq vaqt o'ngga qaraldi.",
-    "GAZE_AWAY_UP":                 "Ekrandan uzoq vaqt tepaga qaraldi.",
-    "GAZE_AWAY_DOWN":               "Ekrandan uzoq vaqt pastga qaraldi.",
-}
-
-DEFAULT_BAN_REASON = (
-    "Imtihon qoidalari bir necha marta buzildi. "
-    "Tizim tomonidan avtomatik ravishda bloklanish amalga oshirildi."
-)
-
+from apps.api.pdf_i18n import PdfTexts
 
 def _get_logo_path() -> str | None:
     for p in _LOGO_CANDIDATES:
@@ -162,27 +90,24 @@ def _get_logo_path() -> str | None:
     return None
 
 
-def _violation_label(vtype: str) -> str:
-    """Violation type ni o'zbek tiliga tarjima qiladi."""
-    return VIOLATION_LABELS.get(vtype, vtype.replace("_", " ").capitalize())
+def _violation_label(vtype: str, texts: PdfTexts) -> str:
+    return texts.violation_label(vtype)
 
 
-def _group_violation_rows_for_pdf(
+def _violation_chunks_for_pdf(
     rows: list[dict],
+    texts: PdfTexts,
     *,
     window_sec: int = 60,
-) -> list[str]:
-    """
-    serverdagi 60s ogohlantirish birlashishi bilan mos: birinchi hodisadan {window_sec}s
-    ichidagi ketma-kelgan yozuvlarni bitta soddalashtirilgan qator sifatida ko'rsatadi.
-    """
+) -> list[dict]:
+    """Vaqt oynasida guruhlangan hodisalar — har guruhdan 1 rasmiy ogohlantirish."""
     if not rows:
         return []
     with_ts = [r for r in rows if r.get("timestamp") is not None]
     if not with_ts:
-        return ["- Vaqttama yozuv topilmadi."]
+        return []
     raw = sorted(with_ts, key=lambda x: x["timestamp"])
-    out: list[str] = []
+    out: list[dict] = []
     i = 0
     n = len(raw)
     w = max(10, float(window_sec))
@@ -196,23 +121,99 @@ def _group_violation_rows_for_pdf(
                 break
             chunk.append(raw[j])
             j += 1
-        if len(chunk) == 1:
-            ts = str(chunk[0].get("timestamp") or "")[:19].replace("T", " ")
-            vt = str(chunk[0].get("violation_type") or "UNKNOWN")
-            out.append(f"[{ts}]  {_violation_label(vt)}")
-        else:
-            t0 = str(chunk[0].get("timestamp") or "")[:19].replace("T", " ")
-            t1 = str(chunk[-1].get("timestamp") or "")[:19].replace("T", " ")
-            labels = " — ".join(_violation_label(str(c.get("violation_type") or "UNKNOWN")) for c in chunk)
-            out.append(
-                f"[{t0} – {t1}]  {len(chunk)} ta texnik hodisa, 1 rasmiy ogohlantirish davrida: {labels}"
-            )
+        t0 = str(chunk[0].get("timestamp") or "")[:19].replace("T", " ")
+        t1 = str(chunk[-1].get("timestamp") or "")[:19].replace("T", " ")
+        types = [str(c.get("violation_type") or "UNKNOWN") for c in chunk]
+        labels = " — ".join(_violation_label(t, texts) for t in types)
+        summary = texts.format_chunk_summary(
+            timestamp_start=t0,
+            timestamp_end=t1,
+            count=len(chunk),
+            labels=labels,
+        )
+        out.append({
+            "timestamp_start": t0,
+            "timestamp_end": t1,
+            "count": len(chunk),
+            "types": types,
+            "labels": labels,
+            "summary": summary,
+        })
         i = j
     return out
 
 
+def _group_violation_rows_for_pdf(
+    rows: list[dict],
+    texts: PdfTexts,
+    *,
+    window_sec: int = 60,
+) -> list[str]:
+    """PDF uchun soddalashtirilgan qatorlar (orqaga moslik)."""
+    return [c["summary"] for c in _violation_chunks_for_pdf(rows, texts, window_sec=window_sec)]
+
+
+def _ban_timeline_items(
+    violations: list[dict],
+    texts: PdfTexts,
+    *,
+    window_sec: int,
+    official_warnings: int,
+    last_violation_type: str,
+) -> list[dict]:
+    """
+    Raqamli ro'yxat: 1, 2, 3 … ogohlantirishlar va oxirida BAN.
+    Har element: {n, title, lines, is_ban}
+    """
+    last_type = (last_violation_type or "").strip()
+    instant = last_type == "IDENTITY_SUBSTITUTION"
+    if instant:
+        label = _violation_label(last_type, texts)
+        detail = texts.ban_reason(last_type)
+        return [{
+            "n": 1,
+            "title": texts.t("ban_instant_title"),
+            "lines": [f"{label}.", detail],
+            "is_ban": True,
+        }]
+
+    warn_n = max(0, int(official_warnings or 0))
+    chunks = _violation_chunks_for_pdf(violations, texts, window_sec=window_sec)
+    items: list[dict] = []
+
+    for i in range(warn_n):
+        num = i + 1
+        ch = chunks[i] if i < len(chunks) else None
+        lines = [ch["summary"]] if ch else [texts.t("violation_recorded")]
+        items.append({
+            "n": num,
+            "title": texts.t("warning_title", n=num),
+            "lines": lines,
+            "is_ban": False,
+        })
+
+    ban_num = len(items) + 1
+    trigger = _violation_label(last_type, texts) if last_type else texts.t("unknown_violation")
+    ban_lines = [
+        texts.t("ban_after_warnings", n=warn_n),
+        texts.t("last_violation", label=trigger),
+    ]
+    if last_type:
+        extra = texts.ban_reason(last_type)
+        if extra:
+            ban_lines.append(extra)
+    items.append({
+        "n": ban_num,
+        "title": texts.t("ban_step"),
+        "lines": ban_lines,
+        "is_ban": True,
+    })
+    return items
+
+
 def _ban_reason_text(
     violations: list[dict],
+    texts: PdfTexts,
     *,
     official_warnings: int = 0,
     last_violation_type: str = "",
@@ -226,11 +227,8 @@ def _ban_reason_text(
 
     instant_types = {"IDENTITY_SUBSTITUTION"}
     if last_type in instant_types:
-        detail = BAN_REASONS.get(last_type, DEFAULT_BAN_REASON)
-        headline = (
-            f"Darhol bloklash: {_violation_label(last_type)}. "
-            "Yuz almashtirish yoki shaxsni almashtirish aniqlandi — ogohlantirishsiz to'xtatildi."
-        )
+        detail = texts.ban_reason(last_type)
+        headline = texts.t("instant_headline", label=_violation_label(last_type, texts))
         return headline, detail
 
     priority = [
@@ -254,80 +252,79 @@ def _ban_reason_text(
             from collections import Counter
             trigger_type = Counter(vtypes).most_common(1)[0][0]
 
-    trigger_label = _violation_label(trigger_type) if trigger_type else "noma'lum qoidabuzarlik"
-    detail = BAN_REASONS.get(trigger_type, DEFAULT_BAN_REASON)
+    trigger_label = _violation_label(trigger_type, texts) if trigger_type else texts.t("unknown_violation")
+    detail = texts.ban_reason(trigger_type)
 
     warn_n = max(0, int(official_warnings or 0))
     if warn_n >= 3:
-        headline = (
-            f"3 ta rasmiy ogohlantirishdan keyin bloklandi. "
-            f"Oxirgi qoidabuzarlik: {trigger_label}."
-        )
-        extra = (
-            f"Intizomiy tartib: 1-ogohlantirish → 2-ogohlantirish → 3-ogohlantirish → BAN. "
-            f"Ushbu talaba {warn_n} ta rasmiy ogohlantirish olganidan so'ng imtihon to'xtatildi."
-        )
+        headline = texts.t("blocked_after_3", label=trigger_label)
+        extra = texts.t("discipline_extra", n=warn_n)
         return headline, f"{detail} {extra}"
 
-    headline = f"Bloklash sababi: {trigger_label}."
-    extra = (
-        "Imtihon qoidalari buzilgani sababli tizim tomonidan avtomatik bloklash qo'llanildi. "
-        f"Jami qayd etilgan hodisalar: {len(violations)}."
-    )
+    headline = texts.t("generic_headline", label=trigger_label)
+    extra = texts.t("generic_extra", count=len(violations))
     return headline, f"{detail} {extra}"
 
 
-def _draw_header(c, w: float, h: float, title: str, subtitle: str, hint: str, *, accent: str = "cert"):
-    """Institut logosi, sarlavha va QR — yangilangan professional ko'rinish."""
+def _draw_header(c, w: float, h: float, title: str, subtitle: str, hint: str, texts: PdfTexts, *, accent: str = "cert"):
+    """Professional sarlavha: logo | matn | QR."""
     accent_color = C_RED if accent == "ban" else C_NAVY
-    band_y = h - 36
+    accent_light = C_RED_LIGHT if accent == "ban" else C_NAVY_LIGHT
+    top = h - 40
+    header_h = HEADER_CARD_H
+
+    c.setFillColor(accent_light)
+    c.setStrokeColor(C_BORDER)
+    c.roundRect(40, top - header_h, w - 80, header_h, 10, stroke=1, fill=1)
     c.setFillColor(accent_color)
-    c.rect(18, band_y, w - 36, HEADER_BAND_H, stroke=0, fill=1)
+    c.roundRect(40, top - 6, w - 80, 6, 8, stroke=0, fill=1)
 
     logo_path = _get_logo_path()
-    logo_x = 42
-    logo_y = h - 38 - LOGO_PDF_SIZE
+    logo_x, logo_y = 52, top - 14 - LOGO_PDF_SIZE
     if logo_path:
         try:
             from reportlab.lib.utils import ImageReader
             c.drawImage(
-                ImageReader(logo_path),
-                logo_x, logo_y,
+                ImageReader(logo_path), logo_x, logo_y,
                 width=LOGO_PDF_SIZE, height=LOGO_PDF_SIZE,
                 preserveAspectRatio=True, mask="auto",
             )
         except Exception:
-            _draw_logo_placeholder(c, logo_x + LOGO_PDF_SIZE // 2, logo_y + LOGO_PDF_SIZE // 2, LOGO_PDF_SIZE // 2)
+            _draw_logo_placeholder(c, logo_x + LOGO_PDF_SIZE // 2, logo_y + LOGO_PDF_SIZE // 2, LOGO_PDF_SIZE // 2.2)
     else:
-        _draw_logo_placeholder(c, logo_x + LOGO_PDF_SIZE // 2, logo_y + LOGO_PDF_SIZE // 2, LOGO_PDF_SIZE // 2)
+        _draw_logo_placeholder(c, logo_x + LOGO_PDF_SIZE // 2, logo_y + LOGO_PDF_SIZE // 2, LOGO_PDF_SIZE // 2.2)
 
-    text_x = logo_x + LOGO_PDF_SIZE + 16
-    text_max_w = w - text_x - QR_PDF_SIZE - 55
-    c.setFont(FONT_BOLD, 12)
-    c.setFillColor(C_NAVY)
-    inst_lines = _wrap_text(c, "Farg\u2019ona jamoat salomatligi tibbiyot instituti", FONT_BOLD, 12, text_max_w)[:2]
-    inst_y = h - 52
-    for il in inst_lines:
-        c.drawString(text_x, inst_y, il)
-        inst_y -= 13
+    qr_size = QR_PDF_SIZE
+    qr_x, qr_y = w - qr_size - 52, top - 14 - qr_size
+
+    text_x = logo_x + LOGO_PDF_SIZE + 14
+    text_max_w = qr_x - text_x - 12
+    ty = top - 22
+    c.setFont(FONT_BOLD, 8.5)
+    c.setFillColor(C_MUTED)
+    c.drawString(text_x, ty, texts.t("institute_name"))
+    ty -= 16
     c.setFont(FONT_BOLD, 13)
     c.setFillColor(accent_color)
-    c.drawString(text_x, h - 72, title)
-    c.setFont(FONT_REGULAR, 8.5)
-    c.setFillColor(C_MUTED)
-    c.drawString(text_x, h - 86, subtitle)
+    for tl in _wrap_text(c, title, FONT_BOLD, 13, text_max_w)[:2]:
+        c.drawString(text_x, ty, tl)
+        ty -= 15
+    c.setFont(FONT_REGULAR, 8)
+    c.setFillColor(C_SLATE)
+    c.drawString(text_x, ty, subtitle)
+    ty -= 11
     if hint:
-        for i, hl in enumerate(_wrap_text(c, hint, FONT_REGULAR, 7.5, text_max_w)[:2]):
-            c.drawString(text_x, h - 98 - i * 10, hl)
+        c.setFont(FONT_REGULAR, 7.5)
+        c.setFillColor(C_MUTED)
+        for hl in _wrap_text(c, hint, FONT_REGULAR, 7.5, text_max_w)[:2]:
+            c.drawString(text_x, ty, hl)
+            ty -= 10
 
-    c.setStrokeColor(C_BORDER)
-    c.setLineWidth(0.8)
-    c.line(40, h - 118, w - 40, h - 118)
     c.setFillColor(colors.black)
 
 
-def _draw_qr(c, verify_url: str, w: float, h: float, *, size: int | None = None):
-    """QR kod chizish."""
+def _draw_qr(c, verify_url: str, w: float, h: float, texts: PdfTexts, *, size: int | None = None):
+    """QR kod — sarlavha o'ng tomonida."""
     qr_size = size or QR_PDF_SIZE
     try:
         import qrcode
@@ -341,17 +338,96 @@ def _draw_qr(c, verify_url: str, w: float, h: float, *, size: int | None = None)
         qbuf = BytesIO()
         img.save(qbuf, format="PNG")
         qbuf.seek(0)
-        qr_x = w - qr_size - 42
-        qr_y = h - qr_size - 42
+        top = h - 40
+        qr_x = w - qr_size - 52
+        qr_y = top - 14 - qr_size
         c.setFillColor(colors.white)
         c.setStrokeColor(C_BORDER)
-        c.roundRect(qr_x - 6, qr_y - 6, qr_size + 12, qr_size + 18, 6, stroke=1, fill=1)
+        c.roundRect(qr_x - 5, qr_y - 5, qr_size + 10, qr_size + 16, 8, stroke=1, fill=1)
         c.drawImage(ImageReader(qbuf), qr_x, qr_y, width=qr_size, height=qr_size)
         c.setFont(FONT_REGULAR, 7)
         c.setFillColor(C_MUTED)
-        c.drawCentredString(qr_x + qr_size / 2, qr_y - 11, "QR tekshiruv")
+        c.drawCentredString(qr_x + qr_size / 2, qr_y - 10, texts.t("qr_verify"))
     except Exception:
         pass
+
+
+def _draw_section_title(c, x: float, y: float, title: str, *, color=None) -> float:
+    c.setFont(FONT_BOLD, 10.5)
+    c.setFillColor(color or C_NAVY)
+    c.drawString(x, y, title)
+    return y - 14
+
+
+def _draw_kv_panel(c, x: float, y: float, width: float, fields: list[tuple[str, str]], *, fill=None) -> float:
+    """Label: value ro'yxati — yumaloq panel."""
+    row_h = 16
+    pad = 12
+    panel_h = pad * 2 + len(fields) * row_h
+    c.setFillColor(fill or C_NAVY_LIGHT)
+    c.setStrokeColor(C_BORDER)
+    c.roundRect(x, y - panel_h, width, panel_h, 10, stroke=1, fill=1)
+    fy = y - pad - 2
+    for label, val in fields:
+        c.setFont(FONT_BOLD, 8.5)
+        c.setFillColor(C_MUTED)
+        c.drawString(x + 14, fy, label)
+        c.setFont(FONT_REGULAR, 9)
+        c.setFillColor(C_SLATE)
+        val_lines = _wrap_text(c, str(val), FONT_REGULAR, 9, width - 140)[:1]
+        c.drawString(x + 120, fy, val_lines[0] if val_lines else "")
+        fy -= row_h
+    return panel_h + 10
+
+
+def _draw_numbered_timeline(c, x: float, y: float, width: float, items: list[dict]) -> float:
+    """1, 2, 3, 4 … raqamli ogohlantirish va BAN ro'yxati."""
+    if not items:
+        return 0
+    pad_x = 12
+    num_w = 22
+    text_w = width - pad_x * 2 - num_w - 6
+    gap = 5
+    total = 0
+
+    for item in items:
+        is_ban = bool(item.get("is_ban"))
+        title = str(item.get("title") or "")
+        body_lines: list[str] = []
+        for line in item.get("lines") or []:
+            body_lines.extend(_wrap_text(c, str(line), FONT_REGULAR, 8.5, text_w))
+        row_h = 16 + 12 + len(body_lines) * 11 + 8
+
+        bg = C_RED_LIGHT if is_ban else colors.white
+        border = C_RED if is_ban else C_BORDER
+        c.setFillColor(bg)
+        c.setStrokeColor(border)
+        c.setLineWidth(0.8 if is_ban else 0.5)
+        c.roundRect(x, y - row_h, width, row_h, 8, stroke=1, fill=1)
+
+        num = int(item.get("n") or 0)
+        cy = y - 18
+        c.setFillColor(C_RED if is_ban else C_NAVY)
+        c.circle(x + pad_x + 9, cy, 9, stroke=0, fill=1)
+        c.setFont(FONT_BOLD, 9)
+        c.setFillColor(colors.white)
+        c.drawCentredString(x + pad_x + 9, cy - 3.5, str(num))
+
+        tx = x + pad_x + num_w
+        c.setFont(FONT_BOLD, 9)
+        c.setFillColor(C_RED if is_ban else C_NAVY)
+        c.drawString(tx, y - 14, title)
+        ly = y - 28
+        c.setFont(FONT_REGULAR, 8.5)
+        c.setFillColor(C_SLATE)
+        for bl in body_lines:
+            c.drawString(tx, ly, bl)
+            ly -= 11
+
+        y -= row_h + gap
+        total += row_h + gap
+
+    return total
 
 
 def _draw_logo_placeholder(c, cx: float, cy: float, r: float):
@@ -390,10 +466,10 @@ def _draw_page_frame(c, w: float, h: float):
     c.setFillColor(colors.black)
 
 
-def _draw_footer(c, w: float, page_label: str = ""):
+def _draw_footer(c, w: float, texts: PdfTexts, page_label: str = ""):
     c.setFont(FONT_REGULAR, 7)
     c.setFillColor(colors.HexColor("#9aa0aa"))
-    c.drawString(30, 26, "Farg\u2019ona jamoat salomatligi tibbiyot instituti \u2014 avtomatik shakllantirilgan hujjat")
+    c.drawString(30, 26, texts.t("footer_doc"))
     if page_label:
         c.drawRightString(w - 30, 26, page_label)
     c.setFillColor(colors.black)
@@ -412,7 +488,9 @@ def build_certificate_pdf(
     overview: str,
     rows: list[dict],
     pass_threshold: int | None = None,
+    lang: str = "uz",
 ) -> bytes:
+    texts = PdfTexts(lang)
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=A4)
     w, h = A4
@@ -420,18 +498,19 @@ def build_certificate_pdf(
 
     def new_page():
         nonlocal page_no
-        _draw_footer(c, w, f"{page_no}-bet")
+        _draw_footer(c, w, texts, texts.page_label(page_no))
         c.showPage()
         page_no += 1
         _draw_page_frame(c, w, h)
         return h - 50
 
     _draw_page_frame(c, w, h)
-    _draw_qr(c, verify_url, w, h)
+    _draw_qr(c, verify_url, w, h, texts)
     _draw_header(c, w, h,
-                 title="Onlayn imtihon sertifikati",
-                 subtitle="Hujjat raqamli QR orqali tekshiriladi",
+                 title=texts.t("cert_title"),
+                 subtitle=texts.t("cert_subtitle"),
                  hint="",
+                 texts=texts,
                  accent="cert")
 
     pct = round((score / total) * 100) if total else 0
@@ -439,19 +518,19 @@ def build_certificate_pdf(
     passed = pct >= threshold
     badge_color = C_GREEN if passed else C_RED
     badge_bg = C_GREEN_LIGHT if passed else C_RED_LIGHT
-    badge_label = "MUVAFFAQIYATLI O'TDI" if passed else "O'TA OLMADI"
+    badge_label = texts.t("passed_badge") if passed else texts.t("failed_badge")
 
-    y = h - 138
+    y = h - HEADER_BOTTOM_Y
 
     # --- Ma'lumotlar bloki (chegaralangan karta) ---
     box_top = y
     fields = [
-        ("Natija ID",        result_id),
-        ("Talaba",           student_name),
-        ("Imtihon",          exam_title),
-        ("Yakunlangan sana", completed_at[:19].replace("T", " ")),
-        ("Yaxlitlik kodi",   integrity_code),
-        ("Tekshiruv havolasi", verify_url),
+        (texts.t("result_id"),        result_id),
+        (texts.t("student"),           student_name),
+        (texts.t("exam"),              exam_title),
+        (texts.t("completed_at"), completed_at[:19].replace("T", " ")),
+        (texts.t("integrity_code"),   integrity_code),
+        (texts.t("verify_url"), verify_url),
     ]
     box_height = 18 + len(fields) * 15 + 6
     c.setFillColor(C_NAVY_LIGHT)
@@ -497,10 +576,7 @@ def build_certificate_pdf(
     # O'tish mezoni va hisoblash qoidasi
     c.setFont(FONT_REGULAR, 8)
     c.setFillColor(colors.HexColor("#666666"))
-    rule_line = (
-        f"Hisoblash: har bir to'g'ri javob 1 ball ({score} / {total}). "
-        f"O'tish mezoni: kamida {threshold}%."
-    )
+    rule_line = texts.t("scoring_rule", score=score, total=total, threshold=threshold)
     for line in _wrap_text(c, rule_line, FONT_REGULAR, 8, w - 100):
         c.drawString(50, y, line)
         y -= 11
@@ -511,7 +587,7 @@ def build_certificate_pdf(
     if (overview or "").strip():
         c.setFont(FONT_BOLD, 11)
         c.setFillColor(colors.HexColor("#1a1a2e"))
-        c.drawString(50, y, "Xulosa")
+        c.drawString(50, y, texts.t("overview"))
         y -= 16
         c.setFont(FONT_REGULAR, 9)
         c.setFillColor(colors.HexColor("#333333"))
@@ -531,7 +607,7 @@ def build_certificate_pdf(
     # --- Savollar (batafsil) ---
     c.setFont(FONT_BOLD, 12)
     c.setFillColor(C_NAVY)
-    c.drawString(50, y, "Savollar bo'yicha batafsil natija")
+    c.drawString(50, y, texts.t("questions_detail"))
     y -= 18
 
     for r in rows:
@@ -550,15 +626,15 @@ def build_certificate_pdf(
         q_lines = _wrap_text(c, f"{idx}. {text}", FONT_REGULAR, 9, w - 130) or [f"{idx}."]
         detail_blocks: list[tuple[str, str]] = []
         if student_ans:
-            detail_blocks.append(("Javobingiz", student_ans))
+            detail_blocks.append((texts.t("your_answer"), student_ans))
         if correct_ans:
-            detail_blocks.append(("To'g'ri javob", correct_ans))
+            detail_blocks.append((texts.t("correct_answer"), correct_ans))
         if is_correct and comment_ok:
-            detail_blocks.append(("Izoh", comment_ok))
+            detail_blocks.append((texts.t("comment"), comment_ok))
         if not is_correct and why_wrong:
-            detail_blocks.append(("Nima uchun noto'g'ri", why_wrong))
+            detail_blocks.append((texts.t("why_wrong"), why_wrong))
         if not is_correct and why_right:
-            detail_blocks.append(("To'g'ri javob tushuntirishi", why_right))
+            detail_blocks.append((texts.t("why_correct_right"), why_right))
 
         block_lines = 0
         for label, body in detail_blocks:
@@ -571,7 +647,7 @@ def build_certificate_pdf(
             y = new_page()
             c.setFont(FONT_BOLD, 12)
             c.setFillColor(C_NAVY)
-            c.drawString(50, y, "Savollar (davomi)")
+            c.drawString(50, y, texts.t("questions_continued"))
             y -= 18
 
         card_top = y
@@ -594,15 +670,15 @@ def build_certificate_pdf(
         if options:
             c.setFont(FONT_BOLD, 7.5)
             c.setFillColor(C_MUTED)
-            c.drawString(52, cy, "Variantlar:")
+            c.drawString(52, cy, texts.t("options"))
             cy -= 10
             c.setFont(FONT_REGULAR, 7.5)
             for opt_i, opt in enumerate(options[:8], start=1):
                 opt_mark = ""
                 if student_ans and str(opt) == student_ans:
-                    opt_mark = " \u2190 siz"
+                    opt_mark = f" \u2190 {texts.t('opt_you')}"
                 elif correct_ans and str(opt) == correct_ans:
-                    opt_mark = " \u2190 to'g'ri"
+                    opt_mark = f" \u2190 {texts.t('opt_correct')}"
                 for ol in _wrap_text(c, f"{opt_i}) {opt}{opt_mark}", FONT_REGULAR, 7.5, w - 120)[:2]:
                     c.drawString(58, cy, ol)
                     cy -= 9
@@ -613,14 +689,14 @@ def build_certificate_pdf(
             c.drawString(52, cy, f"{label}:")
             cy -= 10
             c.setFont(FONT_REGULAR, 8)
-            c.setFillColor(C_MUTED if label != "To'g'ri javob" else C_GREEN)
+            c.setFillColor(C_MUTED if label != texts.t("correct_answer") else C_GREEN)
             for bl in _wrap_text(c, body, FONT_REGULAR, 8, w - 120)[:8]:
                 c.drawString(58, cy, bl)
                 cy -= 10
 
         y = card_top - card_h - 10
 
-    _draw_footer(c, w, f"{page_no}-bet")
+    _draw_footer(c, w, texts, texts.page_label(page_no))
     c.showPage()
     c.save()
     return buf.getvalue()
@@ -636,163 +712,131 @@ def build_ban_report_pdf(
     verify_url: str,
     official_warnings: int = 0,
     last_violation_type: str = "",
+    lang: str = "uz",
 ) -> bytes:
+    texts = PdfTexts(lang)
     buf = BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=A4)
     w, h = A4
     page_no = 1
+    margin_x = 44
+    content_w = w - margin_x * 2
 
     def new_page():
         nonlocal page_no
-        _draw_footer(c, w, f"{page_no}-bet")
+        _draw_footer(c, w, texts, texts.page_label(page_no))
         c.showPage()
         page_no += 1
         _draw_page_frame(c, w, h)
         return h - 50
 
     _draw_page_frame(c, w, h)
-    _draw_qr(c, verify_url, w, h)
     _draw_header(c, w, h,
-                 title="Rasmiy intizomiy bayonnoma (BAN hisobot)",
-                 subtitle="Hujjat raqamli QR orqali tekshiriladi",
-                 hint="Ushbu hujjat institut ichki nazorat tizimi tomonidan avtomatik shakllantirildi",
+                 title=texts.t("ban_title"),
+                 subtitle=texts.t("ban_subtitle"),
+                 hint=texts.t("ban_hint"),
+                 texts=texts,
                  accent="ban")
+    _draw_qr(c, verify_url, w, h, texts)
 
-    y = h - 138
-    fields = [
-        ("Talaba ID", student_id),
-        ("Talaba F.I.Sh.", student_name),
-        ("Imtihon", exam_title),
-        ("Berilgan sana", issued_at[:19].replace("T", " ")),
-    ]
-    box_h = 14 + len(fields) * 16 + 8
-    c.setFillColor(C_NAVY_LIGHT)
-    c.setStrokeColor(C_BORDER)
-    c.roundRect(40, y - box_h + 8, w - 80, box_h, 8, stroke=1, fill=1)
-    fy = y - 6
-    for label, val in fields:
-        c.setFont(FONT_BOLD, 9)
-        c.setFillColor(C_MUTED)
-        c.drawString(52, fy, f"{label}:")
-        c.setFont(FONT_REGULAR, 9)
-        c.setFillColor(C_SLATE)
-        for vl in _wrap_text(c, str(val), FONT_REGULAR, 9, w - 200)[:1]:
-            c.drawString(165, fy, vl)
-        fy -= 16
-    y -= box_h + 10
+    y = h - HEADER_BOTTOM_Y
+
+    y = _draw_section_title(c, margin_x + 4, y, texts.t("student_info"))
+    y -= _draw_kv_panel(c, margin_x, y, content_w, [
+        (texts.t("student_id"), student_id),
+        (texts.t("full_name"), student_name),
+        (texts.t("exam"), exam_title),
+        (texts.t("issued_at"), issued_at[:19].replace("T", " ")),
+    ])
 
     ban_headline, ban_detail = _ban_reason_text(
         violations,
+        texts,
         official_warnings=official_warnings,
         last_violation_type=last_violation_type,
     )
-    headline_lines = _wrap_text(c, ban_headline, FONT_BOLD, 9.5, w - 110)[:4]
+    headline_lines = _wrap_text(c, ban_headline, FONT_BOLD, 10, content_w - 28)[:4]
     detail_lines: list[str] = []
-    for dl in _wrap_text(c, ban_detail, FONT_REGULAR, 8.5, w - 110):
+    for dl in _wrap_text(c, ban_detail, FONT_REGULAR, 8.5, content_w - 28):
         detail_lines.append(dl)
-        if len(detail_lines) >= 8:
+        if len(detail_lines) >= 6:
             break
-    reason_h = 28 + len(headline_lines) * 12 + len(detail_lines) * 11 + 34
 
+    y = _draw_section_title(c, margin_x + 4, y, texts.t("why_blocked"), color=C_RED)
+    reason_pad = 14
+    reason_h = reason_pad * 2 + 20 + len(headline_lines) * 13 + len(detail_lines) * 11
     c.setFillColor(C_RED_LIGHT)
     c.setStrokeColor(C_RED)
-    c.roundRect(40, y - reason_h, w - 80, reason_h, 8, stroke=1, fill=1)
-    c.setFont(FONT_BOLD, 11)
+    c.setLineWidth(0.6)
+    c.roundRect(margin_x, y - reason_h, content_w, reason_h, 10, stroke=1, fill=1)
+
+    ry = y - reason_pad - 2
+    c.setFont(FONT_BOLD, 10)
     c.setFillColor(C_RED)
-    c.drawString(52, y - 16, "Nima uchun bloklandi")
-    ry = y - 30
+    c.drawString(margin_x + 14, ry, texts.t("block_reason_title"))
+    ry -= 16
     c.setFont(FONT_BOLD, 9.5)
     c.setFillColor(C_SLATE)
     for line in headline_lines:
-        c.drawString(52, ry, line)
-        ry -= 12
+        c.drawString(margin_x + 14, ry, line)
+        ry -= 13
     c.setFont(FONT_REGULAR, 8.5)
     c.setFillColor(C_MUTED)
     for line in detail_lines:
-        c.drawString(52, ry, line)
+        c.drawString(margin_x + 14, ry, line)
         ry -= 11
+    y -= reason_h + 6
 
-    # Ogohlantirish bosqichlari
     warn_n = max(0, int(official_warnings or 0))
-    instant_ban = (last_violation_type or "") in {"IDENTITY_SUBSTITUTION"}
-    steps = ["1", "2", "3", "BAN"]
-    step_x = 52
-    step_y = y - reason_h + 14
-    for i, step in enumerate(steps):
-        if instant_ban:
-            active = i == 3
-        else:
-            active = (i < 3 and warn_n >= i + 1) or (i == 3 and warn_n >= 3)
-        c.setFillColor(C_RED if active else colors.HexColor("#e2e8f0"))
-        c.circle(step_x + 10, step_y, 9, stroke=0, fill=1)
-        c.setFont(FONT_BOLD, 8)
-        c.setFillColor(colors.white if active else C_MUTED)
-        c.drawCentredString(step_x + 10, step_y - 3, step)
-        if i < len(steps) - 1:
-            c.setStrokeColor(colors.HexColor("#cbd5e1"))
-            c.setLineWidth(1)
-            c.line(step_x + 20, step_y, step_x + 34, step_y)
-        step_x += 38
+    warn_win = max(15, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "30")))
+    timeline = _ban_timeline_items(
+        violations,
+        texts,
+        window_sec=warn_win,
+        official_warnings=warn_n,
+        last_violation_type=last_violation_type,
+    )
+
+    y = _draw_section_title(c, margin_x + 4, y, texts.t("timeline_title"), color=C_RED)
     c.setFont(FONT_REGULAR, 7.5)
     c.setFillColor(C_MUTED)
-    c.drawString(52, step_y - 16, f"Rasmiy ogohlantirishlar: {warn_n} / 3")
-    y -= reason_h + 14
+    note_y = y
+    for note in _wrap_text(
+        c,
+        texts.t("timeline_note", win=warn_win),
+        FONT_REGULAR, 7.5, content_w - 8,
+    )[:1]:
+        c.drawString(margin_x + 4, note_y, note)
+        note_y -= 10
+    y = note_y - 4
 
-    c.setFont(FONT_BOLD, 11)
-    c.setFillColor(C_NAVY)
-    c.drawString(50, y, "Qayd etilgan qoidabuzarliklar")
-    y -= 16
+    for item in timeline:
+        item_lines: list[str] = []
+        for line in item.get("lines") or []:
+            item_lines.extend(_wrap_text(c, str(line), FONT_REGULAR, 8.5, content_w - 52))
+        row_h = 16 + 12 + len(item_lines) * 11 + 8
+        if y - row_h < 80:
+            y = new_page()
+        single_h = _draw_numbered_timeline(c, margin_x, y, content_w, [item])
+        y -= single_h
 
-    warn_win = max(15, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "30")))
-    grouped = _group_violation_rows_for_pdf(violations, window_sec=warn_win) if violations else []
-    if not grouped:
-        c.setFont(FONT_REGULAR, 9)
-        c.setFillColor(C_MUTED)
-        c.drawString(50, y, "- Qoidabuzarlik loglari topilmadi.")
-        y -= 12
-    else:
-        c.setFont(FONT_REGULAR, 7.5)
-        c.setFillColor(C_MUTED)
-        for note in _wrap_text(
-            c,
-            f"Eslatma: ketma-kelgan hodisalar {warn_win}s oynasida 1 rasmiy ogohlantirish bilan bitta qator sifatida ko'rsatiladi.",
-            FONT_REGULAR,
-            7.5,
-            w - 100,
-        )[:2]:
-            c.drawString(50, y, note)
-            y -= 10
-        y -= 4
-        for idx, line in enumerate(grouped, start=1):
-            if y < 90:
-                y = new_page()
-            row_bg = C_NAVY_LIGHT if idx % 2 == 0 else colors.white
-            row_lines = _wrap_text(c, f"{idx}) {line}", FONT_REGULAR, 8.5, w - 110)[:3]
-            row_h = max(18, len(row_lines) * 11 + 8)
-            c.setFillColor(row_bg)
-            c.roundRect(42, y - row_h, w - 84, row_h, 4, stroke=0, fill=1)
-            c.setFont(FONT_REGULAR, 8.5)
-            c.setFillColor(C_SLATE)
-            ly = y - 12
-            for rl in row_lines:
-                c.drawString(50, ly, rl)
-                ly -= 11
-            y -= row_h + 4
+    if y < 120:
+        y = new_page()
 
-    y -= 12
+    y -= 8
     c.setStrokeColor(C_BORDER)
     c.setLineWidth(0.8)
-    c.line(40, y, w - 40, y)
-    y -= 18
+    c.line(margin_x, y, w - margin_x, y)
+    y -= 20
     c.setFont(FONT_REGULAR, 8)
     c.setFillColor(C_MUTED)
-    c.drawString(50, y, "Ushbu hujjat Farg\u2019ona jamoat salomatligi tibbiyot instituti ichki nazorat siyosati asosida shakllantirildi.")
+    c.drawString(margin_x, y, texts.t("footer_policy"))
     c.setFont(FONT_BOLD, 9)
     c.setFillColor(C_SLATE)
-    c.drawString(50, y - 28, "Mas\u2019ul shaxs imzosi: ____________________________")
-    c.drawString(320, y - 28, "Sana: _______________")
+    c.drawString(margin_x, y - 24, texts.t("responsible_sign"))
+    c.drawString(330, y - 24, texts.t("date_label"))
 
-    _draw_footer(c, w, f"{page_no}-bet")
+    _draw_footer(c, w, texts, texts.page_label(page_no))
     c.showPage()
     c.save()
     return buf.getvalue()
