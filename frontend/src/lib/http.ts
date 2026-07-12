@@ -3,6 +3,22 @@ export function signalAuthError() {
   window.dispatchEvent(new Event('auth:error'));
 }
 
+export function checkAdminAuthResponse(res: Response): boolean {
+  if (res.status === 401 || res.status === 403) {
+    signalAuthError();
+    return false;
+  }
+  return true;
+}
+
+export function checkStudentAuthResponse(res: Response): boolean {
+  if (res.status === 401) {
+    signalAuthError();
+    return false;
+  }
+  return true;
+}
+
 /** Avoid SyntaxError when the server returns HTML (e.g. SPA fallback) instead of JSON. */
 export async function readJsonSafe<T = unknown>(res: Response): Promise<T | null> {
   const ct = res.headers.get('content-type') || '';

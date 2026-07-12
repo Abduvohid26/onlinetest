@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
 import { ExamResultSummary, type ExamResultPayload } from '../components/ExamResultSummary';
-import { readJsonSafe } from '../lib/http';
+import { readJsonSafe, checkStudentAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { formatCountdown, formatExamDateTime, msUntil } from '../lib/datetimeLocal';
-import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
+import { AdminBtn, AdminAlert, AdminInput, AdminSelect } from './admin/ui';
 
 const REFRESH_INTERVAL_MS = 30_000;
 const REFRESH_BANNED_WAIT_MS = 8_000;
@@ -24,6 +24,8 @@ const LOCAL: Record<Language, Record<string, string>> = {
     scoreLabel: 'Natija',
     pendingEval: 'Baholanmoqda',
     questionsWord: 'savol',
+    filterByStatus: 'Holat bo‘yicha',
+    filterEmpty: 'Bu holatda natija topilmadi',
   },
   ru: {
     greeting: 'Добро пожаловать',
@@ -36,6 +38,8 @@ const LOCAL: Record<Language, Record<string, string>> = {
     scoreLabel: 'Результат',
     pendingEval: 'На проверке',
     questionsWord: 'вопр.',
+    filterByStatus: 'По статусу',
+    filterEmpty: 'Нет результатов с этим статусом',
   },
   en: {
     greeting: 'Welcome',
@@ -48,6 +52,8 @@ const LOCAL: Record<Language, Record<string, string>> = {
     scoreLabel: 'Score',
     pendingEval: 'Under review',
     questionsWord: 'questions',
+    filterByStatus: 'Filter by status',
+    filterEmpty: 'No results for this status',
   },
 };
 
@@ -56,6 +62,24 @@ function scoreTone(pct: number): { text: string; bar: string } {
   if (pct >= 50) return { text: 'text-emerald-600', bar: 'bg-emerald-500' };
   if (pct >= 40) return { text: 'text-amber-600', bar: 'bg-amber-500' };
   return { text: 'text-red-600', bar: 'bg-red-500' };
+}
+
+type ResultStatusFilter = 'all' | 'Completed' | 'Banned';
+
+function resultSortTime(r: { completed_at?: string | null; id?: number }): number {
+  if (r.completed_at) {
+    const t = new Date(r.completed_at).getTime();
+    if (!Number.isNaN(t)) return t;
+  }
+  return 0;
+}
+
+function sortResultsNewestFirst<T extends { completed_at?: string | null; id?: number }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const diff = resultSortTime(b) - resultSortTime(a);
+    if (diff !== 0) return diff;
+    return (b.id ?? 0) - (a.id ?? 0);
+  });
 }
 
 /* Kichik statistika plitkasi. */
@@ -108,6 +132,7 @@ export function StudentDashboard({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'available' | 'results'>('available');
+  const [resultStatusFilter, setResultStatusFilter] = useState<ResultStatusFilter>('all');
   const [isBanned, setIsBanned] = useState(false);
   const [detailPayload, setDetailPayload] = useState<ExamResultPayload | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -145,7 +170,7 @@ export function StudentDashboard({
     }
 
     if (cancelledRef.current) return;
-    if (examsRes.status === 401) { setError(tr.studentSessionUnauthorized); setLoading(false); setRefreshing(false); return; }
+    if (!checkStudentAuthResponse(examsRes)) { setLoading(false); setRefreshing(false); return; }
     if (examsRes.status === 403) {
       const j = await readJsonSafe<{ error?: string }>(examsRes);
       const err = String(j?.error || '');
@@ -162,6 +187,7 @@ export function StudentDashboard({
     const resultsRes = await fetch(apiUrl('/api/student/results'), {
       headers: { Authorization: `Bearer ${token}` },
     });
+    if (!checkStudentAuthResponse(resultsRes)) { setLoading(false); setRefreshing(false); return; }
     if (resultsRes.ok) {
       const j = await readJsonSafe<any[]>(resultsRes);
       if (!cancelledRef.current) setResults(Array.isArray(j) ? j : []);
@@ -268,9 +294,6 @@ export function StudentDashboard({
   const visibleExams = exams.filter(
     (e: any) => now <= new Date(e.end_time).getTime() || e.in_progress,
   );
-  const ongoingCount = visibleExams.filter(
-    (e: any) => now >= new Date(e.start_time).getTime() && now <= new Date(e.end_time).getTime(),
-  ).length;
 
   const completedResults = results.filter((r: any) => r.status === 'Completed');
   const gradedPcts = completedResults
@@ -279,6 +302,13 @@ export function StudentDashboard({
   const avgPct = gradedPcts.length
     ? Math.round(gradedPcts.reduce((a: number, b: number) => a + b, 0) / gradedPcts.length)
     : null;
+
+  const displayedResults = useMemo(() => {
+    const filtered = resultStatusFilter === 'all'
+      ? results
+      : results.filter((r: any) => r.status === resultStatusFilter);
+    return sortResultsNewestFirst(filtered);
+  }, [results, resultStatusFilter]);
 
   const firstName = (user?.name || '').toString().trim().split(/\s+/)[0] || '';
 
@@ -401,10 +431,29 @@ export function StudentDashboard({
         />
       </div>
 
-      {/* ── Tabs ── */}
-      <div className="flex items-center gap-1 h-11 rounded-xl bg-gray-100 p-1 border border-gray-200 w-full sm:w-fit mb-5">
-        <Tab id="available" label={t.tabAvailableExams} count={visibleExams.length} />
-        <Tab id="results" label={t.tabMyResults} count={results.length} />
+      {/* ── Tabs + natija filtri (bir qator) ── */}
+      <div className="flex items-center justify-between gap-2 sm:gap-3 mb-5 min-w-0">
+        <div className="flex items-center gap-1 h-11 rounded-xl bg-gray-100 p-1 border border-gray-200 min-w-0 shrink">
+          <Tab id="available" label={t.tabAvailableExams} count={visibleExams.length} />
+          <Tab id="results" label={t.tabMyResults} count={results.length} />
+        </div>
+        {activeTab === 'results' && results.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <label htmlFor="student-result-status-filter" className="text-[12px] text-gray-500 shrink-0 hidden sm:inline">
+              {L.filterByStatus}
+            </label>
+            <AdminSelect
+              id="student-result-status-filter"
+              value={resultStatusFilter}
+              onChange={(e) => setResultStatusFilter(e.target.value as ResultStatusFilter)}
+              className="h-9 text-[13px] w-[130px] sm:w-[170px]"
+            >
+              <option value="all">{t.examStatusAll}</option>
+              <option value="Completed">{t.resultStatusCompleted}</option>
+              <option value="Banned">{t.resultStatusBanned}</option>
+            </AdminSelect>
+          </div>
+        )}
       </div>
 
       {/* Error */}
@@ -609,8 +658,8 @@ export function StudentDashboard({
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
               transition={{ duration: 0.2 }}
-              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4"
             >
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {results.length === 0 ? (
                 <EmptyState
                   icon={
@@ -620,8 +669,17 @@ export function StudentDashboard({
                   }
                   title={t.emptyStudentResults}
                 />
+              ) : displayedResults.length === 0 ? (
+                <EmptyState
+                  icon={
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                    </svg>
+                  }
+                  title={L.filterEmpty}
+                />
               ) : (
-                results.map((r: any, i) => {
+                displayedResults.map((r: any, i) => {
                   const isCompleted = r.status === 'Completed';
                   const isBannedRes = r.status === 'Banned';
                   const pct = typeof r.percentage === 'number' ? r.percentage : null;
@@ -724,6 +782,7 @@ export function StudentDashboard({
                   );
                 })
               )}
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

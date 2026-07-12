@@ -5,7 +5,7 @@ import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { examAuthHeaders } from '../lib/deviceFingerprint';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
-import { FacePositionChecker, type FacePositionStatus } from '../lib/facePositionCheck';
+import { FacePositionChecker, YawChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
@@ -28,6 +28,23 @@ const PASSIVE_LIVE_GAP_MS = 260;
 const PASSIVE_LIVE_THRESHOLD = 400;
 const LIVENESS_W = 80;
 const LIVENESS_H = 60;
+
+// Active liveness challenge (bosh burish) — passiv piksel-farq tekshiruvidan keyin,
+// video-replay/statik-foto spoofing'ga qarshi qo'shimcha qatlam sifatida ishlaydi.
+const CHALLENGE_YAW_MIN = 0.22; // position-gate'ning YAW_MAX (0.17) dan qattiqroq
+const CHALLENGE_CENTER_MAX = 0.17; // markazga qaytish — gate bilan bir xil chegara
+const CHALLENGE_CENTER_STREAK_NEEDED = 5; // markazda barqaror bo'lishi kerak bo'lgan freym soni
+const CHALLENGE_TIMEOUT_MS = 8000;
+/**
+ * MUHIM: video preview CSS orqali oynalanadi (`scaleX(-1)`), lekin MediaPipe xom
+ * (oynalanmagan) kamera bufer koordinatasi ustida ishlaydi (`computeYaw` ning
+ * musbat/manfiy belgisi shu xom koordinataga tegishli). Talaba ko'rsatmani o'z
+ * oynadagi (mirror) aksiga qarab bajaradi — shuning uchun "chapga bur" ko'rsatmasi
+ * xom noseRelX'ning qaysi belgisiga mos kelishini BRAUZERDA QO'LDA TEKSHIRISH SHART
+ * (production'ga chiqarishdan oldin). Agar teskari bo'lib chiqsa, faqat shu xaritani
+ * almashtiring — boshqa hech narsaga tegishli emas.
+ */
+const DIRECTION_SIGN: Record<'left' | 'right', number> = { left: -1, right: 1 };
 
 /** Kadr yoritilishi/piksel yig'indisi o'zgarishi — foydalanuvchi harakat yoki tabiiy harakat */
 async function samplePassiveFrameMotion(captureFrame: () => number): Promise<boolean> {
@@ -74,6 +91,14 @@ export function PreExamCheck({
   const [livenessChecking, setLivenessChecking] = useState(false);
   const [livenessRetryKey, setLivenessRetryKey] = useState(0);
   const [livenessFailed, setLivenessFailed] = useState(false);
+  /** Passiv piksel-farq tekshiruvi o'tdi — active challenge (bosh burish) boshlanadi. */
+  const [passiveMotionOk, setPassiveMotionOk] = useState(false);
+  const [challengeDirection, setChallengeDirection] = useState<'left' | 'right' | null>(null);
+  const [challengeStatus, setChallengeStatus] = useState<
+    'idle' | 'waiting_turn' | 'waiting_center' | 'passed' | 'failed'
+  >('idle');
+  const [challengeRetryKey, setChallengeRetryKey] = useState(0);
+  const challengeCenterStreakRef = useRef(0);
   /** Pre-exam yuz pozitsiyasi gate (kameraga yaqin + markaz + to'g'ri qaragan). */
   const [positionStatus, setPositionStatus] = useState<FacePositionStatus>('WAITING');
   const [positionOk, setPositionOk] = useState(false);
@@ -373,9 +398,11 @@ export function PreExamCheck({
     };
   }, [cameraReady, verified]);
 
-  /** Shaxs tasdiqlandi — tugmasiz: kamera kadrlarida yengil harakat qidiriladi */
+  /** Shaxs tasdiqlandi — tugmasiz: kamera kadrlarida yengil harakat qidiriladi
+   *  (statik foto/video-replay'ga qarshi arzon birinchi qatlam). O'tsa, active
+   *  bosh-burish challenge boshlanadi (keyingi effekt). */
   useEffect(() => {
-    if (!verified || livenessPassed || !cameraReady) return;
+    if (!verified || passiveMotionOk || !cameraReady) return;
 
     let cancelled = false;
     const run = async () => {
@@ -388,7 +415,7 @@ export function PreExamCheck({
         const ok = await samplePassiveFrameMotion(() => captureFrame());
         if (ok) {
           if (!cancelled) {
-            setLivenessPassed(true);
+            setPassiveMotionOk(true);
             setLivenessChecking(false);
             setLivenessFailed(false);
             setError('');
@@ -408,7 +435,74 @@ export function PreExamCheck({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [verified, cameraReady, livenessPassed, livenessRetryKey]);
+  }, [verified, cameraReady, passiveMotionOk, livenessRetryKey]);
+
+  /** Passiv tekshiruv o'tgandan keyin — active challenge: tasodifiy yo'nalishga
+   *  burilish so'raladi, so'ng markazga qaytish tasdiqlanadi. */
+  useEffect(() => {
+    if (!verified || !passiveMotionOk || livenessPassed || !cameraReady) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    const direction: 'left' | 'right' = Math.random() < 0.5 ? 'left' : 'right';
+    setChallengeDirection(direction);
+    setChallengeStatus('waiting_turn');
+    challengeCenterStreakRef.current = 0;
+
+    const tracker = new YawChallengeTracker(video, (yaw) => {
+      if (cancelled) return;
+      setChallengeStatus((prev) => {
+        if (prev === 'waiting_turn') {
+          if (yaw !== null && yaw * DIRECTION_SIGN[direction] >= CHALLENGE_YAW_MIN) {
+            challengeCenterStreakRef.current = 0;
+            return 'waiting_center';
+          }
+          return prev;
+        }
+        if (prev === 'waiting_center') {
+          if (yaw !== null && Math.abs(yaw) <= CHALLENGE_CENTER_MAX) {
+            challengeCenterStreakRef.current += 1;
+            if (challengeCenterStreakRef.current >= CHALLENGE_CENTER_STREAK_NEEDED) {
+              return 'passed';
+            }
+          } else {
+            challengeCenterStreakRef.current = 0;
+          }
+          return prev;
+        }
+        return prev;
+      });
+    });
+
+    void tracker.init().then((ok) => {
+      if (cancelled) {
+        tracker.dispose();
+        return;
+      }
+      if (ok) {
+        tracker.start();
+        timeoutId = window.setTimeout(() => {
+          setChallengeStatus((s) => (s === 'passed' ? s : 'failed'));
+        }, CHALLENGE_TIMEOUT_MS);
+      } else {
+        // Model yuklanmadi (CDN bloklangan/eski qurilma) — challenge skip,
+        // imtihon bloklanmasin (passiv tekshiruv allaqachon o'tgan).
+        setChallengeStatus('passed');
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+      tracker.dispose();
+    };
+  }, [verified, passiveMotionOk, livenessPassed, cameraReady, challengeRetryKey]);
+
+  useEffect(() => {
+    if (challengeStatus === 'passed') setLivenessPassed(true);
+  }, [challengeStatus]);
 
   useEffect(() => {
     if (!verified) {
@@ -477,11 +571,11 @@ export function PreExamCheck({
           code.startsWith('VAC_');
         setError(
           code === 'STUDENT_ONLY'
-            ? 'Yuz tekshiruvi faqat talaba hisobi uchun. Talaba ID bilan kiring.'
+            ? t.identityVerify403StudentOnly
             : code === 'EXAM_NOT_ASSIGNED'
-              ? 'Siz ushbu imtihon guruhiga biriktirilmagansiz. Administrator bilan bog‘laning.'
+              ? t.identityVerify403ExamNotAssigned
               : sessionLocked
-                ? 'Bu imtihon allaqachon boshlangan (tugallanmagan sessiya bor). Avvalgi qurilma/oynada davom eting yoki administratordan imtihonni qayta ochishni so‘rang.'
+                ? t.identityVerify403SessionLocked
                 : t.identityVerifyError,
         );
         return;
@@ -547,6 +641,7 @@ export function PreExamCheck({
 
   const blocked: string[] = [];
   if (!cameraReady) blocked.push(t.preExamBlockedCamera);
+  if (!micReady) blocked.push(t.preExamBlockedMic);
   if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
   if (!agreed) blocked.push(t.preExamBlockedAgree);
   if (exam.has_pin && !pin) blocked.push(t.preExamBlockedPin);
@@ -627,6 +722,7 @@ export function PreExamCheck({
             </header>
             <div
               ref={vacRulesBoxRef}
+              data-testid="vac-rules-box"
               className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-3 text-[13px] text-gray-700 leading-relaxed space-y-3 touch-pan-y"
             >
               <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntro}</p>
@@ -733,9 +829,9 @@ export function PreExamCheck({
                   {verified ? t.identityVerified : t.identityVerifyBtn}
                 </AdminBtn>
 
-                {(verified || livenessChecking || livenessPassed || livenessFailed) && (
+                {(verified || livenessChecking || livenessPassed || livenessFailed || challengeStatus !== 'idle') && (
                   <div className="text-[12.5px] text-gray-600">
-                    {verified && !livenessPassed && !livenessChecking && !livenessFailed && (
+                    {verified && !passiveMotionOk && !livenessChecking && !livenessFailed && (
                       <p>{t.preExamLivenessSelfHint}</p>
                     )}
                     {livenessChecking && (
@@ -744,12 +840,7 @@ export function PreExamCheck({
                         {t.preExamLivenessWaiting}
                       </p>
                     )}
-                    {livenessPassed && (
-                      <p className="font-semibold text-emerald-700 flex items-center gap-1.5">
-                        <Check className="w-4 h-4 stroke-[3]" /> {t.preExamLivenessPassed}
-                      </p>
-                    )}
-                    {verified && !livenessPassed && livenessFailed && !livenessChecking && (
+                    {!livenessPassed && livenessFailed && !livenessChecking && (
                       <AdminBtn
                         variant="ghost"
                         size="sm"
@@ -762,6 +853,35 @@ export function PreExamCheck({
                       >
                         {t.preExamLivenessRetryBtn}
                       </AdminBtn>
+                    )}
+                    {(challengeStatus === 'waiting_turn' || challengeStatus === 'waiting_center') && (
+                      <p className="font-semibold text-indigo-700 flex items-center gap-1.5">
+                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                        {challengeStatus === 'waiting_turn'
+                          ? challengeDirection === 'left'
+                            ? t.preExamChallengeTurnLeft
+                            : t.preExamChallengeTurnRight
+                          : t.preExamChallengeReturnCenter}
+                      </p>
+                    )}
+                    {challengeStatus === 'failed' && (
+                      <AdminBtn
+                        variant="ghost"
+                        size="sm"
+                        className="w-full mt-1"
+                        onClick={() => {
+                          setChallengeStatus('idle');
+                          setError('');
+                          setChallengeRetryKey((k) => k + 1);
+                        }}
+                      >
+                        {t.preExamChallengeRetryBtn}
+                      </AdminBtn>
+                    )}
+                    {livenessPassed && (
+                      <p className="font-semibold text-emerald-700 flex items-center gap-1.5">
+                        <Check className="w-4 h-4 stroke-[3]" /> {t.preExamLivenessPassed}
+                      </p>
                     )}
                   </div>
                 )}

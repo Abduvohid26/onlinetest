@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe } from '../../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
   AdminEmpty, AdminAlert, ChevronRight, PlusIcon,
@@ -45,6 +45,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
       fetch(apiUrl('/api/admin/levels'), { headers: h }),
       fetch(apiUrl('/api/admin/groups'), { headers: h }),
     ]);
+    if (!checkAdminAuthResponse(rL) || !checkAdminAuthResponse(rG)) return;
     const jL = await readJsonSafe<Level[]>(rL);
     const jG = await readJsonSafe<Group[]>(rG);
     setLevels(Array.isArray(jL) ? jL : []);
@@ -71,6 +72,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
       body: JSON.stringify(body),
     });
     setSaving(false);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setNewGroupName('');
       setMsg({ type: 'success', text: t.groupAddedOk });
@@ -104,6 +106,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
       body: JSON.stringify({ name: editName.trim() }),
     });
     setEditSaving(false);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setEditingId(null);
       reload();
@@ -127,6 +130,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
       body: JSON.stringify({ force }),
     });
     setDeletingId(null);
+    if (!checkAdminAuthResponse(res)) return;
     if (!res.ok) {
       const d = await readJsonSafe<{ error?: string; requires_force?: boolean }>(res);
       if (d?.requires_force) {

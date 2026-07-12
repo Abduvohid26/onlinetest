@@ -254,6 +254,17 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 
+# Davriy (beat) task'lar — alohida `beat` xizmati orqali ishga tushadi
+# (docker-compose `beat` service / deploy/systemd/onlinetest-beat.service).
+# DIQQAT: hech qachon bir nechta beat jarayoni bir vaqtda ishlamasin —
+# aks holda bitta sweep bir necha marta takrorlanadi.
+CELERY_BEAT_SCHEDULE = {
+    "proctor-sweep-stale-sessions": {
+        "task": "proctor.sweep_stale_sessions",
+        "schedule": float(os.environ.get("PROCTOR_SWEEP_INTERVAL_SECONDS", "60")),
+    },
+}
+
 # SPA boshqa domen orqali POST (multipart /api/admin/...) yuborilganda Django CSRF
 # HTTP_ORIGIN ni CSRF_TRUSTED_ORIGINS bilan solishtiradi. GET o'tadi, POST 403 bo'lishi mumkin
 # agar faqat API domeni yozilgan bo'lsa. CORS_ALLOWED_ORIGINS dagi frontend domenlarini bu yerga ham qo'shamiz.

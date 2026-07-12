@@ -74,6 +74,13 @@ def staff_exams_results(request, pk: int):
                 "highest_priority": risk["highest_priority"],
                 "recommended_review": risk["recommended_review"],
                 "question_risk_timeline": _question_risk_timeline(se, e),
+                "identity_last_checked_at": (
+                    se.identity_last_checked_at.isoformat() if se.identity_last_checked_at else None
+                ),
+                "identity_last_matched": se.identity_last_matched,
+                "identity_last_score": se.identity_last_score,
+                "identity_last_method": se.identity_last_method,
+                "identity_last_code": se.identity_last_code,
             }
         )
     review_priority_counts = {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiUrl } from '../lib/apiUrl';
-import { readJsonSafe } from '../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { translations, Language } from '../i18n';
 import { motion, AnimatePresence } from 'motion/react';
 import { ExamSettings } from '../components/ExamSettings';
@@ -41,6 +41,7 @@ export function AdminExamsTab({
   const fetchExams = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
     const res = await fetch(apiUrl(examsListUrl), { headers: { Authorization: `Bearer ${token}` } });
+    if (!checkAdminAuthResponse(res)) { if (manual) setRefreshing(false); return; }
     if (res.ok) { const raw = await readJsonSafe<unknown>(res); setExams(Array.isArray(raw) ? raw : []); }
     if (manual) setRefreshing(false);
   }, [token, examsListUrl]);
@@ -48,6 +49,7 @@ export function AdminExamsTab({
   const fetchGroups = useCallback(async () => {
     if (isStaffPortal) return;
     const res = await fetch(apiUrl('/api/admin/groups'), { headers: { Authorization: `Bearer ${token}` } });
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) { const raw = await readJsonSafe<unknown>(res); setGroups(Array.isArray(raw) ? raw : []); }
   }, [token, isStaffPortal]);
 
@@ -55,6 +57,7 @@ export function AdminExamsTab({
 
   const viewResults = async (examId: number) => {
     const res = await fetch(apiUrl(resultsUrl(examId)), { headers: { Authorization: `Bearer ${token}` } });
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       const raw = await readJsonSafe<unknown>(res);
       setResults(raw && typeof raw === 'object' ? raw : null);
@@ -67,9 +70,10 @@ export function AdminExamsTab({
 
   const allowRetake = async (studentExamId: number) => {
     if (isStaffPortal) return;
-    await fetch(apiUrl(`/api/admin/student_exams/${studentExamId}/retake`), {
+    const retakeRes = await fetch(apiUrl(`/api/admin/student_exams/${studentExamId}/retake`), {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
     });
+    if (!checkAdminAuthResponse(retakeRes)) return;
     if (selectedExam != null) viewResults(selectedExam);
   };
 

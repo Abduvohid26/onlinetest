@@ -28,6 +28,9 @@ const PAGES = [
   { nav: 'Xodimlar', title: 'Xodimlar', check: async (page) => {
     await page.waitForTimeout(500);
   }},
+  { nav: 'Audit jurnali', title: 'Audit jurnali', check: async (page) => {
+    await page.waitForTimeout(500);
+  }},
   { nav: 'Test bazasi', title: 'Test bazasi', check: async (page) => {
     await page.waitForSelector('text=Import, text=import, text=Kategoriya, text=категор', { timeout: 8000 }).catch(() => {});
   }},

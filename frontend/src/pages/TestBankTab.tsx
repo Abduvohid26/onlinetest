@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
-import { readJsonSafe } from '../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, PlusIcon } from './admin/ui';
 
@@ -76,8 +76,12 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
     fetch(apiUrl(`/api/admin/test-bank/questions?category_id=${catId}`), {
       headers: { Authorization: `Bearer ${token}` },
     })
-      .then((r) => readJsonSafe<Question[]>(r))
-      .then((data) => { setQuestions(Array.isArray(data) ? data : []); setLoading(false); })
+      .then(async (r) => {
+        if (!checkAdminAuthResponse(r)) { setLoading(false); return; }
+        const data = await readJsonSafe<Question[]>(r);
+        setQuestions(Array.isArray(data) ? data : []);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, [catId, token]);
 
@@ -217,6 +221,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
 
   const load = useCallback(async () => {
     const res = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: h });
+    if (!checkAdminAuthResponse(res)) return;
     const data = await readJsonSafe<Category[]>(res);
     setCategories(Array.isArray(data) ? data : []);
   }, [token]);
@@ -247,6 +252,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
     });
     setDeletingId(null);
     setDeleteConfirmId(null);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setPageMsg({ type: 'ok', text: t.testBankDeletedOk });
       setTimeout(() => setPageMsg(null), 3000);
@@ -294,10 +300,12 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
       const res = await fetch(apiUrl('/api/admin/test-bank/import-smart'), {
         method: 'POST', headers: h, body: fd,
       });
+      if (!checkAdminAuthResponse(res)) return;
       const d = await readJsonSafe<{
         error?: string; detail?: string; inserted?: number; detected?: number;
         chunks?: number; source_language?: string; translation_limited?: boolean;
-        ai_skipped_for_size?: boolean; categories?: { name: string; questions_added: number }[];
+        ai_skipped_for_size?: boolean; openai_available?: boolean;
+        categories?: { name: string; questions_added: number }[];
       }>(res);
 
       if (res.ok && d && typeof d.inserted === 'number') {
@@ -312,7 +320,8 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
         const chunksNote = d.chunks && d.chunks > 1 ? ` · bo'laklari: ${d.chunks}` : '';
         const localNote = d.ai_skipped_for_size ? ' · katta fayl: lokal parser' : '';
         const trNote = d.translation_limited ? ' · tarjima qisman' : '';
-        setImportMsg({ type: 'ok', text: `${t.testBankAiResult.replace('{n}', String(d.inserted))}${detectedNote}${srcLangNote}${catLines ? ` — ${catLines}` : ''}${chunksNote}${localNote}${trNote}` });
+        const aiNote = d.openai_available === false ? ' · OpenAI yo\'q: lokal parser' : '';
+        setImportMsg({ type: 'ok', text: `${t.testBankAiResult.replace('{n}', String(d.inserted))}${detectedNote}${srcLangNote}${catLines ? ` — ${catLines}` : ''}${chunksNote}${localNote}${trNote}${aiNote}` });
         // Clear form
         setCollectionName('');
         setSmartFile(null);

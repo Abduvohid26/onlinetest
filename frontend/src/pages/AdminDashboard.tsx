@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate as useRRNavigate, useLocation } from 'react-router-dom';
 import { translations, Language } from '../i18n';
+import { apiUrl } from '../lib/apiUrl';
+import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { TestBankTab } from './TestBankTab';
 import { ImtixonTab } from './ImtixonTab';
 import { AdminExamsTab } from './AdminExamsTab';
@@ -106,6 +108,10 @@ function pathToPage(pathname: string): AdminPage {
   return found ? found[0] : 'overview';
 }
 
+function isKnownAdminPath(pathname: string): boolean {
+  return Object.values(PAGE_PATHS).includes(pathname);
+}
+
 export function AdminDashboard({
   token,
   lang,
@@ -119,16 +125,34 @@ export function AdminDashboard({
   const rrNavigate = useRRNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [bannedCount, setBannedCount] = useState(0);
 
-  const page = pathToPage(location.pathname);
+  const knownPath = isKnownAdminPath(location.pathname);
+  const page = knownPath ? pathToPage(location.pathname) : 'overview';
 
   // Cross-page navigation state
   const [filterLevelId, setFilterLevelId] = useState<number | null>(null);
   const [filterGroupId, setFilterGroupId] = useState<number | null>(null);
 
-  const navigate = (p: AdminPage) => {
+  useEffect(() => {
+    fetch(apiUrl('/api/admin/stats'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (res) => {
+        if (!checkAdminAuthResponse(res) || !res.ok) return;
+        const j = await readJsonSafe<{ bannedUsers?: number }>(res);
+        if (j?.bannedUsers != null) setBannedCount(j.bannedUsers);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const navigateTo = (p: AdminPage) => {
     rrNavigate(PAGE_PATHS[p]);
     setSidebarOpen(false);
+  };
+
+  const navigateSidebar = (p: AdminPage) => {
+    setFilterLevelId(null);
+    setFilterGroupId(null);
+    navigateTo(p);
   };
 
   const navGroups: { label: string; items: { id: AdminPage; label: string; color?: string }[] }[] = [
@@ -191,7 +215,7 @@ export function AdminDashboard({
                 <button
                   key={item.id}
                   type="button"
-                  onClick={() => navigate(item.id)}
+                  onClick={() => navigateSidebar(item.id)}
                   className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors ${
                     isActive
                       ? 'bg-indigo-50 text-indigo-700'
@@ -204,6 +228,11 @@ export function AdminDashboard({
                   <span className={`truncate text-[13.5px] leading-snug ${isActive ? 'font-semibold' : 'font-medium'}`}>
                     {item.label}
                   </span>
+                  {item.id === 'banned' && bannedCount > 0 && (
+                    <span className="ml-auto shrink-0 min-w-[1.25rem] h-5 px-1.5 rounded-full bg-red-100 text-red-700 text-[11px] font-bold tabular-nums flex items-center justify-center">
+                      {bannedCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -271,13 +300,26 @@ export function AdminDashboard({
 
         {/* Page content */}
         <motion.div
-          key={page}
+          key={knownPath ? page : 'not-found'}
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.18 }}
         >
+          {!knownPath ? (
+            <div className="text-center py-16 px-4">
+              <p className="text-lg font-semibold text-gray-800 mb-2">{t.adminPageNotFound}</p>
+              <button
+                type="button"
+                onClick={() => navigateSidebar('overview')}
+                className="text-indigo-600 hover:text-indigo-800 text-[14px] font-medium underline"
+              >
+                {t.adminBackToDashboard}
+              </button>
+            </div>
+          ) : (
+          <>
           {page === 'overview' && (
-            <OverviewPage token={token} lang={lang} onNavigate={navigate} />
+            <OverviewPage token={token} lang={lang} onNavigate={navigateSidebar} />
           )}
           {page === 'levels' && (
             <LevelsPage
@@ -285,7 +327,7 @@ export function AdminDashboard({
               lang={lang}
               onViewGroups={(level: Level) => {
                 setFilterLevelId(level.id);
-                navigate('groups');
+                navigateTo('groups');
               }}
             />
           )}
@@ -296,7 +338,7 @@ export function AdminDashboard({
               initialLevelId={filterLevelId}
               onViewStudents={(group: Group) => {
                 setFilterGroupId(group.id);
-                navigate('students');
+                navigateTo('students');
               }}
             />
           )}
@@ -320,6 +362,8 @@ export function AdminDashboard({
           )}
           {page === 'exam_list' && (
             <AdminExamsTab token={token} lang={lang} hideExamSettings />
+          )}
+          </>
           )}
         </motion.div>
       </main>

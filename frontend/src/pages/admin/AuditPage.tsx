@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe } from '../../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import { AdminCard, AdminEmpty, AdminInput, AdminSelect, AdminBtn } from './ui';
 
 interface Props { token: string; lang: Language; }
@@ -100,19 +100,21 @@ export function AuditPage({ token, lang }: Props) {
   const reload = useCallback(async (pg = 0) => {
     setLoading(true);
     const res = await fetch(apiUrl(`/api/admin/audit-log?${buildParams(pg)}`), { headers: h });
+    if (!checkAdminAuthResponse(res)) { setLoading(false); return; }
     const data = await readJsonSafe<{ total: number; rows: AuditRow[] }>(res);
     setRows(data?.rows ?? []);
     setTotal(data?.total ?? 0);
     setLoading(false);
   }, [token, actorFilter, actionFilter, period]);
 
-  useEffect(() => { setPage(0); reload(0); }, [actorFilter, actionFilter, period]);
-  useEffect(() => { reload(page); }, [page]);
+  useEffect(() => { setPage(0); }, [actorFilter, actionFilter, period]);
+  useEffect(() => { reload(page); }, [reload, page]);
 
   const exportCsv = async () => {
     setExporting(true);
     const url = apiUrl(`/api/admin/audit-log?${buildParams(0, true)}`);
     const res = await fetch(url, { headers: h });
+    if (!checkAdminAuthResponse(res)) { setExporting(false); return; }
     const blob = await res.blob();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -169,6 +171,14 @@ export function AuditPage({ token, lang }: Props) {
           ))}
 
           <div className="w-px h-5 bg-gray-200 shrink-0 mx-1" />
+
+          {/* Actor filter */}
+          <AdminInput
+            value={actorFilter}
+            onChange={(e) => setActorFilter(e.target.value)}
+            placeholder={t.auditActorFilter}
+            className="h-8 !w-36 shrink-0 text-[12px]"
+          />
 
           {/* Action filter */}
           <AdminSelect

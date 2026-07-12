@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe, parseAdminUsersList } from '../../lib/http';
+import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import { fileToProfileImageBase64, ProfileImageError } from '../../lib/profileImage';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
@@ -47,7 +46,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
       fetch(apiUrl('/api/admin/groups'), { headers: h }),
       fetch(apiUrl('/api/admin/users?role=student'), { headers: h }),
     ]);
-    if (rG.status === 401 || rG.status === 403) { window.dispatchEvent(new Event('auth:error')); return; }
+    if (!checkAdminAuthResponse(rG) || !checkAdminAuthResponse(rS)) { setLoading(false); return; }
     const jG = await readJsonSafe<Group[]>(rG);
     const jS = await readJsonSafe<unknown>(rS);
     setGroups(Array.isArray(jG) ? jG : []);
@@ -82,6 +81,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
         profile_image: b64,
       }),
     });
+    if (!checkAdminAuthResponse(res)) return;
     const d = await readJsonSafe<{ error?: string }>(res);
     if (!res.ok) { setAddError(d?.error || t.errorGeneric); return; }
     setAddFormKey((k) => k + 1);
@@ -101,6 +101,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
     const res = await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(id)}`), { method: 'DELETE', headers: h });
     setDeletingId(null);
     setDeleteConfirmId(null);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setPageMsg({ type: 'ok', text: t.studentDeletedOk });
       setTimeout(() => setPageMsg(null), 3000);
@@ -115,6 +116,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
     setEditError(''); setEditPhotoCurrent(null); setEditPhotoPick(null); setEditPhotoFile('');
     setEditing(u); setEditLoading(true);
     const res = await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(u.id)}`), { headers: h });
+    if (!checkAdminAuthResponse(res)) { setEditLoading(false); return; }
     const d = await readJsonSafe<StudentRow & { profile_image?: string }>(res);
     if (d) setEditPhotoCurrent(d.profile_image || null);
     setEditLoading(false);
@@ -136,6 +138,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
     const res = await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(editing.id)}`), {
       method: 'PATCH', headers: { 'Content-Type': 'application/json', ...h }, body: JSON.stringify(payload),
     });
+    if (!checkAdminAuthResponse(res)) { setEditSaving(false); return; }
     const d = await readJsonSafe<{ error?: string }>(res);
     setEditSaving(false);
     if (!res.ok) { setEditError(d?.error || t.errorGeneric); return; }
@@ -256,8 +259,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
               </thead>
               <tbody>
                 {filtered.map((u) => (
-                  <React.Fragment key={u.id}>
-                    <tr className={`border-b border-gray-50 transition-colors ${deleteConfirmId === u.id ? 'bg-red-50/30' : u.status === 'Banned' ? 'bg-red-50/20 hover:bg-red-50/40' : 'hover:bg-gray-50/60'}`}>
+                  <tr key={u.id} className={`border-b border-gray-50 transition-colors ${deleteConfirmId === u.id ? 'bg-red-50/30' : u.status === 'Banned' ? 'bg-red-50/20 hover:bg-red-50/40' : 'hover:bg-gray-50/60'}`}>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
                           <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-sm font-semibold shrink-0 ${u.has_photo ? 'bg-indigo-50 text-indigo-600' : 'bg-gray-100 text-gray-400'}`}>
@@ -289,25 +291,6 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                         </div>
                       </td>
                     </tr>
-                    <AnimatePresence>
-                      {deleteConfirmId === u.id && (
-                        <tr>
-                          <td colSpan={5} className="p-0">
-                            <motion.div
-                              initial={{ opacity: 0, height: 0 }}
-                              animate={{ opacity: 1, height: 'auto' }}
-                              exit={{ opacity: 0, height: 0 }}
-                              className="overflow-hidden"
-                            >
-                              <div className="mx-5 mb-2 p-3 bg-red-50 border border-red-200 rounded-lg text-[13px] text-red-700 font-medium">
-                                {t.userDeleteConfirm.replace('{name}', u.name).replace('{id}', u.id)}
-                              </div>
-                            </motion.div>
-                          </td>
-                        </tr>
-                      )}
-                    </AnimatePresence>
-                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -334,8 +317,8 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                   </AdminField>
                   <AdminField label={t.userStatus}>
                     <AdminSelect name="status" defaultValue={editing.status}>
-                      <option value="Active">Faol (Active)</option>
-                      <option value="Banned">Bloklangan (Banned)</option>
+                      <option value="Active">{t.adminStatusActive}</option>
+                      <option value="Banned">{t.adminStatusBanned}</option>
                     </AdminSelect>
                   </AdminField>
                   <AdminField label={t.kontingentGroups}>

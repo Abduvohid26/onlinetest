@@ -34,6 +34,13 @@ htmlcov/
 .pytest_cache/
 .mypy_cache/
 
+# Playwright (e2e/)
+playwright-report/
+test-results/
+blob-report/
+# Real-yuz E2E fixture'lari — shaxsiy fotosurat/video, HECH QACHON commit qilinmasin.
+e2e/fixtures/
+
 # IDE
 .idea/
 .vscode/

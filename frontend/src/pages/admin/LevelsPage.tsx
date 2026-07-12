@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe } from '../../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
   AdminEmpty, AdminAlert, ChevronRight, PlusIcon,
@@ -40,7 +40,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
       fetch(apiUrl('/api/admin/levels'), { headers: h }),
       fetch(apiUrl('/api/admin/groups'), { headers: h }),
     ]);
-    if (rL.status === 401 || rL.status === 403) { window.dispatchEvent(new Event('auth:error')); return; }
+    if (!checkAdminAuthResponse(rL) || !checkAdminAuthResponse(rG)) return;
     const jL = await readJsonSafe<Level[]>(rL);
     const jG = await readJsonSafe<Group[]>(rG);
     setLevels(Array.isArray(jL) ? jL : []);
@@ -60,6 +60,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
       body: JSON.stringify({ name: newName.trim() }),
     });
     setSaving(false);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setNewName('');
       setMsg({ type: 'success', text: t.levelAddedOk });
@@ -93,6 +94,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
       body: JSON.stringify({ name: editName.trim() }),
     });
     setEditSaving(false);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setEditingId(null);
       reload();
@@ -115,6 +117,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
     });
     setDeletingId(null);
     setDeleteConfirmId(null);
+    if (!checkAdminAuthResponse(res)) return;
     if (!res.ok) {
       const d = await readJsonSafe<{ error?: string }>(res);
       setMsg({ type: 'error', text: d?.error || t.errorGeneric });

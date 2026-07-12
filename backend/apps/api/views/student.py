@@ -4,30 +4,14 @@ from __future__ import annotations
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
 from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, fill_missing_exam_translations
+from apps.api.proctor_config import max_warnings_before_ban, warn_suppress_seconds
+from apps.api.proctor_escalation import (
+    apply_official_warning_or_ban,
+    notify_banned as _notify_banned,
+)
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-
-
-def _notify_banned(student_id: str, student_name: str, student_exam_id: int, exam_id: int, reason: str, violations_count: int) -> None:
-    """Ban bo'lganda WebSocket orqali exam group'ga xabar yuborish."""
-    try:
-        layer = get_channel_layer()
-        if layer:
-            async_to_sync(layer.group_send)(
-                f"exam_{exam_id}",
-                {
-                    "type": "exam.student_banned",
-                    "student_id": student_id,
-                    "student_name": student_name,
-                    "student_exam_id": student_exam_id,
-                    "exam_id": exam_id,
-                    "reason": reason,
-                    "violations_count": violations_count,
-                },
-            )
-    except Exception:
-        pass  # WS xatosi ban jarayonini to'xtatmasin
 
 
 def _notify_student_unblocked(
@@ -162,8 +146,23 @@ def student_identity_compare(request):
                     exam_id=eid,
                     defaults={"status": "Pending"},
                 )
-                se_row.identity_verified_at = dj_tz.now()
-                se_row.save(update_fields=["identity_verified_at"])
+                now_ = dj_tz.now()
+                se_row.identity_verified_at = now_
+                se_row.identity_last_checked_at = now_
+                se_row.identity_last_matched = True
+                se_row.identity_last_score = None
+                se_row.identity_last_method = "bypass"
+                se_row.identity_last_code = code
+                se_row.save(
+                    update_fields=[
+                        "identity_verified_at",
+                        "identity_last_checked_at",
+                        "identity_last_matched",
+                        "identity_last_score",
+                        "identity_last_method",
+                        "identity_last_code",
+                    ]
+                )
             return _exam_guarded_response(request, resp) if se else resp
         log_identity("identity_http_503", student_id=u.id, exam_id=eid, code=code)
         return Response({"match": False, "skipped": False, "code": code}, status=503)
@@ -176,14 +175,56 @@ def student_identity_compare(request):
         verified_saved=matched and eid is not None,
         ai_note="NO_MATCH — kameraga to'g'ri qarang" if not matched else "OK",
     )
-    if matched and eid is not None:
+    if eid is not None:
         se_row, _ = StudentExam.objects.get_or_create(
             student_id=u.id,
             exam_id=eid,
             defaults={"status": "Pending"},
         )
-        se_row.identity_verified_at = dj_tz.now()
-        se_row.save(update_fields=["identity_verified_at"])
+        now_ = dj_tz.now()
+        if matched:
+            # Har 3s'da chaqiriladigan poll — har safar yozmasdan, tashqarida
+            # (throttle oralig'i) yoki holat o'zgarganda (fail->match) yozamiz.
+            throttle_s = max(5, int(os.environ.get("IDENTITY_SCORE_WRITE_INTERVAL_SECONDS", "30")))
+            should_write = (
+                se_row.identity_last_checked_at is None
+                or (now_ - se_row.identity_last_checked_at) >= timedelta(seconds=throttle_s)
+                or se_row.identity_last_matched is not True
+            )
+            se_row.identity_verified_at = now_
+            fields = ["identity_verified_at"]
+            if should_write:
+                se_row.identity_last_checked_at = now_
+                se_row.identity_last_matched = True
+                se_row.identity_last_score = result.get("score")
+                se_row.identity_last_method = result.get("method") or ""
+                se_row.identity_last_code = ""
+                fields += [
+                    "identity_last_checked_at",
+                    "identity_last_matched",
+                    "identity_last_score",
+                    "identity_last_method",
+                    "identity_last_code",
+                ]
+            se_row.save(update_fields=fields)
+        else:
+            # Mos kelmagan urinish — hajm o'zi cheklangan (3 marta ketma-ket fail
+            # bo'lsa IDENTITY_SUBSTITUTION bilan ban bo'ladi), shuning uchun har
+            # doim darhol yoziladi — audit uchun muhim.
+            se_row.identity_last_checked_at = now_
+            se_row.identity_last_matched = False
+            se_row.identity_last_score = result.get("score")
+            se_row.identity_last_method = result.get("method") or ""
+            se_row.identity_last_code = result.get("code") or ""
+            se_row.save(
+                update_fields=[
+                    "identity_last_checked_at",
+                    "identity_last_matched",
+                    "identity_last_score",
+                    "identity_last_method",
+                    "identity_last_code",
+                ]
+            )
     resp = Response(
         {
             "match": matched,
@@ -605,6 +646,11 @@ def student_exams_submit(request, pk: int):
             return sig_err
         exam = se.exam
         now_submit = dj_tz.now()
+        if not student_in_exam_access_window(exam, str(u.id), now_submit):
+            return Response(
+                {"error": "Imtihon vaqti tugagan. Javoblar qabul qilinmaydi."},
+                status=403,
+            )
         deadline = submission_deadline(exam, se, student_id=str(u.id))
         if deadline and now_submit > deadline:
             return Response(
@@ -937,11 +983,11 @@ def student_violations(request):
     }
     reason_text = violation_reason_map.get(vtype, vtype)
 
-    WARN_SUPPRESS_SECONDS = max(5, int(os.environ.get("PROCTOR_WARN_SUPPRESS_SECONDS", "10")))
+    WARN_SUPPRESS_SECONDS = warn_suppress_seconds()
     EVENT_MIN_INTERVAL_SECONDS = max(1, int(os.environ.get("PROCTOR_EVENT_MIN_INTERVAL_SECONDS", "5")))
     # Imtihon startida texnik tebranishlar (kamera/GPU) uchun grace — yozuvsiz.
     STARTUP_GRACE_SECONDS = max(0, int(os.environ.get("PROCTOR_STARTUP_GRACE_SECONDS", "0")))
-    MAX_WARNINGS_BEFORE_BAN = 3  # 3-chi rasmiy ogohlantirishda darhol ban
+    MAX_WARNINGS_BEFORE_BAN = max_warnings_before_ban()
     HARDENED_MODE = str(os.environ.get("PROCTOR_HARDENED_MODE", "1")).strip() not in ("0", "false", "False")
     HARDENED_WINDOW_MIN = max(3, int(os.environ.get("PROCTOR_HARD_WINDOW_MIN", "10")))
     HARDENED_MAX_POINTS = max(8, int(os.environ.get("PROCTOR_HARD_MAX_POINTS", "22")))
@@ -1010,22 +1056,15 @@ def student_violations(request):
                         }
                     )
 
-            # Rasmiy ogohlantirish merge oynasida bo'lsa, qo'shimcha log yozmaymiz.
+            # Rasmiy ogohlantirish merge oynasida bo'lsa, ogohlantirish/ban hisoblagichi oshmaydi —
+            # lekin hodisaning o'zi baribir ViolationLog'ga yoziladi (audit to'liq bo'lishi uchun;
+            # avval bu holatda yozuv umuman qolmas edi va admin buzilishni ko'ra olmas edi).
             last = se.proctor_last_warning_at
-            if not bypass_dedupe:
-                if last is not None and (now - last) < timedelta(seconds=WARN_SUPPRESS_SECONDS):
-                    return _guard(
-                        {
-                            "banned": False,
-                            "warningSuppressed": True,
-                            "violationsCount": logs_qs.count(),
-                            "warningNumber": 0,
-                            "violationReason": reason_text,
-                            "isFinalWarning": False,
-                            "officialWarnings": se.proctor_official_warnings,
-                            "mergeWindowSeconds": WARN_SUPPRESS_SECONDS,
-                        }
-                    )
+            warning_merge_suppressed = bool(
+                not bypass_dedupe
+                and last is not None
+                and (now - last) < timedelta(seconds=WARN_SUPPRESS_SECONDS)
+            )
 
             ViolationLog.objects.create(
                 student_id=u.id,
@@ -1036,6 +1075,20 @@ def student_violations(request):
             )
 
             cnt_all = logs_qs.count()
+
+            if warning_merge_suppressed:
+                return _guard(
+                    {
+                        "banned": False,
+                        "warningSuppressed": True,
+                        "violationsCount": cnt_all,
+                        "warningNumber": 0,
+                        "violationReason": reason_text,
+                        "isFinalWarning": False,
+                        "officialWarnings": se.proctor_official_warnings,
+                        "mergeWindowSeconds": WARN_SUPPRESS_SECONDS,
+                    }
+                )
 
             hardened_in_startup_window = bool(
                 se.started_at
@@ -1140,61 +1193,18 @@ def student_violations(request):
                     }
                 )
 
-            se.proctor_official_warnings = int(se.proctor_official_warnings or 0) + 1
-            se.proctor_last_warning_at = now
-
-            if se.proctor_official_warnings >= MAX_WARNINGS_BEFORE_BAN:
-                if not AUTO_BAN_NON_IDENTITY:
-                    se.proctor_official_warnings = MAX_WARNINGS_BEFORE_BAN
-                    se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at"])
-                    return _guard(
-                        {
-                            "banned": False,
-                            "requiresHumanReview": True,
-                            "reviewReason": "WARNINGS_LIMIT",
-                            "violationsCount": cnt_all,
-                            "warningNumber": MAX_WARNINGS_BEFORE_BAN,
-                            "violationReason": reason_text,
-                            "isFinalWarning": True,
-                            "warningSuppressed": False,
-                            "officialWarnings": MAX_WARNINGS_BEFORE_BAN,
-                        }
-                    )
-                if GLOBAL_ACCOUNT_BAN:
-                    AppUser.objects.filter(pk=u.id).update(status="Banned")
-                se.status = "Banned"
-                se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at", "status"])
-                _notify_banned(
-                    str(u.id), getattr(u, "name", str(u.id)), se.id,
-                    exam_id_int, reason_text, cnt_all,
-                )
-                return _guard(
-                    {
-                        "banned": True,
-                        "violationsCount": cnt_all,
-                        "warningNumber": MAX_WARNINGS_BEFORE_BAN,
-                        "violationReason": reason_text,
-                        "isFinalWarning": False,
-                        "warningSuppressed": False,
-                        "officialWarnings": se.proctor_official_warnings,
-                    }
-                )
-
-            se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at"])
-            cnt_warn = se.proctor_official_warnings
-            # 3-chi ogohlantirishda darhol ban bo'lganligi uchun, 2-chi "oxirgi ogohlantirish"
-            is_final = cnt_warn >= MAX_WARNINGS_BEFORE_BAN - 1
-            return _guard(
-                {
-                    "banned": False,
-                    "warningSuppressed": False,
-                    "violationsCount": cnt_all,
-                    "warningNumber": cnt_warn,
-                    "violationReason": reason_text,
-                    "isFinalWarning": is_final,
-                    "officialWarnings": cnt_warn,
-                }
+            payload = apply_official_warning_or_ban(
+                se,
+                student_id=str(u.id),
+                student_name=getattr(u, "name", str(u.id)),
+                exam_id=exam_id_int,
+                reason_text=reason_text,
+                violations_count=cnt_all,
+                max_warnings_before_ban=MAX_WARNINGS_BEFORE_BAN,
+                auto_ban=AUTO_BAN_NON_IDENTITY,
+                global_account_ban=GLOBAL_ACCOUNT_BAN,
             )
+            return _guard(payload)
     except Exception:
         logger.exception(
             "student_violations: saqlashda xato exam_id=%s vtype=%s student_id=%s",

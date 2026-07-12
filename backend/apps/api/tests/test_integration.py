@@ -265,6 +265,85 @@ class ExamFlowApiTests(TestCase):
         self.assertIsNotNone(se)
         self.assertIsNotNone(se.identity_verified_at)
 
+    @mock.patch(
+        "apps.api.views.student.compare_faces",
+        return_value={"success": True, "match": True, "score": 0.87, "method": "embedding"},
+    )
+    def test_identity_compare_match_sets_last_match_fields(self, _mock_faces):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.student_token}")
+        r = self.client.post(
+            "/api/student/identity-compare",
+            {
+                "exam_id": self.exam_a.id,
+                "profile_image_base64": PROFILE,
+                "live_capture_base64": PROFILE,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        se = StudentExam.objects.get(student_id=self.student.id, exam_id=self.exam_a.id)
+        self.assertTrue(se.identity_last_matched)
+        self.assertEqual(se.identity_last_score, 0.87)
+        self.assertEqual(se.identity_last_method, "embedding")
+        self.assertIsNotNone(se.identity_last_checked_at)
+
+    @mock.patch(
+        "apps.api.views.student.compare_faces",
+        return_value={"success": True, "match": True, "score": 0.5, "method": "embedding"},
+    )
+    def test_identity_compare_match_write_throttled_within_interval(self, _mock_faces):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.student_token}")
+        r1 = self.client.post(
+            "/api/student/identity-compare",
+            {"exam_id": self.exam_a.id, "profile_image_base64": PROFILE, "live_capture_base64": PROFILE},
+            format="json",
+        )
+        self.assertEqual(r1.status_code, 200)
+        se = StudentExam.objects.get(student_id=self.student.id, exam_id=self.exam_a.id)
+        first_checked = se.identity_last_checked_at
+        self.assertIsNotNone(first_checked)
+
+        _mock_faces.return_value = {"success": True, "match": True, "score": 0.91, "method": "embedding"}
+        r2 = self.client.post(
+            "/api/student/identity-compare",
+            {"exam_id": self.exam_a.id, "profile_image_base64": PROFILE, "live_capture_base64": PROFILE},
+            format="json",
+        )
+        self.assertEqual(r2.status_code, 200)
+        se.refresh_from_db()
+        # Throttle oralig'i (default 30s) ichida — checked_at/score o'zgarmasligi kerak.
+        self.assertEqual(se.identity_last_checked_at, first_checked)
+        self.assertEqual(se.identity_last_score, 0.5)
+
+    @mock.patch(
+        "apps.api.views.student.compare_faces",
+        return_value={
+            "success": True,
+            "match": False,
+            "score": 0.11,
+            "method": "embedding",
+            "code": "FACE_NOT_DETECTED",
+        },
+    )
+    def test_identity_compare_mismatch_records_attempt_without_verifying(self, _mock_faces):
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.student_token}")
+        r = self.client.post(
+            "/api/student/identity-compare",
+            {
+                "exam_id": self.exam_a.id,
+                "profile_image_base64": PROFILE,
+                "live_capture_base64": PROFILE,
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.json().get("match"))
+        se = StudentExam.objects.get(student_id=self.student.id, exam_id=self.exam_a.id)
+        self.assertFalse(se.identity_last_matched)
+        self.assertEqual(se.identity_last_score, 0.11)
+        self.assertEqual(se.identity_last_code, "FACE_NOT_DETECTED")
+        self.assertIsNone(se.identity_verified_at)
+
     @mock.patch.dict(
         os.environ,
         {"IDENTITY_VERIFY_REQUIRED": "1", "EXAM_MIN_SUBMIT_SECONDS": "0"},
@@ -538,7 +617,14 @@ class ExamFlowApiTests(TestCase):
         self.assertEqual(r2.json().get("warningNumber"), 0)
         se = StudentExam.objects.get(student_id=st3.id, exam_id=eid)
         self.assertEqual(se.proctor_official_warnings, 1)
-        self.assertEqual(ViolationLog.objects.filter(student_id=st3.id, exam_id=eid).count(), 1)
+        # Ikkalasi ham log qilinadi (audit to'liq bo'lishi uchun) — faqat rasmiy
+        # ogohlantirish/ban hisoblagichi suppress qilinadi, ViolationLog yozuvi emas.
+        logged_types = set(
+            ViolationLog.objects.filter(student_id=st3.id, exam_id=eid).values_list(
+                "violation_type", flat=True
+            )
+        )
+        self.assertEqual(logged_types, {"FACE_NOT_VISIBLE", "SUSPICIOUS_AUDIO"})
 
     def test_violation_same_type_spam_is_deduped_without_extra_logs(self):
         hp = bcrypt.hashpw(b"vstudent12", bcrypt.gensalt(rounds=10)).decode("ascii")

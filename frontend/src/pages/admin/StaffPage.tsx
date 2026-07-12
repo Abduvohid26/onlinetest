@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe, parseAdminUsersList } from '../../lib/http';
+import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
   AdminEmpty, AdminAlert, PlusIcon,
@@ -32,8 +32,9 @@ function usePasswordChange(token: string) {
       headers: { 'Content-Type': 'application/json', ...h },
       body: JSON.stringify({ password: pwdValue }),
     });
-    const d = await readJsonSafe<{ error?: string }>(res);
     setPwdSaving(false);
+    if (!checkAdminAuthResponse(res)) return;
+    const d = await readJsonSafe<{ error?: string }>(res);
     if (!res.ok) { setPwdMsg({ type: 'err', text: d?.error || t.errorGeneric }); return; }
     setPwdMsg({ type: 'ok', text: t.pwdChangedOk });
     setTimeout(() => { setPwdId(null); setPwdValue(''); setPwdMsg(null); }, 1500);
@@ -194,6 +195,7 @@ export function StaffPage({ token, lang }: Props) {
       fetch(apiUrl('/api/admin/users?role=staff'), { headers: h }),
       fetch(apiUrl('/api/admin/users?role=admin'), { headers: h }),
     ]);
+    if (!checkAdminAuthResponse(rS) || !checkAdminAuthResponse(rA)) return;
     const jS = await readJsonSafe<unknown>(rS);
     const jA = await readJsonSafe<unknown>(rA);
     setStaffList(parseAdminUsersList<StudentRow>(jS));
@@ -211,6 +213,7 @@ export function StaffPage({ token, lang }: Props) {
       headers: { 'Content-Type': 'application/json', ...h },
       body: JSON.stringify({ id: fd.get('id'), password: fd.get('password'), role: 'staff', name: fd.get('name'), group_id: null }),
     });
+    if (!checkAdminAuthResponse(res)) return;
     const d = await readJsonSafe<{ error?: string }>(res);
     if (!res.ok) { setStaffMsg({ type: 'err', text: d?.error || t.errorGeneric }); return; }
     setStaffFormKey((k) => k + 1);
@@ -232,6 +235,7 @@ export function StaffPage({ token, lang }: Props) {
         profile_image: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
       }),
     });
+    if (!checkAdminAuthResponse(res)) return;
     const d = await readJsonSafe<{ error?: string }>(res);
     if (!res.ok) { setAdminMsg({ type: 'err', text: d?.error || t.errorGeneric }); return; }
     setAdminFormKey((k) => k + 1);
@@ -251,6 +255,7 @@ export function StaffPage({ token, lang }: Props) {
     const res = await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(id)}`), { method: 'DELETE', headers: h });
     setDeletingId(null);
     setDeleteConfirmId(null);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setPageMsg({ type: 'ok', text: t.staffDeletedOk });
       setTimeout(() => setPageMsg(null), 3000);

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createRealtimeSocket, buildRealtimeUrl } from '../lib/realtimeSocket';
 import { apiUrl } from '../lib/apiUrl';
+import { checkAdminAuthResponse } from '../lib/http';
 import { translations, Language } from '../i18n';
 import { AdminBtn } from '../pages/admin/ui';
 
@@ -31,6 +32,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
   const t = translations[lang];
   const [students, setStudents] = useState<StudentEntry[]>([]);
   const [banAlerts, setBanAlerts] = useState<BanAlert[]>([]);
+  const [unblockError, setUnblockError] = useState('');
   const [unblockBusy, setUnblockBusy] = useState<Record<number, boolean>>({});
   const wsRef = useRef<ReturnType<typeof createRealtimeSocket> | null>(null);
   const myChannelRef = useRef<string | null>(null);
@@ -39,8 +41,9 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
 
   const handleUnblock = async (seId: number, canRetake: boolean) => {
     setUnblockBusy((prev) => ({ ...prev, [seId]: true }));
+    setUnblockError('');
     try {
-      await fetch(apiUrl(`/api/admin/student_exams/${seId}/unblock`), {
+      const res = await fetch(apiUrl(`/api/admin/student_exams/${seId}/unblock`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -48,11 +51,16 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
         },
         body: JSON.stringify({ can_retake: canRetake }),
       });
+      if (!checkAdminAuthResponse(res) || !res.ok) {
+        const errText = await res.text().catch(() => '');
+        setUnblockError(errText || t.liveMonitorUnblockFailed);
+        return;
+      }
       setBanAlerts((prev) =>
         prev.map((a) => (a.student_exam_id === seId ? { ...a, resolved: true } : a)),
       );
     } catch {
-      /* ignore */
+      setUnblockError(t.liveMonitorUnblockFailed);
     } finally {
       setUnblockBusy((prev) => ({ ...prev, [seId]: false }));
     }
@@ -191,8 +199,13 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
 
       {/* ── Ban alerts ── */}
       <AnimatePresence>
-        {activeAlerts.length > 0 && (
+        {(activeAlerts.length > 0 || unblockError) && (
           <div className="shrink-0 px-5 pt-4 space-y-2">
+            {unblockError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-[13px] text-red-700 font-medium">
+                {unblockError}
+              </div>
+            )}
             {activeAlerts.map((alert) => (
               <motion.div
                 key={alert.student_exam_id}

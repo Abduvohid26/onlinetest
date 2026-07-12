@@ -1,7 +1,10 @@
 """Face embedding unit tests."""
 from __future__ import annotations
 
+import hashlib
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from apps.api import face_embedding
@@ -54,3 +57,51 @@ class FaceEmbeddingTests(unittest.TestCase):
         self.assertTrue(out.get("success"))
         self.assertFalse(out.get("match"))
         self.assertEqual(out.get("code"), "FACE_NOT_DETECTED")
+
+
+class ModelIntegrityTests(unittest.TestCase):
+    """SHA256 pin tekshiruvi — tampering/mos kelmaslikka qarshi fail-closed."""
+
+    def _write_tmp(self, content: bytes) -> Path:
+        d = Path(tempfile.mkdtemp())
+        p = d / "model.onnx"
+        p.write_bytes(content)
+        self.addCleanup(lambda: p.unlink(missing_ok=True))
+        return p
+
+    def test_verified_accepts_matching_hash(self):
+        content = b"fake-onnx-bytes"
+        path = self._write_tmp(content)
+        expected = hashlib.sha256(content).hexdigest()
+        self.assertTrue(face_embedding._verified(path, expected))
+
+    def test_verified_rejects_mismatched_hash(self):
+        path = self._write_tmp(b"fake-onnx-bytes")
+        wrong_hash = "0" * 64
+        self.assertFalse(face_embedding._verified(path, wrong_hash))
+
+    def test_verified_rejects_missing_file(self):
+        missing = Path(tempfile.mkdtemp()) / "does-not-exist.onnx"
+        self.assertFalse(face_embedding._verified(missing, "0" * 64))
+
+    def test_ensure_models_false_when_hash_mismatch_and_download_disabled(self):
+        with mock.patch.object(face_embedding, "_MODELS_VERIFIED", None):
+            with mock.patch.object(face_embedding, "_verified", return_value=False):
+                with mock.patch.object(face_embedding, "_download_allowed", return_value=False):
+                    self.assertFalse(face_embedding._ensure_models())
+
+    def test_ensure_models_true_when_hash_matches(self):
+        with mock.patch.object(face_embedding, "_MODELS_VERIFIED", None):
+            with mock.patch.object(face_embedding, "_verified", return_value=True):
+                self.assertTrue(face_embedding._ensure_models())
+
+    def test_get_engine_returns_none_on_hash_mismatch(self):
+        """Uchidan uchiga: hash mos kelmasa compare_face_images FACE_ENGINE_UNAVAILABLE qaytaradi."""
+        with mock.patch.object(face_embedding, "_MODELS_VERIFIED", None), \
+             mock.patch.object(face_embedding, "_ENGINE", None), \
+             mock.patch.object(face_embedding, "_verified", return_value=False), \
+             mock.patch.object(face_embedding, "_download_allowed", return_value=False), \
+             mock.patch.object(face_embedding, "_engine_available", return_value=True):
+            out = face_embedding.compare_face_images("abc", "def")
+        self.assertFalse(out.get("success"))
+        self.assertEqual(out.get("code"), "FACE_ENGINE_UNAVAILABLE")

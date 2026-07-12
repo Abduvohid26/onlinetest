@@ -155,7 +155,7 @@ export function Login({ onLogin, lang, setLang }: LoginProps) {
                     value={id}
                     onChange={(e) => setId(e.target.value)}
                     required
-                    placeholder={lang === 'ru' ? 'masalan, demo_student' : lang === 'en' ? 'e.g. demo_student' : 'masalan, demo_student'}
+                    placeholder={t.loginUserIdPlaceholder}
                     autoComplete="username"
                     disabled={loading}
                   />

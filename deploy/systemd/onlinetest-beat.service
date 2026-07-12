@@ -1,0 +1,27 @@
+[Unit]
+Description=FJSTI Online Exam Celery Beat (davriy tasklar rejalashtiruvchisi)
+After=network.target redis-server.service
+Wants=redis-server.service
+
+[Service]
+# DIQQAT: faqat BITTA nusxa ishlashi kerak (serverda ham, boshqa hostda ham) —
+# bir nechta beat jarayoni bir xil taskni bir necha marta navbatga qo'yib yuboradi.
+Type=simple
+User=www-data
+Group=www-data
+PrivateTmp=yes
+NoNewPrivileges=yes
+RuntimeDirectory=onlinetest
+EnvironmentFile=/etc/onlinetest/api.env
+Environment=XDG_RUNTIME_DIR=/run/onlinetest
+Environment=HOME=/var/www/onlinetest/backend
+WorkingDirectory=/var/www/onlinetest/backend
+ExecStart=/var/www/onlinetest/backend/.venv/bin/celery \
+  -A exam_platform beat \
+  --loglevel=info \
+  -s /run/onlinetest/celerybeat-schedule
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

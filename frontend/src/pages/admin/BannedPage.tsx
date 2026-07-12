@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe, parseAdminUsersList } from '../../lib/http';
+import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import { AdminInput, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminLabel, AdminTextarea, AdminModal, AdminFileInput } from './ui';
 import type { BanAppeal, Group, StudentRow } from './types';
 
@@ -37,6 +37,7 @@ export function BannedPage({ token, lang }: Props) {
       fetch(apiUrl('/api/admin/ban-appeals?status=Pending'), { headers: h }),
       fetch(apiUrl('/api/admin/review-queue?limit=40'), { headers: h }),
     ]);
+    if (!checkAdminAuthResponse(rG) || !checkAdminAuthResponse(rB) || !checkAdminAuthResponse(rA) || !checkAdminAuthResponse(rQ)) return;
     const jG = await readJsonSafe<Group[]>(rG);
     const jB = await readJsonSafe<unknown>(rB);
     const jA = await readJsonSafe<BanAppeal[]>(rA);
@@ -59,6 +60,7 @@ export function BannedPage({ token, lang }: Props) {
     const res = await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(id)}`), { method: 'DELETE', headers: h });
     setDeletingId(null);
     setDeleteConfirmId(null);
+    if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setPageMsg({ type: 'ok', text: t.studentDeletedOk });
       setTimeout(() => setPageMsg(null), 3000);
@@ -78,6 +80,7 @@ export function BannedPage({ token, lang }: Props) {
     fd.append('reason', unbanReason.trim());
     fd.append('evidence', unbanFile);
     const res = await fetch(apiUrl(`/api/admin/users/${encodeURIComponent(unbanUser.id)}/unban`), { method: 'POST', headers: h, body: fd });
+    if (!checkAdminAuthResponse(res)) { setUnbanBusy(false); return; }
     const d = await readJsonSafe<{ error?: string }>(res);
     setUnbanBusy(false);
     if (!res.ok) { setUnbanError(d?.error || t.errorGeneric); return; }
@@ -96,6 +99,7 @@ export function BannedPage({ token, lang }: Props) {
         method: 'POST', headers: { 'Content-Type': 'application/json', ...h },
         body: JSON.stringify({ decision, note }),
       });
+      if (!checkAdminAuthResponse(res)) return;
       const d = await readJsonSafe<{ error?: string }>(res);
       if (!res.ok) {
         setPageMsg({ type: 'err', text: d?.error || t.errorGeneric });
@@ -192,7 +196,7 @@ export function BannedPage({ token, lang }: Props) {
             <p className="text-[14px] text-indigo-400 py-2">{t.reviewQueueEmpty}</p>
           ) : (
             <div className="space-y-2 max-h-52 overflow-y-auto">
-              {reviewQueue.slice(0, 10).map((q: any, idx: number) => (
+              {reviewQueue.map((q: any, idx: number) => (
                 <div key={`${q.exam_id}-${q.student_id}-${idx}`}
                   className="text-[13px] px-3 py-2.5 rounded-xl bg-white border border-indigo-100 flex items-center justify-between gap-2">
                   <span className="truncate text-gray-700">{q.student_name} · {q.exam_title}</span>

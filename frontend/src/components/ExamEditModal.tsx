@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { translations, Language } from '../i18n';
-import { readJsonSafe } from '../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { fromIsoToDatetimeLocal } from '../lib/datetimeLocal';
 import { DateTimeField } from './DateTimeField';
@@ -68,6 +68,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
       setError('');
       try {
         const res = await fetch(apiUrl(`/api/admin/exams/${examId}`), { headers: { Authorization: `Bearer ${token}` } });
+        if (!checkAdminAuthResponse(res)) return;
         const data = await readJsonSafe<any>(res);
         if (!res.ok) throw new Error(data?.error || t.examLoadFailed);
         if (!data) throw new Error(t.loginInvalidServerResponse);
@@ -88,6 +89,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         setRetakeList(Array.isArray(data.retake_windows) ? data.retake_windows : []);
         if (data.exam_mode === 'bank_mixed') {
           const cr = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: { Authorization: `Bearer ${token}` } });
+          if (!checkAdminAuthResponse(cr)) return;
           if (cr.ok && !cancelled) {
             const cats = await readJsonSafe<any[]>(cr);
             setBankCats(Array.isArray(cats) ? cats : []);
@@ -163,6 +165,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(body),
       });
+      if (!checkAdminAuthResponse(res)) return;
       const data = (await readJsonSafe<{ error?: string }>(res)) || {};
       if (!res.ok) throw new Error(data.error || t.examSaveFailed);
       onSaved({ examId });
@@ -183,6 +186,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ items: exceptions }),
       });
+      if (!checkAdminAuthResponse(res)) { setExBusy(false); return; }
       const data = (await readJsonSafe<{ error?: string }>(res)) || {};
       if (!res.ok) throw new Error(data.error || t.examSaveFailed);
     } catch (e: any) {
@@ -214,9 +218,11 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
           note: rtNote,
         }),
       });
+      if (!checkAdminAuthResponse(res)) return;
       const data = (await readJsonSafe<{ error?: string; id?: number }>(res)) || {};
       if (!res.ok) throw new Error(data.error || t.examSaveFailed);
       const r2 = await fetch(apiUrl(`/api/admin/exams/${examId}`), { headers: { Authorization: `Bearer ${token}` } });
+      if (!checkAdminAuthResponse(r2)) return;
       const ex = await readJsonSafe<any>(r2);
       if (r2.ok && ex?.retake_windows) setRetakeList(ex.retake_windows);
       setRtStudent('');
@@ -236,6 +242,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!checkAdminAuthResponse(res)) return;
       if (!res.ok) {
         const data = (await readJsonSafe<{ error?: string }>(res)) || {};
         throw new Error(data.error || t.examDeleteFailed);
@@ -256,6 +263,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!checkAdminAuthResponse(res)) return;
       const data = (await readJsonSafe<{ error?: string }>(res)) || {};
       if (!res.ok) throw new Error(data.error || t.examDeleteFailed);
       onSaved({ examId, deleted: true });

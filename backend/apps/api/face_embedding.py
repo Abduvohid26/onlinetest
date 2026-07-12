@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import os
 import threading
@@ -17,8 +18,16 @@ _MODELS_DIR = Path(__file__).resolve().parent / "face_models"
 _YUNET = _MODELS_DIR / "face_detection_yunet_2023mar.onnx"
 _SFACE = _MODELS_DIR / "face_recognition_sface_2021dec.onnx"
 
+# opencv_zoo'dagi rasmiy fayllarning SHA256 pin'lari — modellar repo'ga
+# committed (backend/apps/api/face_models/), shuning uchun bu tekshiruv
+# odatda faqat tasodifiy buzilish/mos kelmaslikni ushlab qoladi, MITM/supply
+# chain'ga qarshi himoya sifatida ham xizmat qiladi.
+_YUNET_SHA256 = "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4"
+_SFACE_SHA256 = "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79"
+
 _ENGINE_LOCK = threading.Lock()
 _ENGINE: dict[str, Any] | None = None
+_MODELS_VERIFIED: bool | None = None
 
 
 def _cosine_threshold() -> float:
@@ -43,26 +52,83 @@ def _decode_b64_image(data_b64: str) -> bytes | None:
     return raw if len(raw) >= 80 else None
 
 
-def _ensure_models() -> bool:
-    if _YUNET.is_file() and _SFACE.is_file():
-        return True
-    urls = {
-        _YUNET: "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
-        _SFACE: "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
-    }
+def _sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _verified(path: Path, expected_sha256: str) -> bool:
+    """Fayl mavjud VA hash mos — mos kelmasa (yoki fayl yo'q) False, tampering'ga
+    qarshi fail-closed: mos kelmagan fayl hech qachon "mavjud" deb hisoblanmaydi."""
+    if not path.is_file():
+        return False
+    actual = _sha256_of(path)
+    if actual != expected_sha256:
+        _logger.warning(
+            "face model hash mismatch: %s (expected=%s actual=%s) — engine unavailable",
+            path.name, expected_sha256, actual,
+        )
+        return False
+    return True
+
+
+def _download_allowed() -> bool:
+    return (os.environ.get("FACE_MODELS_ALLOW_DOWNLOAD") or "").strip().lower() in (
+        "1", "true", "yes",
+    )
+
+
+def _try_download(path: Path, url: str, expected_sha256: str) -> bool:
+    """Faqat FACE_MODELS_ALLOW_DOWNLOAD=1 bo'lsa chaqiriladi (default: o'chiq —
+    modellar allaqachon repo/image ichida, runtime tarmoq chaqiruvi kutilmaydi).
+    Yuklangan fayl ham hash tekshiruvidan o'tishi shart; mos kelmasa o'chiriladi."""
     try:
         import urllib.request
 
         _MODELS_DIR.mkdir(parents=True, exist_ok=True)
-        for path, url in urls.items():
-            if path.is_file():
-                continue
-            _logger.info("Downloading face model %s", path.name)
-            urllib.request.urlretrieve(url, path)  # noqa: S310
-        return _YUNET.is_file() and _SFACE.is_file()
+        _logger.info("Downloading face model %s", path.name)
+        urllib.request.urlretrieve(url, path)  # noqa: S310
     except Exception as exc:
         _logger.warning("face model download failed: %s", exc)
         return False
+    if not _verified(path, expected_sha256):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _ensure_models() -> bool:
+    global _MODELS_VERIFIED
+    if _MODELS_VERIFIED is not None:
+        return _MODELS_VERIFIED
+
+    urls = {
+        _YUNET: (
+            "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+            _YUNET_SHA256,
+        ),
+        _SFACE: (
+            "https://github.com/opencv/opencv_zoo/raw/main/models/face_recognition_sface/face_recognition_sface_2021dec.onnx",
+            _SFACE_SHA256,
+        ),
+    }
+    ok = True
+    for path, (url, expected_sha256) in urls.items():
+        if _verified(path, expected_sha256):
+            continue
+        if _download_allowed():
+            if not _try_download(path, url, expected_sha256):
+                ok = False
+        else:
+            ok = False
+    _MODELS_VERIFIED = ok
+    return ok
 
 
 def _engine_available() -> bool:

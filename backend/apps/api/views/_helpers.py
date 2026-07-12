@@ -40,7 +40,7 @@ from rest_framework.response import Response
 
 from apps.api.authentication import issue_token
 from apps.api.permissions import IsAuthenticatedStrict as IsAuthenticated
-from apps.api.exam_time import seconds_until_deadline, submission_deadline
+from apps.api.exam_time import seconds_until_deadline, student_in_exam_access_window, submission_deadline
 from apps.api.throttles import (
     BankAiImportThrottle,
     ExamAutosaveThrottle,
@@ -79,6 +79,7 @@ from apps.api.services import (
     extract_text_from_bank_upload,
     filter_bank_questions_for_group,
     integrity_code,
+    localize_exam_question,
     next_result_public_id,
     parse_pdf_questions,
     public_base_url,
@@ -544,11 +545,14 @@ def _question_risk_timeline(se: StudentExam, exam: Exam) -> list[dict]:
     return out[:20]
 
 
-def _review_queue_rows(limit: int = 100) -> list[dict]:
+def _review_queue_rows(limit: int = 100, teacher_id: str | None = None) -> list[dict]:
     rows = list(
         ViolationLog.objects.values("exam_id", "student_id", "violation_type")
         .annotate(cnt=Count("id"))
     )
+    if teacher_id:
+        allowed = set(Exam.objects.filter(teacher_id=teacher_id).values_list("id", flat=True))
+        rows = [r for r in rows if int(r["exam_id"]) in allowed]
     by_key: dict[tuple[int, str], dict] = {}
     rank = {"critical": 3, "high": 2, "medium": 1}
     for r in rows:

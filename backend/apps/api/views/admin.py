@@ -408,7 +408,8 @@ def admin_review_queue(request):
     except (TypeError, ValueError):
         limit = 80
     limit = max(1, min(limit, 300))
-    queue = _review_queue_rows(limit=limit)
+    teacher_id = str(request.user.id) if request.user.role == "staff" else None
+    queue = _review_queue_rows(limit=limit, teacher_id=teacher_id)
     return Response({"results": queue, "total": len(queue)})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -898,6 +899,7 @@ def admin_test_bank_import_smart(request):
             "chunks": len(chunks),
             "translation_limited": len(payload) > translate_limit,
             "ai_skipped_for_size": force_local_parse,
+            "openai_available": bool(getattr(settings, "OPENAI_API_KEY", "") or ""),
         }
     )
 @api_view(["GET", "POST"])
@@ -1207,6 +1209,13 @@ def admin_exams_results(request, pk: int):
                 "highest_priority": risk["highest_priority"],
                 "recommended_review": risk["recommended_review"],
                 "question_risk_timeline": _question_risk_timeline(se, e),
+                "identity_last_checked_at": (
+                    se.identity_last_checked_at.isoformat() if se.identity_last_checked_at else None
+                ),
+                "identity_last_matched": se.identity_last_matched,
+                "identity_last_score": se.identity_last_score,
+                "identity_last_method": se.identity_last_method,
+                "identity_last_code": se.identity_last_code,
             }
         )
     review_priority_counts = {

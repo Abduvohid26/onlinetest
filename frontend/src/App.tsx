@@ -17,6 +17,47 @@ import { apiUrl } from './lib/apiUrl';
 import { readJsonSafe } from './lib/http';
 
 const SUPPORTED_LANGS: Language[] = ['uz', 'ru', 'en'];
+const EXAM_FLOW_KEY = 'fjsti_exam_flow';
+
+type ExamFlowPersist = {
+  examStatus: 'checking' | 'taking';
+  activeExam: any;
+  studentExamId: number;
+};
+
+function readExamFlow(): ExamFlowPersist | null {
+  try {
+    const raw = sessionStorage.getItem(EXAM_FLOW_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ExamFlowPersist;
+    if (
+      (parsed.examStatus === 'checking' || parsed.examStatus === 'taking') &&
+      parsed.activeExam &&
+      parsed.studentExamId != null
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function writeExamFlow(data: ExamFlowPersist): void {
+  try {
+    sessionStorage.setItem(EXAM_FLOW_KEY, JSON.stringify(data));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearExamFlow(): void {
+  try {
+    sessionStorage.removeItem(EXAM_FLOW_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 /** Admin fetch-larida 401/403 kelsa bu eventni dispatch qiling → App avtomatik logout qiladi */
 export const AUTH_ERROR_EVENT = 'auth:error';
@@ -108,7 +149,9 @@ function AppContent() {
     setUser(userData);
     safeStorageSet('token', newToken);
     safeStorageSet('user', JSON.stringify(userData));
-    navigate('/');
+    if (userData.role === 'admin') navigate('/admin');
+    else if (userData.role === 'staff') navigate('/staff');
+    else navigate('/');
   };
 
   const handleLogout = useCallback(() => {
@@ -116,6 +159,7 @@ function AppContent() {
     setUser(null);
     setActiveExam(null);
     setExamStatus('pending');
+    clearExamFlow();
     clearDeviceSessionToken();
     safeStorageRemove('token');
     safeStorageRemove('user');
@@ -129,15 +173,73 @@ function AppContent() {
     return () => window.removeEventListener(AUTH_ERROR_EVENT, onAuthError);
   }, [handleLogout]);
 
-  // Admin tokenini mount da bir marta backend bilan tekshirish
+  // Tokenni mount da bir marta backend bilan tekshirish (barcha rollar)
   const tokenCheckedRef = useRef(false);
   useEffect(() => {
-    if (tokenCheckedRef.current || !token || user?.role !== 'admin') return;
+    if (tokenCheckedRef.current || !token || !user?.role) return;
+    const roleEndpoints: Record<string, string> = {
+      admin: '/api/admin/groups',
+      staff: '/api/staff/exams',
+      student: '/api/student/exams',
+    };
+    const endpoint = roleEndpoints[user.role];
+    if (!endpoint) return;
     tokenCheckedRef.current = true;
-    fetch(apiUrl('/api/admin/groups'), { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => { if (r.status === 401 || r.status === 403) handleLogout(); })
+    fetch(apiUrl(endpoint), { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => { if (r.status === 401) handleLogout(); })
       .catch(() => {});
   }, [token, user?.role, handleLogout]);
+
+  // Admin `/` → `/admin`; talaba exam flow sessionStorage dan tiklash
+  const examFlowRestoredRef = useRef(false);
+  useEffect(() => {
+    if (user?.role === 'admin' && location.pathname === '/') {
+      navigate('/admin', { replace: true });
+    }
+  }, [user?.role, location.pathname, navigate]);
+
+  useEffect(() => {
+    if (examFlowRestoredRef.current || user?.role !== 'student' || !token) return;
+    examFlowRestoredRef.current = true;
+    const saved = readExamFlow();
+    if (!saved) return;
+    if (saved.examStatus === 'checking') {
+      setActiveExam(saved.activeExam);
+      setStudentExamId(saved.studentExamId);
+      setExamStatus('checking');
+      return;
+    }
+    if (saved.examStatus === 'taking') {
+      fetch(apiUrl('/api/student/exams'), { headers: { Authorization: `Bearer ${token}` } })
+        .then(async (r) => {
+          const list = await readJsonSafe<any[]>(r);
+          const match = Array.isArray(list)
+            ? list.find((e) => e.id === saved.activeExam?.id && e.in_progress)
+            : null;
+          if (match) {
+            setActiveExam({ ...saved.activeExam, ...match });
+            setStudentExamId(saved.studentExamId);
+            setExamStatus('taking');
+          } else {
+            clearExamFlow();
+          }
+        })
+        .catch(() => clearExamFlow());
+    }
+  }, [user?.role, token]);
+
+  useEffect(() => {
+    if (user?.role !== 'student') return;
+    if (
+      (examStatus === 'checking' || examStatus === 'taking') &&
+      activeExam &&
+      studentExamId != null
+    ) {
+      writeExamFlow({ examStatus, activeExam, studentExamId });
+    } else if (examStatus === 'pending' || examStatus === 'finished') {
+      clearExamFlow();
+    }
+  }, [examStatus, activeExam, studentExamId, user?.role]);
 
   const startExamCheck = (exam: any, seId: number) => {
     setActiveExam(exam);
@@ -197,6 +299,7 @@ function AppContent() {
   };
 
   const finishExam = (submitPayload?: ExamResultPayload | null) => {
+    clearExamFlow();
     setExamStatus('finished');
     setActiveExam(null);
     setStudentExamId(null);
@@ -323,18 +426,20 @@ function AppContent() {
             exit={user.role === 'admin' ? { opacity: 0 } : { opacity: 0, y: -20, filter: 'blur(10px)' }}
             transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           >
-            {user.role === 'admin' && (
+            {user.role === 'admin' && location.pathname.startsWith('/admin') && (
               <div className="min-h-[calc(100vh-62px)] sm:min-h-[calc(100vh-66px)] bg-white [--admin-header-h:62px] sm:[--admin-header-h:66px]">
                 <AdminDashboard token={token} lang={lang} adminUserId={user?.id ? String(user.id) : undefined} />
               </div>
             )}
-            {user.role === 'staff' && <StaffDashboard token={token} lang={lang} />}
-            {user.role === 'student' && examStatus === 'pending' && (
+            {user.role === 'staff' && (location.pathname === '/' || location.pathname === '/staff') && (
+              <StaffDashboard token={token} lang={lang} />
+            )}
+            {user.role === 'student' && location.pathname === '/' && examStatus === 'pending' && (
               <div>
                 <StudentDashboard token={token} user={user} onStartExam={startExamCheck} onResumeExam={resumeExam} lang={lang} />
               </div>
             )}
-            {user.role === 'student' && examStatus === 'checking' && activeExam && (
+            {user.role === 'student' && location.pathname === '/' && examStatus === 'checking' && activeExam && (
               <PreExamCheck 
                 exam={activeExam} 
                 token={token} 
@@ -344,7 +449,7 @@ function AppContent() {
                 onCancel={() => setExamStatus('pending')} 
               />
             )}
-            {user.role === 'student' && examStatus === 'taking' && activeExam && (
+            {user.role === 'student' && location.pathname === '/' && examStatus === 'taking' && activeExam && (
               <ExamRoom 
                 exam={activeExam} 
                 studentExamId={studentExamId ?? 0} 
@@ -354,7 +459,7 @@ function AppContent() {
                 onFinish={finishExam} 
               />
             )}
-            {user.role === 'student' && examStatus === 'finished' && lastSubmitResult && (
+            {user.role === 'student' && location.pathname === '/' && examStatus === 'finished' && lastSubmitResult && (
               <ExamResultSummary
                 data={lastSubmitResult}
                 token={token}
@@ -365,7 +470,7 @@ function AppContent() {
                 }}
               />
             )}
-            {user.role === 'student' && examStatus === 'finished' && !lastSubmitResult && (
+            {user.role === 'student' && location.pathname === '/' && examStatus === 'finished' && !lastSubmitResult && (
               <div className="text-center py-32 glass-panel max-w-2xl mx-auto mt-12">
                 <div className="w-24 h-24 bg-green-500/10 text-green-500 rounded-full flex items-center justify-center mx-auto mb-6">
                   <svg className="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>

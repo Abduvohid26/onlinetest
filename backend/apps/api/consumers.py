@@ -20,8 +20,11 @@ from __future__ import annotations
 from urllib.parse import parse_qs
 
 import jwt as pyjwt
+from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.conf import settings
+
+from apps.core.models.exam import Exam
 
 
 class ExamRealtimeConsumer(AsyncJsonWebsocketConsumer):
@@ -90,6 +93,14 @@ class ExamRealtimeConsumer(AsyncJsonWebsocketConsumer):
         except pyjwt.PyJWTError:
             return None
 
+    @database_sync_to_async
+    def _proctor_may_join_exam(self, exam_id: int) -> bool:
+        if self.role == "admin":
+            return True
+        if self.role == "staff":
+            return Exam.objects.filter(pk=exam_id, teacher_id=self.user_id).exists()
+        return False
+
     async def _handle_join_exam(self, content: dict) -> None:
         role = str(content.get("role", ""))
         if role == "student" and self.role != "student":
@@ -101,6 +112,9 @@ class ExamRealtimeConsumer(AsyncJsonWebsocketConsumer):
             eid = int(content["exam_id"])
             assert 0 < eid < 2_147_483_648
         except (KeyError, TypeError, ValueError, AssertionError):
+            return
+
+        if role == "proctor" and not await self._proctor_may_join_exam(eid):
             return
 
         if self.exam_id is not None:

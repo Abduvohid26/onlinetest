@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AmbientNoiseTracker,
   TalkingViolationCoordinator,
   VoiceActivityTracker,
 } from '../src/lib/voiceActivity.ts';
@@ -34,6 +35,44 @@ const chairThud = {
   crestFactor: 9.5,
   harmonicity: 0.12,
 };
+
+const ambientTv = {
+  rms: 0.12,
+  zcr: 0.14,
+  humanVoice: false,
+  speechRatio: 0.28,
+  lowFreqRatio: 0.48,
+  crestFactor: 4.2,
+  harmonicity: 0.18,
+};
+
+describe('AmbientNoiseTracker', () => {
+  it('ignores quiet background', () => {
+    const tracker = new AmbientNoiseTracker();
+    for (let i = 0; i < 60; i++) {
+      assert.equal(tracker.push(quiet), null);
+    }
+  });
+
+  it('ignores human speech (handled by VoiceActivityTracker)', () => {
+    const tracker = new AmbientNoiseTracker();
+    for (let i = 0; i < 50; i++) tracker.push(quiet);
+    for (let i = 0; i < 20; i++) {
+      assert.equal(tracker.push(speech), null);
+    }
+  });
+
+  it('triggers SUSPICIOUS_AUDIO for sustained loud non-speech', () => {
+    const tracker = new AmbientNoiseTracker();
+    for (let i = 0; i < 50; i++) tracker.push(quiet);
+    let saw = false;
+    for (let i = 0; i < 14; i++) {
+      const hit = tracker.push(ambientTv);
+      if (hit === 'SUSPICIOUS_AUDIO') saw = true;
+    }
+    assert.equal(saw, true);
+  });
+});
 
 describe('VoiceActivityTracker', () => {
   it('ignores non-speech loud frames', () => {

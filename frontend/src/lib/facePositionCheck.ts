@@ -44,6 +44,19 @@ const YAW_MAX = 0.17; // burilish chegarasi
 
 export type FacePositionUpdate = (status: FacePositionStatus, okSustained: boolean) => void;
 
+/** Burun landmark (1) chap/o'ng yuz chetlaridan (234/454) nisbatan gorizontal
+ * siljishi — manfiy/musbat belgi xom (mirrorlanmagan) kamera bufer koordinatasida.
+ * Gate (classify) va active liveness challenge ikkalasi ham shu bitta hisob-kitobni
+ * ishlatadi, shunda ikki joyda landmark indekslari mos kelmasligi xavfi yo'q. */
+export function computeYaw(lm: any[]): number | null {
+  const left = lm[234];
+  const right = lm[454];
+  const nose = lm[1];
+  if (!left || !right || !nose) return null;
+  const width = right.x - left.x || 1e-6;
+  return (nose.x - left.x) / width - 0.5;
+}
+
 export class FacePositionChecker {
   private video: HTMLVideoElement;
   private onUpdate: FacePositionUpdate;
@@ -146,9 +159,8 @@ export class FacePositionChecker {
       return 'OFF_CENTER';
     }
 
-    const width = right.x - left.x || 1e-6;
-    const noseRelX = (nose.x - left.x) / width - 0.5;
-    if (Math.abs(noseRelX) > YAW_MAX) return 'TURNED';
+    const noseRelX = computeYaw(lm);
+    if (noseRelX !== null && Math.abs(noseRelX) > YAW_MAX) return 'TURNED';
 
     return 'OK';
   }
@@ -161,5 +173,100 @@ export class FacePositionChecker {
       this.okStreak = 0;
     }
     this.onUpdate(status, this.okStreak >= OK_STREAK_NEEDED);
+  }
+}
+
+export type YawUpdate = (yaw: number | null) => void;
+
+const YAW_DETECT_INTERVAL_MS = 120;
+
+/**
+ * Active liveness challenge uchun yengil yaw-kuzatuvchi — FacePositionChecker'dan
+ * mustaqil, o'z FaceLandmarker instansiyasini yaratadi (identity tasdiqlangandan
+ * keyin, position-gate checker allaqachon dispose qilingan bo'ladi). Alohida
+ * instansiya — position-gate lifecycle'ini o'zgartirmasdan, xavfsiz izolyatsiya.
+ */
+export class YawChallengeTracker {
+  private video: HTMLVideoElement;
+  private onYaw: YawUpdate;
+  private landmarker: any = null;
+  private rafId: number | null = null;
+  private timer: number | null = null;
+  private running = false;
+  private disposed = false;
+
+  constructor(video: HTMLVideoElement, onYaw: YawUpdate) {
+    this.video = video;
+    this.onYaw = onYaw;
+  }
+
+  async init(): Promise<boolean> {
+    try {
+      const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
+      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
+        baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+      });
+      if (this.disposed) {
+        this.dispose();
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  start(): void {
+    if (this.running || !this.landmarker) return;
+    this.running = true;
+    const loop = () => {
+      if (!this.running) return;
+      this.tick();
+      this.timer = window.setTimeout(() => {
+        this.rafId = window.requestAnimationFrame(loop);
+      }, YAW_DETECT_INTERVAL_MS);
+    };
+    this.rafId = window.requestAnimationFrame(loop);
+  }
+
+  private tick(): void {
+    const v = this.video;
+    if (!v || v.readyState < 2 || v.videoWidth === 0) {
+      this.onYaw(null);
+      return;
+    }
+    try {
+      const res = this.landmarker.detectForVideo(v, performance.now());
+      const faces = res?.faceLandmarks || [];
+      if (faces.length !== 1) {
+        this.onYaw(null);
+        return;
+      }
+      this.onYaw(computeYaw(faces[0]));
+    } catch {
+      this.onYaw(null);
+    }
+  }
+
+  stop(): void {
+    this.running = false;
+    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.rafId = null;
+    this.timer = null;
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.stop();
+    try {
+      this.landmarker?.close?.();
+    } catch {
+      /* ignore */
+    }
+    this.landmarker = null;
   }
 }

@@ -1,10 +1,15 @@
 # FJSTI Online Exam
 
-Masofaviy imtihon platformasi: **Django REST API**, **React (Vite) SPA**, **Django Channels** WebSocket real-time (proctoring signal). Batafsil funksional talablar: [`docs/TEXNIK_TALABLAR.md`](docs/TEXNIK_TALABLAR.md).
+**Farg‘ona jamoat salomatligi tibbiyot instituti** uchun masofaviy imtihon platformasi.
 
-## Ishga tushirish (Docker — yagona yo'l)
+Uchta rol: **talaba (student)**, **admin**, **staff (kuzatuvchi/proktor)**. Django REST API + React SPA + WebSocket real-time proctoring + Celery background tasklar.
 
-Node/Python/PostgreSQL/Redis — hammasi konteynerda. Boshqa hech narsa o'rnatish shart emas:
+To‘liq funksional talablar: [`docs/TEXNIK_TALABLAR.md`](docs/TEXNIK_TALABLAR.md)  
+Bug hisobot (sahifa bo‘yicha): [`docs/BUG_REPORT.md`](docs/BUG_REPORT.md)
+
+---
+
+## Tezkor boshlash (Docker)
 
 ```bash
 docker compose up --build
@@ -12,57 +17,233 @@ docker compose up --build
 
 Brauzer: **http://127.0.0.1:8080**
 
-Demo loginlar (parol hammasiga **`DemoFJSTI2026!`**):
+| Login | Rol | Parol |
+|-------|-----|-------|
+| `demo_admin` | Admin | `DemoFJSTI2026!` |
+| `demo_staff` | Staff (kuzatuvchi) | `DemoFJSTI2026!` |
+| `demo_student` | Talaba | `DemoFJSTI2026!` |
 
-| Login | Rol |
-|-------|-----|
-| `demo_admin` | admin |
-| `demo_staff` | staff (kuzatuvchi) |
-| `demo_student` | talaba |
+Django ORM admin (alohida): **http://127.0.0.1:8080/django-admin/** — `admin` / `AdminLocal123`
 
-Django admin paneli: `http://127.0.0.1:8080/admin/` (`admin` / `AdminLocal123`).
-
-- To'xtatish: `Ctrl+C` yoki `docker compose down`
-- Loglar: `docker compose logs -f`
-- Stack: `app` (API + SPA, `:8080`), `db` (PostgreSQL), `redis`, `worker` (Celery proctoring tasklari)
-
-## Muhit o'zgaruvchilari (ixtiyoriy — `backend/.env`)
-
-Docker standartlari ishlash uchun yetarli. AI funksiyalari uchun bittagina o'zgaruvchi muhim:
-
-| O'zgaruvchi | Tavsif |
-|-------------|--------|
-| `OPENAI_API_KEY` | Yuz solishtirish, smart import, AI savollar (yo'q bo'lsa AI funksiyalari o'tkazib yuboriladi) |
-| `OPENAI_MODEL` / `OPENAI_VISION_MODEL` | Standart: `gpt-4o-mini` / `gpt-4o` |
-| `DATABASE_URL` | PostgreSQL (`postgres://...`). Docker'da avtomatik; SQLite qo'llab-quvvatlanmaydi |
-| `REDIS_URL` | Channel layer + Celery broker (Docker'da avtomatik) |
-| `JWT_SECRET`, `DJANGO_SECRET_KEY` | Prod deploy uchun (Docker dev'da standart bor) |
-
-To'liq namunalar: `backend/.env.example`, `deploy/env.api.example`.
-
-## Joylashtirish
-
-[`deploy/DEPLOY.md`](deploy/DEPLOY.md), GitHub Actions: [`deploy/DEPLOY-GITHUB-ACTIONS.md`](deploy/DEPLOY-GITHUB-ACTIONS.md).
-
-**Serverda bitta yangilash** (git pull, migrate, frontend build, nginx HTTP/HTTPS tanlash, restart):
-
+Demo foydalanuvchilarni qayta yaratish:
 ```bash
-cd /var/www/onlinetest && bash deploy/remote-update.sh
+docker compose exec app python manage.py seed_demo_users
 ```
 
-Barcha foydalanuvchi + imtihonlarni o‘chirib faqat `admin` / `fjsti123` qoldirish (xavfli): `bash deploy/remote-update.sh --reset-admin`
+---
 
-## Xavfsizlik eslatmalari
+## Loyiha tuzilmasi
 
-- Repoda `.env` qolmaganini tekshiring (`.gitignore`). Baza — PostgreSQL (SQLite ishlatilmaydi).
-- Brauzerda **parolni localStorage da saqlamaymiz**; «Eslab qolish» faqat foydalanuvchi ID.
-- Production da `bootstrap_exam` kuchsiz standart parol ishlatmaydi — `ADMIN_BOOTSTRAP_PASSWORD` o‘rnating yoki `deploy/bootstrap-ubuntu-once.sh` avtogeneratsiyasidan foydalaning.
+```
+OnlineTest/
+├── backend/                 # Django 5 + DRF + Channels + Celery
+│   ├── apps/
+│   │   ├── core/            # Modellar, migratsiyalar, admin
+│   │   └── api/             # REST API, WebSocket, PDF, AI, proctoring
+│   └── exam_platform/       # settings, asgi, urls
+├── frontend/                # React 19 + Vite + TypeScript + Tailwind
+│   └── src/
+│       ├── pages/           # Login, dashboards, exam flow
+│       ├── components/      # UI, LiveMonitor, natija, kalkulyator
+│       └── lib/             # Proctoring, VAC, WebSocket, API
+├── e2e/                     # Playwright end-to-end testlar
+├── deploy/                  # Nginx, systemd, prod skriptlar
+├── docs/                    # Texnik talablar, bug hisobot
+└── docker-compose.yml       # app + db + redis + worker + beat
+```
 
-## Masshtablash / yuklama eslatmalari
+### Texnologiyalar
 
-- **Redis majburiy** (bir nechta Gunicorn worker bo'lsa, `WEB_CONCURRENCY>1`): WebSocket proctoring (LiveMonitor) signali worker'lar orasida `channels-redis` orqali tarqaladi; `REDIS_URL` bo'lmasa `InMemoryChannelLayer` ishlatiladi va jonli kuzatuv buziladi. `REDIS_URL` VAC HMAC replay cache'ni ham FileBased o'rniga Redis'ga o'tkazadi. Prod'da `REDIS_URL` yo'q bo'lsa `manage.py check --deploy` buni `exam.E001` (Error) bilan to'xtatadi; ataylab bitta jarayonli deploy uchun `ALLOW_INMEMORY_CHANNELS=1` (faqat `WEB_CONCURRENCY=1`). Docker Compose'da Redis allaqachon sozlangan.
-- **AI background queue (Celery):** `proctor-frame` AI kadr tahlili Celery worker'da bajariladi — web worker thread'larini band qilmaydi. `REDIS_URL` (yoki `CELERY_BROKER_URL`) bo'lsa: endpoint `202 {task_id}` qaytaradi, client `GET .../proctor-frame/{task_id}` bilan natijani poll qiladi. Broker yo'q bo'lsa (dev/test) `CELERY_TASK_ALWAYS_EAGER=True` — task sync ishlaydi, eski xulq saqlanadi (frontend ikkala holatni qo'llaydi). Worker: `celery -A exam_platform worker -l info --concurrency=2` (Docker: `worker` service, systemd: `deploy/systemd/onlinetest-worker.service`). `identity-compare` hozircha sync (imtihon start oldidan bir martalik); `identity_compare_task` kelajak uchun tayyor.
+| Qatlam | Texnologiya |
+|--------|-------------|
+| Backend | Python 3.12, Django, DRF, Channels, Celery |
+| Ma’lumotlar bazasi | PostgreSQL (SQLite **qo‘llab-quvvatlanmaydi**) |
+| Cache / Queue | Redis (WebSocket, Celery, VAC HMAC) |
+| Frontend | React, Vite, TypeScript, Motion, Tailwind |
+| Real-time | WebSocket (`ws/realtime/`) — WebRTC signaling |
+| AI | OpenAI API (savol import, tarjima, proctor frame, identity) |
+| PDF | ReportLab — sertifikat va ban hisoboti |
 
-## CI
+---
 
-GitHub Actions: `.github/workflows/ci.yml` (frontend typecheck/test/build, backend check/test).
+## Rollar va imkoniyatlar
+
+### Talaba (Student)
+
+Imtihon topshirish, natijalarni ko‘rish, proctoring qoidalarga rioya qilish.
+
+| Bosqich | Sahifa / komponent | Yo‘l |
+|---------|-------------------|------|
+| Kirish | Login | `/login` |
+| Bosh sahifa | Talaba paneli — mavjud imtihonlar, natijalar | `/` |
+| Oldi tekshiruv | Kamera, VAC qoidalar, shaxs, liveness | State: `checking` |
+| Imtihon | Savollar, taymer, proctoring, kalkulyator | State: `taking` |
+| Natija | Ball, savollar tahlili, PDF | State: `finished` |
+| Ommaviy tekshiruv | QR orqali natija (login shart emas) | `/verify/result/:id?k=...` |
+
+**Asosiy API:** `/api/student/exams`, `/api/student/results`, start/submit/draft, violations, identity-compare, proctor-frame.
+
+### Admin
+
+To‘liq boshqaruv: kontingent, imtihonlar, test bazasi, moderatsiya, audit.
+
+| Sahifa | Yo‘l | Vazifa |
+|--------|------|--------|
+| Asosiy panel | `/admin` | Statistika, tezkor havolalar |
+| Darajalar | `/admin/levels` | Kurslar CRUD |
+| Guruhlar | `/admin/groups` | Guruhlar CRUD |
+| Talabalar | `/admin/students` | Talaba qo‘shish/tahrirlash, profil rasm |
+| Bloklanganlar | `/admin/banned` | Unban, apellyatsiyalar, review queue |
+| Xodimlar | `/admin/staff` | Staff/admin foydalanuvchilar |
+| Audit | `/admin/audit` | Harakatlar jurnali, CSV export |
+| Test bazasi | `/admin/testbank` | PDF/DOCX smart import, kategoriyalar |
+| Imtihon yaratish | `/admin/exam/create` | Bank / PDF / qo‘lda |
+| Imtihonlar ro‘yxati | `/admin/exam/list` | Natijalar, Live Monitor, retake, CSV |
+
+**Asosiy API:** `/api/admin/*` — users, levels, groups, exams, test-bank, stats, audit, ban-appeals.
+
+### Staff (kuzatuvchi)
+
+Faqat **o‘ziga biriktirilgan** imtihonlarni kuzatish va natijalarni ko‘rish.
+
+| Sahifa | Yo‘l | Vazifa |
+|--------|------|--------|
+| Staff portali | `/` | Sarlavha + imtihonlar tabi |
+| Imtihonlar | (inline) | Ro‘yxat, filter, natijalar (read-only) |
+| Live Monitor | (modal) | Jonli kamera, ban ogohlantirish, unblock |
+
+**Cheklovlar:** imtihon yaratish, tahrirlash, CSV, retake — **admin** uchun.
+
+**API:** `GET /api/staff/exams`, `GET /api/staff/exams/:id/results`, unblock via `/api/admin/student_exams/:id/unblock`.
+
+---
+
+## Imtihon oqimi (talaba)
+
+```
+Login → Dashboard → PreExamCheck (kamera, qoidalar, shaxs, liveness)
+    → ExamRoom (savollar + proctoring) → Submit → Natija → PDF / Dashboard
+```
+
+**Anti-cheat (VAC):** HMAC soat, ketma-ketlik raqami, challenge header, qurilma bog‘lash, tab almashtirish, kamera yo‘qolishi, yuz tekshiruvi, ovoz faolligi. 3 ogohlantirish → ban.
+
+**Proctoring:** MediaPipe (client) + server frame tahlili (Celery) + WebSocket (staff/admin Live Monitor).
+
+---
+
+## Ishga tushirish (batafsil)
+
+### Docker (tavsiya etiladi)
+
+```bash
+docker compose up --build
+```
+
+Servislar: `app` (:8080), `db` (PostgreSQL), `redis`, `worker` (Celery), `beat` (stale session sweep).
+
+### Lokal (Docker siz — qiyinroq)
+
+Backend:
+```bash
+cd backend
+pip install -r requirements/dev.txt
+# .env: DJANGO_SECRET_KEY, JWT_SECRET, DATABASE_URL (PostgreSQL)
+python manage.py migrate
+python manage.py runserver
+```
+
+Frontend:
+```bash
+cd frontend
+npm install
+npm run dev    # http://127.0.0.1:5173
+```
+
+Node: `>=20.19 <23` (`.nvmrc`).
+
+---
+
+## Test va sifat nazorati
+
+```bash
+# Frontend typecheck
+cd frontend && npm run lint
+
+# Frontend unit testlar
+cd frontend && npm test
+
+# Backend
+cd backend && python manage.py test apps.api.tests -v 1
+
+# UI smoke (server ishlab turishi kerak)
+node scripts/admin_ui_check.mjs
+node scripts/portal_ui_check.mjs
+
+# E2E (Playwright)
+cd e2e && npx playwright test
+```
+
+CI: `.github/workflows/ci.yml` — frontend + backend + realtime smoke.
+
+---
+
+## Muhit o‘zgaruvchilari
+
+| O‘zgaruvchi | Tavsif |
+|-------------|--------|
+| `OPENAI_API_KEY` | AI: import, tarjima, proctor, identity (yo‘q bo‘lsa graceful degrade) |
+| `OPENAI_MODEL` / `OPENAI_VISION_MODEL` | Standart: `gpt-4o-mini` / `gpt-4o` |
+| `DATABASE_URL` | PostgreSQL majburiy |
+| `REDIS_URL` | WebSocket + Celery + VAC cache (prod da majburiy, ko‘p worker bo‘lsa) |
+| `JWT_SECRET`, `DJANGO_SECRET_KEY` | Auth va imzo |
+| `PUBLIC_APP_URL` | QR / sertifikat verify URL |
+| `VITE_API_BASE_URL` | Frontend API bazasi (default: nisbiy `/api`) |
+
+Namunalar: `backend/.env.example`, `deploy/env.api.example`.
+
+---
+
+## Joylashtirish (production)
+
+- [`deploy/DEPLOY.md`](deploy/DEPLOY.md) — to‘liq qo‘llanma
+- [`deploy/DEPLOY-GITHUB-ACTIONS.md`](deploy/DEPLOY-GITHUB-ACTIONS.md) — CI/CD
+- Server yangilash: `bash deploy/remote-update.sh`
+- HTTPS: `sudo bash deploy/https-certbot.sh your-domain.uz`
+
+**Muhim:** Prod nginx da `/admin/` SPA yo‘llari Django API ga proxy qilinmasligi kerak — batafsil [`docs/BUG_REPORT.md`](docs/BUG_REPORT.md) (ADM-27).
+
+---
+
+## Xavfsizlik
+
+- JWT (HS256), rol serverda DB dan qayta tekshiriladi
+- Parol brauzerda saqlanmaydi; «Eslab qolish» faqat foydalanuvchi ID
+- Banned talaba login va imtihon API larida bloklanadi
+- Sertifikat: `result_public_id` + `integrity_code` + QR verify
+- `.env` va maxfiy kalitlar repoga kirmasligi kerak
+
+---
+
+## Masshtablash
+
+- **Redis** — bir nechta Gunicorn worker + WebSocket uchun majburiy
+- **Celery worker** — `proctor-frame` AI tahlili (202 + poll)
+- **Celery beat** — `proctor.sweep_stale_sessions` (kamera uzilgan sessiyalar)
+- Faqat **bitta** beat instance ishlashi kerak
+
+---
+
+## Hujjatlar
+
+| Fayl | Mazmun |
+|------|--------|
+| [`docs/TEXNIK_TALABLAR.md`](docs/TEXNIK_TALABLAR.md) | To‘liq funksional TZ (o‘zbekcha) |
+| [`docs/BUG_REPORT.md`](docs/BUG_REPORT.md) | Sahifa bo‘yicha bug ro‘yxati |
+| [`CLAUDE.md`](CLAUDE.md) | AI/agent uchun arxitektura qisqacha |
+| [`deploy/DEPLOY.md`](deploy/DEPLOY.md) | Server o‘rnatish |
+
+---
+
+## Litsenziya va aloqa
+
+FJSTI ichki loyiha. Savollar uchun institut IT bo‘limi yoki loyiha administratori bilan bog‘laning.

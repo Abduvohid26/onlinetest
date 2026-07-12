@@ -33,7 +33,8 @@ COPY --from=frontend-build /build/frontend/dist /app/frontend_dist
 COPY deploy/docker/nginx.conf /etc/nginx/onlinetest.conf
 COPY scripts/docker-entrypoint.sh /app/docker-entrypoint.sh
 COPY scripts/docker-worker-entrypoint.sh /app/docker-worker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh /app/docker-worker-entrypoint.sh && mkdir -p /data
+COPY scripts/docker-beat-entrypoint.sh /app/docker-beat-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh /app/docker-worker-entrypoint.sh /app/docker-beat-entrypoint.sh && mkdir -p /data
 
 EXPOSE 8080
 VOLUME ["/data"]

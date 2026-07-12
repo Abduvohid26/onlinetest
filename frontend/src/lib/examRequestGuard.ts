@@ -32,12 +32,14 @@ export type VacSyncState = {
   challengeSeed?: string;
 };
 
-/** Server javob sarlavhalaridan VAC seq/challenge sinxronlash (faqat muvaffaqiyatli so‘rovlardan keyin). */
+/** Server javob sarlavhalaridan VAC seq/challenge sinxronlash (faqat muvaffaqiyatli so‘rovlardan keyin).
+ * seq MONOTON yangilanadi — kechikkan (out-of-order) javob seq'ni hech qachon orqaga
+ * qaytarmaydi (aks holda keyingi so'rovlar zanjirli VAC_SEQ_MISMATCH oladi). */
 export function syncVacFromResponse(headers: Headers, state: VacSyncState): void {
   const nextSeq = headers.get('X-Exam-Seq-Next');
   if (nextSeq) {
     const parsed = Number.parseInt(nextSeq, 10);
-    if (Number.isFinite(parsed) && parsed > 0) {
+    if (Number.isFinite(parsed) && parsed > state.seq) {
       state.seq = parsed;
     }
   }

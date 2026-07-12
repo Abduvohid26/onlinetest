@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { translations, Language, type TranslationBundle } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
-import { readJsonSafe } from '../../lib/http';
+import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import { AdminSectionLabel } from './ui';
 import type { AdminStats } from './types';
 
@@ -112,10 +112,7 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
     (async () => {
       setLoading(true);
       const res = await fetch(apiUrl('/api/admin/stats'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.status === 401 || res.status === 403) {
-        window.dispatchEvent(new Event('auth:error'));
-        return;
-      }
+      if (!checkAdminAuthResponse(res)) return;
       const j = await readJsonSafe<AdminStats>(res);
       if (j) setStats(j);
       setLoading(false);
@@ -129,7 +126,7 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
     <div className="space-y-7">
       {/* ── Statistika ── */}
       <section>
-        <AdminSectionLabel>Statistika</AdminSectionLabel>
+        <AdminSectionLabel>{t.overviewStatsSection}</AdminSectionLabel>
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {cards.map(({ label, value, icon, page, tone }) => {
             const alert = (tone === 'danger' || tone === 'warning') && value > 0;

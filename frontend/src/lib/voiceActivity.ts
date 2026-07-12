@@ -22,6 +22,10 @@ export interface VoiceFrame {
   harmonicity: number;
 }
 
+export type VoiceViolationSignal =
+  | 'WHISPER_OR_CONVERSATION_SUSPECTED'
+  | 'SUSPICIOUS_AUDIO';
+
 const RMS_VOICE = 0.042;
 const ZCR_MIN = 0.024;
 const ZCR_MAX = 0.17;
@@ -136,7 +140,7 @@ export class VoiceActivityTracker {
   private calibrateLeft = 45;
   private prevRms = 0;
 
-  push(frame: VoiceFrame): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+  push(frame: VoiceFrame): VoiceViolationSignal | null {
     if (this.calibrateLeft > 0) {
       this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
       this.calibrateLeft -= 1;
@@ -160,6 +164,50 @@ export class VoiceActivityTracker {
       }
     } else {
       this.voiceStreak = 0;
+    }
+    return null;
+  }
+}
+
+const AMBIENT_RMS_MIN = 0.055;
+const AMBIENT_STREAK_MIN = 10;
+
+/**
+ * Baland tashqi shovqin (musiqa, televizor, eshik — inson nutqi emas).
+ */
+export class AmbientNoiseTracker {
+  private streak = 0;
+  private noiseFloor = 0.018;
+  private calibrateLeft = 45;
+  private prevRms = 0;
+
+  push(frame: VoiceFrame): 'SUSPICIOUS_AUDIO' | null {
+    if (this.calibrateLeft > 0) {
+      this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
+      this.calibrateLeft -= 1;
+    }
+
+    const spike = this.prevRms > 0.015 && frame.rms > this.prevRms * 3.2;
+    this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
+    if (spike) {
+      this.streak = 0;
+      return null;
+    }
+
+    const loudAmbient =
+      !frame.humanVoice &&
+      frame.rms >= AMBIENT_RMS_MIN &&
+      frame.rms > this.noiseFloor * 2.0 &&
+      (frame.lowFreqRatio > 0.35 || frame.speechRatio < 0.45);
+
+    if (loudAmbient) {
+      this.streak += 1;
+      if (this.streak >= AMBIENT_STREAK_MIN) {
+        this.streak = 0;
+        return 'SUSPICIOUS_AUDIO';
+      }
+    } else {
+      this.streak = 0;
     }
     return null;
   }

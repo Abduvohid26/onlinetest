@@ -1,6 +1,8 @@
 """Talaba natijalari, sertifikat, ban report va appeal endpointlari."""
 from __future__ import annotations
 
+from django.db.models import F
+
 from apps.api.views._helpers import *  # noqa: F401,F403
 
 
@@ -97,7 +99,7 @@ def student_results(request):
     rows = (
         StudentExam.objects.filter(student_id=u.id, status__in=["Completed", "Banned"])
         .select_related("exam")
-        .order_by("-completed_at")
+        .order_by(F("completed_at").desc(nulls_last=True), "-id")
     )
     out = []
     for se in rows:

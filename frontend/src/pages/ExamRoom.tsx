@@ -4,7 +4,7 @@ import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive } from '../lib/realtimeProctor';
-import { analyzeVoiceFrame, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
+import { analyzeVoiceFrame, AmbientNoiseTracker, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -59,7 +59,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
 };
 
 // Identity check: har 3 soniyada (OpenCV SFace lokal, tez ~100ms; throttle 60/min)
-const IDENTITY_CHECK_MS = 3_000;
+const IDENTITY_CHECK_MS = 90_000;
 
 interface ExamRoomProps {
   exam: any;
@@ -287,6 +287,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [appealReason, setAppealReason] = useState('');
   const [appealBusy, setAppealBusy] = useState(false);
   const [appealMsg, setAppealMsg] = useState('');
+  const [myAppeals, setMyAppeals] = useState<Array<{
+    id: number;
+    exam_id?: number;
+    status: string;
+    reason: string;
+    created_at?: string | null;
+    review_note?: string | null;
+  }>>([]);
   /** Admin ban yechganda — "Davom etish" tugmasi chiqadi (WebSocket yoki polling). */
   const [unblockReady, setUnblockReady] = useState(false);
   /** BAN paytida serverdagi jami violation yozuvlari (3 ta "!" o'rniga) */
@@ -343,6 +351,46 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         path,
       }),
     [token, exam.id, exam.sessionKey, studentExamId, user.id],
+  );
+
+  /**
+   * Barcha VAC-imzoli imtihon so'rovlari SHU navbat orqali serializatsiya qilinadi.
+   * Server bitta monoton `session_request_seq`ni talab qiladi (prod'da VAC_SEQ_GUARD
+   * default yoqilgan) — parallel timerlar (identity 3s, proctor 20s, autosave, clock,
+   * submit) bir vaqtda so'rov yuborsa, ular bitta seq bilan to'qnashib 403 VAC_SEQ_RACE
+   * oladi. Promise-zanjir mutex har bir guarded so'rovni ketma-ket (seq tartibida)
+   * o'tkazadi: header qurish → fetch → javob seq/challenge sinxronlash — atomik.
+   * Har so'rov qisqa; poll'lar orasidagi kutishlar navbatdan tashqarida, HOL blok yo'q.
+   * AbortController timeout osilib qolgan so'rov butun imtihonni bloklamasligi uchun.
+   */
+  const vacChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const guardedFetch = useCallback(
+    (method: string, path: string, init?: RequestInit): Promise<Response> => {
+      const run = async (): Promise<Response> => {
+        const ac = new AbortController();
+        const timeoutMs = method.toUpperCase() === 'POST' ? 30_000 : 20_000;
+        const timer = window.setTimeout(() => ac.abort(), timeoutMs);
+        try {
+          const headers = {
+            ...((init?.headers as Record<string, string> | undefined) || {}),
+            ...(await nextGuardHeaders(method, path)),
+          };
+          const res = await fetch(apiUrl(path), { ...init, method, headers, signal: ac.signal });
+          syncVacFromResponse(res.headers, vacStateRef.current);
+          return res;
+        } finally {
+          window.clearTimeout(timer);
+        }
+      };
+      const p = vacChainRef.current.then(run, run);
+      // Zanjir xato bo'lsa ham uzilmasin (keyingi so'rovlar davom etsin).
+      vacChainRef.current = p.then(
+        () => undefined,
+        () => undefined,
+      );
+      return p;
+    },
+    [nextGuardHeaders],
   );
 
   useEffect(() => {
@@ -646,6 +694,20 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     const id = window.setInterval(() => void pollUnblock(), 5000);
     return () => clearInterval(id);
   }, [banned, unblockReady, exam.id, token]);
+
+  useEffect(() => {
+    if (!banned || !token) return;
+    let cancelled = false;
+    fetch(apiUrl('/api/student/ban-appeals'), { headers: examAuthHeaders(token) })
+      .then(async (res) => {
+        const data = await readJsonSafe<typeof myAppeals>(res);
+        if (!cancelled && Array.isArray(data)) {
+          setMyAppeals(data.filter((a) => a.exam_id === exam.id));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [banned, token, exam.id]);
 
   useEffect(() => {
     tokenRef.current = token;
@@ -1051,6 +1113,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
+  const ambientTrackerRef = useRef<AmbientNoiseTracker | null>(null);
   const talkingCoordinatorRef = useRef<TalkingViolationCoordinator | null>(null);
 
   useEffect(() => {
@@ -1058,12 +1121,15 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     const analyser = analyserRef.current;
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
+    if (!ambientTrackerRef.current) ambientTrackerRef.current = new AmbientNoiseTracker();
     if (!talkingCoordinatorRef.current) talkingCoordinatorRef.current = new TalkingViolationCoordinator();
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
       const now = Date.now();
       const speechCtx = { faceOk: faceStatusRef.current === 'OK' };
+      const ambient = ambientTrackerRef.current?.push(frame);
+      if (ambient) void logViolationRef.current(ambient);
       const signal = voiceTrackerRef.current?.push(frame);
       if (signal) {
         const coordinated = talkingCoordinatorRef.current?.onSpeechSignal(now, speechCtx);
@@ -1238,11 +1304,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   });
 
   // --- Periodic identity match (Gemini serverda) ---
-  // TOKEN TEJASH:
-  // - 90 soniyada bir marta (avval 45s edi)
-  // - Rasm: 280x210, quality=0.55 (avval full res, quality=0.85 edi)
-  // - Faqat yuz aniqlanganida (singleFace=true)
-  // - Ketma-ket 3 ta muvaffaqiyatsiz bo'lsa blok (yolg'on positive kamaytirish)
+  // 90 soniyada bir marta; faqat yuz aniqlanganida.
   const identityFailCountRef = useRef(0);
   // Real-time engine person-swap shubhasida darhol identity tekshiruvini ishga tushiradi.
   const triggerIdentityCheckRef = useRef<() => void>(() => {});
@@ -1436,6 +1498,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     try {
       if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
         requestExamFullscreen();
+      }
+      if (audioContextRef.current?.state === 'suspended') {
+        await audioContextRef.current.resume().catch(() => {});
       }
       const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
         method: 'POST',
@@ -1769,17 +1834,36 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             </AdminBtn>
           </div>
           <div className="mt-5 border-t border-red-200/70 pt-5 text-left space-y-3">
-            <p className="text-[13px] font-semibold text-gray-800">{lang === 'ru' ? 'Обжалование бана' : lang === 'en' ? 'Appeal BAN' : "BAN bo'yicha murojaat"}</p>
+            <p className="text-[13px] font-semibold text-gray-800">{t.banAppealTitle}</p>
+            {myAppeals.length > 0 && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-3 space-y-2">
+                <p className="text-[12px] font-semibold text-gray-700">{t.banAppealHistoryTitle}</p>
+                {myAppeals.map((a) => (
+                  <div key={a.id} className="text-[12px] text-gray-600 border-t border-gray-200/80 pt-2 first:border-0 first:pt-0">
+                    <span className={`font-semibold ${
+                      a.status === 'Approved' ? 'text-emerald-700' :
+                      a.status === 'Rejected' ? 'text-red-700' : 'text-amber-700'
+                    }`}>
+                      {a.status === 'Approved' ? t.banAppealStatusApproved :
+                        a.status === 'Rejected' ? t.banAppealStatusRejected : t.banAppealStatusPending}
+                    </span>
+                    {a.created_at && (
+                      <span className="text-gray-400 ml-2">{new Date(a.created_at).toLocaleString()}</span>
+                    )}
+                    <p className="mt-1 text-gray-700 line-clamp-3">{a.reason}</p>
+                    {a.review_note && <p className="mt-1 text-gray-500 italic">{a.review_note}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
             <textarea
               value={appealReason}
               onChange={(e) => setAppealReason(e.target.value)}
-              placeholder={lang === 'ru' ? 'Опишите ситуацию подробно (мин. 12 симв.) — admin рассмотрит' : lang === 'en' ? 'Describe the situation in detail (min 12 chars) — admin will review' : "Vaziyatni batafsil yozing (kamida 12 belgi) — admin ko'rib chiqadi"}
+              placeholder={t.banAppealPlaceholder}
               className="w-full min-h-[80px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500 transition-colors"
             />
-            {/* Placeholder yozilgach yo'qoladi — tugma nega o'chiqligi ko'rinmay qolmasin uchun doimiy hisoblagich. */}
             <p className={`text-[11px] text-right ${appealReason.trim().length >= 12 ? 'text-emerald-600' : 'text-gray-400'}`}>
-              {appealReason.trim().length}/12{' '}
-              {lang === 'ru' ? 'символов (минимум)' : lang === 'en' ? 'characters (minimum)' : 'belgi (kamida)'}
+              {appealReason.trim().length}/12 {t.banAppealMinChars}
             </p>
             {appealMsg ? (
               <AdminAlert type={appealMsg.startsWith('ok:') ? 'success' : 'error'}>
@@ -1809,17 +1893,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   });
                   const data = await readJsonSafe<{ error?: string }>(res);
                   if (!res.ok) {
-                    setAppealMsg(data?.error || 'Murojaat yuborishda xatolik');
+                    setAppealMsg(data?.error || t.banAppealSubmitError);
                     return;
                   }
-                  setAppealMsg('ok:Murojaat yuborildi. Admin ko\'rib chiqadi.');
+                  setAppealMsg(`ok:${t.banAppealSubmitOk}`);
                   setAppealReason('');
+                  const listRes = await fetch(apiUrl('/api/student/ban-appeals'), { headers: examAuthHeaders(token) });
+                  const listData = await readJsonSafe<typeof myAppeals>(listRes);
+                  if (Array.isArray(listData)) {
+                    setMyAppeals(listData.filter((a) => a.exam_id === exam.id));
+                  }
                 } finally {
                   setAppealBusy(false);
                 }
               }}
             >
-              {appealBusy ? (lang === 'ru' ? 'Отправка...' : lang === 'en' ? 'Sending...' : 'Yuborilmoqda...') : (lang === 'ru' ? 'Отправить обжалование' : lang === 'en' ? 'Submit appeal' : 'Murojaat yuborish')}
+              {appealBusy ? t.banAppealSending : t.banAppealSubmitBtn}
             </AdminBtn>
           </div>
         </div>
@@ -2010,7 +2099,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{t.examLobbyTitle}</h2>
                   <p className="mt-2 text-sm text-gray-500 leading-relaxed">{t.examLobbyHint}</p>
                   <p className="mt-3 text-sm font-medium text-indigo-700 tabular-nums">
-                    {exam.duration_minutes} {t.minutesShort} · {totalQuestions} savol
+                    {exam.duration_minutes} {t.minutesShort} · {t.examLobbyQuestionCount.replace('{n}', String(totalQuestions))}
                   </p>
                 </div>
                 {startError && (

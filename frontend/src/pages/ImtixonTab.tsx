@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { translations, Language } from '../i18n';
-import { readJsonSafe, parseAdminUsersList } from '../lib/http';
+import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import {
   defaultExamEndLocal,
@@ -11,7 +11,6 @@ import {
 } from '../lib/datetimeLocal';
 import { DateTimeField } from '../components/DateTimeField';
 import { GroupMultiSelect } from '../components/GroupMultiSelect';
-import { AdminExamsTab } from './AdminExamsTab';
 import {
   AdminInput,
   AdminSelect,
@@ -106,7 +105,6 @@ export function ImtixonTab({
   // ── UI holati ──────────────────────────────────────────────────────────────
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState({ type: '', text: '' });
-  const [examKey, setExamKey] = useState(0);
 
   // ── Meta yuklash ───────────────────────────────────────────────────────────
   const loadMeta = useCallback(async () => {
@@ -115,6 +113,7 @@ export function ImtixonTab({
       fetch(apiUrl('/api/admin/test-bank/categories'), { headers: h }),
       fetch(apiUrl('/api/admin/users?role=staff'), { headers: h }),
     ]);
+    if (!checkAdminAuthResponse(gr) || !checkAdminAuthResponse(cr) || !checkAdminAuthResponse(st)) return;
     const gj = gr.ok ? await readJsonSafe<any[]>(gr) : null;
     const cj = cr.ok ? await readJsonSafe<any[]>(cr) : null;
     const sj = st.ok ? await readJsonSafe<unknown>(st) : null;
@@ -155,6 +154,7 @@ export function ImtixonTab({
     const lists = await Promise.all(
       selGroups.map(async (gid) => {
         const res = await fetch(apiUrl(`/api/admin/users?group_id=${gid}&role=student`), { headers: h });
+        if (!checkAdminAuthResponse(res)) return [];
         const j = await readJsonSafe<unknown>(res);
         return parseAdminUsersList<StudentRow>(j);
       }),
@@ -293,6 +293,7 @@ export function ImtixonTab({
         });
       }
 
+      if (!checkAdminAuthResponse(res)) return;
       const d = await readJsonSafe<{ error?: string; id?: number }>(res);
       if (!res.ok) { setMsg({ type: 'err', text: d?.error || t.errorGeneric }); return; }
 
@@ -318,7 +319,6 @@ export function ImtixonTab({
       setManualQuestions([emptyQuestion()]);
       setStartLocal(defaultExamStartLocal());
       setEndLocal(defaultExamEndLocal(duration));
-      setExamKey((k) => k + 1);
     } finally {
       setBusy(false);
     }
@@ -664,10 +664,6 @@ export function ImtixonTab({
           </form>
         </div>
       </AdminCard>
-
-      <div key={examKey}>
-        <AdminExamsTab token={token} lang={lang} hideExamSettings />
-      </div>
 
       <AdminModal
         open={exModal}

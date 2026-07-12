@@ -74,6 +74,59 @@ services:
       OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
       CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
 
+  # Celery beat — davriy tasklarni (proctor.sweep_stale_sessions) rejalashtiradi.
+  # DIQQAT: faqat bitta nusxa ishlashi kerak (replicas: 1 default) — bir nechta
+  # beat jarayoni bir xil taskni bir necha marta navbatga qo'yib yuboradi.
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: onlinetest:local
+    restart: unless-stopped
+    entrypoint: ["/app/docker-beat-entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    env_file:
+      - backend/.env
+    environment:
+      DJANGO_DEBUG: "1"
+      DATABASE_URL: postgres://onlinetest:${POSTGRES_PASSWORD:-dev-postgres-password}@db:5432/onlinetest
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: ${JWT_SECRET:-docker-dev-jwt-secret-min-24-chars}
+
+  # Playwright E2E — web tarafni haqiqiy brauzerda sinaydi (login -> PreExamCheck
+  # -> ExamRoom -> natija). Odatiy `docker compose up`da ISHLAMAYDI ("test" profile) —
+  # qo'lda ishga tushiriladi:
+  #   docker compose --profile test run --rm e2e
+  e2e:
+    build:
+      context: ./e2e
+    profiles: ["test"]
+    depends_on:
+      app:
+        condition: service_started
+    # app'ning tarmoq nazratini bo'lishadi — shunda brauzer 127.0.0.1:8080'ga
+    # murojaat qiladi (Chromium buni har doim "xavfsiz kontekst" deb hisoblaydi,
+    # getUserMedia uchun HTTPS yoki maxsus flag shart emas).
+    network_mode: "service:app"
+    environment:
+      BASE_URL: http://127.0.0.1:8080
+      DEMO_SEED_PASSWORD: ${DEMO_SEED_PASSWORD:-DemoFJSTI2026!}
+      # Ixtiyoriy "real yuz" rejimi (standart: bo'sh — mock identity-compare
+      # ishlatiladi). Yoqish uchun: e2e/fixtures/ ichiga fake-camera video qo'yib,
+      # E2E_FAKE_VIDEO_PATH=/fixtures/<fayl> va E2E_MOCK_IDENTITY=0 bilan chaqiring.
+      # e2e/fixtures/ shaxsiy foto/video bo'lishi mumkin — git'ga HECH QACHON
+      # commit qilinmaydi (.gitignore'da).
+      E2E_FAKE_VIDEO_PATH: ${E2E_FAKE_VIDEO_PATH:-}
+      E2E_MOCK_IDENTITY: ${E2E_MOCK_IDENTITY:-1}
+    volumes:
+      - ./e2e/playwright-report:/e2e/playwright-report
+      - ./e2e/test-results:/e2e/test-results
+      - ./e2e/fixtures:/fixtures:ro
+
 volumes:
   pg-data:
   redis-data:
