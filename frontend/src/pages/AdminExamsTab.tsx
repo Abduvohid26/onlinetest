@@ -241,8 +241,10 @@ export function AdminExamsTab({
                         <p className="font-semibold text-gray-900 text-[15px] leading-snug">{e.title}</p>
                         <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                           <ExamStatusBadge e={e} />
-                          {e.exam_mode === 'bank_mixed' && (
-                            <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{t.bankExamBadge}</span>
+                          {(e.exam_mode === 'bank_mixed' || e.exam_mode === 'imentor_mixed') && (
+                            <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                              {e.exam_mode === 'imentor_mixed' ? t.imentorExamBadge : t.bankExamBadge}
+                            </span>
                           )}
                           <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium uppercase">{e.language}</span>
                         </div>
@@ -265,7 +267,7 @@ export function AdminExamsTab({
                         <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         <span className="text-[12px] text-gray-600 font-semibold">{e.duration_minutes} min</span>
                       </div>
-                      {e.exam_mode === 'bank_mixed' && e.bank_question_count && (
+                      {(e.exam_mode === 'bank_mixed' || e.exam_mode === 'imentor_mixed') && e.bank_question_count > 0 && (
                         <div className="bg-indigo-50 rounded-lg px-2.5 py-1.5 border border-indigo-100">
                           <span className="text-[12px] text-indigo-700 font-semibold">{e.bank_question_count} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}</span>
                         </div>

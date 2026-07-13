@@ -18,6 +18,7 @@ class Exam(models.Model):
     exam_mode = models.CharField(max_length=20, default="static")
     bank_category_ids = models.TextField(default="[]")
     bank_question_count = models.IntegerField(default=0)
+    imentor_subject_codes = models.TextField(default="[]", blank=True)
 
     class Meta:
         app_label = "core"

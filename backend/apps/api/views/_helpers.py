@@ -675,6 +675,7 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "exam_mode": e.exam_mode,
         "bank_category_ids": e.bank_category_ids,
         "bank_question_count": e.bank_question_count,
+        "imentor_subject_codes": safe_json_loads(getattr(e, "imentor_subject_codes", None) or "[]", []),
     }
 
 def _bank_pool_check(cat_ids: list, need_bank: int) -> tuple[bool, int]:
@@ -695,12 +696,41 @@ def _admin_exams_create_impl(request):
     lang = str(d.get("language") or "uz").lower().strip()[:10]
     if lang not in ("uz", "ru", "en", "auto"):
         lang = "uz"
-    mode = "bank_mixed" if d.get("exam_mode") == "bank_mixed" else "static"
+    raw_mode = str(d.get("exam_mode") or "static").strip()
+    if raw_mode == "imentor_mixed":
+        mode = "imentor_mixed"
+    elif raw_mode == "bank_mixed":
+        mode = "bank_mixed"
+    else:
+        mode = "static"
     bank_cats_json = "[]"
+    imentor_codes_json = "[]"
     bank_count = 0
     questions: list = []
 
-    if mode == "bank_mixed":
+    if mode == "imentor_mixed":
+        from apps.api.imentor_service import validate_imentor_subjects
+
+        raw_codes = d.get("imentor_subject_codes")
+        if isinstance(raw_codes, list):
+            codes = [str(c).strip().upper() for c in raw_codes if str(c).strip()]
+        else:
+            codes = [
+                str(c).strip().upper()
+                for c in safe_json_loads(raw_codes or "[]", [])
+                if str(c).strip()
+            ]
+        ok, err, _total = validate_imentor_subjects(codes)
+        if not ok:
+            return Response({"error": err}, status=400)
+        n_raw = d.get("bank_question_count")
+        try:
+            n = int(n_raw) if n_raw is not None and str(n_raw).strip() != "" else 0
+        except (TypeError, ValueError):
+            n = 0
+        bank_count = max(0, min(200, n))
+        imentor_codes_json = json.dumps(codes)
+    elif mode == "bank_mixed":
         raw_cat_ids = d.get("bank_category_ids")
         if isinstance(raw_cat_ids, list):
             cat_ids = raw_cat_ids
@@ -790,6 +820,7 @@ def _admin_exams_create_impl(request):
             exam_mode=mode,
             bank_category_ids=bank_cats_json,
             bank_question_count=bank_count,
+            imentor_subject_codes=imentor_codes_json,
         )
         ExamGroup.objects.bulk_create([ExamGroup(exam_id=ex.id, group_id=gid) for gid in gids])
         eid = ex.id

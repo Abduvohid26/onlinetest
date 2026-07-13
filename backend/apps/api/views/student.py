@@ -477,7 +477,7 @@ def student_exams_start(request, pk: int):
                 "draft_answers_json",
                 "draft_flagged_json",
             ]
-            if exam.exam_mode == "bank_mixed":
+            if exam.exam_mode in ("bank_mixed", "imentor_mixed"):
                 se.session_questions_json = None
                 retake_update_fields.append("session_questions_json")
             se.save(update_fields=retake_update_fields)
@@ -573,6 +573,58 @@ def student_exams_start(request, pk: int):
             ai_with_ids = [{**q, "id": next_id + j} for j, q in enumerate(ai_part)]
             merged = shuffle_in_place(picked + ai_with_ids)
             full_questions = [{**q, "id": idx + 1} for idx, q in enumerate(merged)]
+            if is_auto_exam:
+                full_questions = fill_missing_exam_translations(full_questions)
+            se.session_questions_json = json.dumps(full_questions)
+            se.save(update_fields=["session_questions_json"])
+    elif exam.exam_mode == "imentor_mixed":
+        if se.session_questions_json:
+            full_questions = safe_json_loads(se.session_questions_json, [])
+            if is_auto_exam:
+                upgraded = fill_missing_exam_translations(full_questions)
+                if upgraded is not full_questions:
+                    full_questions = upgraded
+                    se.session_questions_json = json.dumps(full_questions)
+                    se.save(update_fields=["session_questions_json"])
+        else:
+            from apps.api.imentor_service import fetch_random_imentor_questions
+
+            codes = safe_json_loads(getattr(exam, "imentor_subject_codes", None) or "[]", [])
+            if not isinstance(codes, list) or not codes:
+                return Response({"error": "Invalid iMentor exam configuration"}, status=500)
+            max_q = int(exam.bank_question_count or 0)
+            try:
+                picked, _meta = fetch_random_imentor_questions(
+                    codes,
+                    max_questions=max_q,
+                    add_translations=is_auto_exam,
+                )
+            except Exception as ex:
+                from apps.api.imentor_client import IMentorApiError
+
+                msg = str(ex)
+                if isinstance(ex, IMentorApiError):
+                    return Response({"error": msg}, status=502 if ex.status and ex.status >= 500 else 400)
+                return Response({"error": "iMentor test yuklanmadi"}, status=502)
+            if track in ("residency", "master") and picked:
+                try:
+                    picked = paraphrase_medical_mcqs(picked, ex_lang)
+                except Exception:
+                    pass
+            elif track == "bachelor" and picked:
+                n_para = max(1, int(len(picked) * 0.25))
+                idxs = list(range(len(picked)))
+                shuffle_in_place(idxs)
+                para_idxs = sorted(idxs[:n_para])
+                to_para = [picked[i] for i in para_idxs]
+                try:
+                    para_results = paraphrase_medical_mcqs(to_para, ex_lang)
+                    if para_results and len(para_results) == len(to_para):
+                        for pos, i in enumerate(para_idxs):
+                            picked[i] = para_results[pos]
+                except Exception:
+                    pass
+            full_questions = [{**q, "id": idx + 1} for idx, q in enumerate(picked)]
             if is_auto_exam:
                 full_questions = fill_missing_exam_translations(full_questions)
             se.session_questions_json = json.dumps(full_questions)

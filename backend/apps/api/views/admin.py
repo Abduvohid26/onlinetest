@@ -957,6 +957,35 @@ def admin_test_bank_categories_delete(request, pk: int):
     TestBankCategory.objects.filter(pk=pk).delete()
     audit(request, "delete_category", "category", pk, cat_name)
     return Response({"success": True})
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_imentor_subjects(request):
+    """iMentor tashqi API: fanlar ro'yxati (admin imtihon yaratish uchun)."""
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    from apps.api.imentor_client import imentor_configured
+    from apps.api.imentor_service import subjects_from_stats
+
+    if not imentor_configured():
+        return Response(
+            {
+                "configured": False,
+                "subjects": [],
+                "error": "IMENTOR_API_KEY sozlanmagan",
+            }
+        )
+    try:
+        subjects = subjects_from_stats()
+    except Exception as ex:
+        return Response(
+            {"configured": True, "subjects": [], "error": str(ex)},
+            status=502,
+        )
+    return Response({"configured": True, "subjects": subjects})
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def admin_test_bank_questions(request):

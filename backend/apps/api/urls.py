@@ -47,6 +47,7 @@ urlpatterns = [
     path("admin/test-bank/categories/<int:pk>", views.admin_test_bank_categories_delete),
     path("admin/test-bank/import-smart", views.admin_test_bank_import_smart),
     path("admin/test-bank/questions", views.admin_test_bank_questions),
+    path("admin/imentor/subjects", views.admin_imentor_subjects),
     path("admin/exams", views.admin_exams),
     path("admin/exams/<int:pk>/results", views.admin_exams_results),
     path("admin/exams/<int:pk>/exceptions", views.admin_exam_exceptions),
