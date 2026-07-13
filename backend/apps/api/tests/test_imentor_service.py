@@ -15,7 +15,9 @@ from apps.api.imentor_service import (
     _transform_imentor_questions,
     fetch_random_imentor_questions,
     normalize_exam_question_count,
+    resolve_imentor_subject_codes,
     subjects_from_stats,
+    validate_imentor_subjects,
 )
 
 
@@ -59,6 +61,31 @@ class IMentorServiceTests(TestCase):
         with self.assertRaises(IMentorApiError):
             normalize_exam_question_count(8)
 
+    @mock.patch("apps.api.imentor_service.subjects_from_stats")
+    def test_resolve_subject_codes_case_insensitive(self, mock_subjects):
+        mock_subjects.return_value = [
+            {
+                "subject_code": "akusherlik-va-ginekologiya",
+                "subject_name": "Akusherlik va ginekologiya",
+                "test_count": 2,
+            }
+        ]
+        resolved = resolve_imentor_subject_codes(["AKUSHERLIK-VA-GINEKOLOGIYA"])
+        self.assertEqual(resolved, ["akusherlik-va-ginekologiya"])
+
+    @mock.patch("apps.api.imentor_service.subjects_from_stats")
+    def test_validate_imentor_subjects_slug_code(self, mock_subjects):
+        mock_subjects.return_value = [
+            {
+                "subject_code": "akusherlik-va-ginekologiya",
+                "subject_name": "Akusherlik va ginekologiya",
+                "test_count": 2,
+            }
+        ]
+        ok, err, total = validate_imentor_subjects(["akusherlik-va-ginekologiya"])
+        self.assertTrue(ok, err)
+        self.assertEqual(total, 2)
+
     @mock.patch("apps.api.imentor_service.imentor_configured", return_value=True)
     @mock.patch("apps.api.imentor_service.imentor_stats")
     def test_subjects_from_stats(self, mock_stats, _cfg):
@@ -76,8 +103,9 @@ class IMentorServiceTests(TestCase):
     @mock.patch("apps.api.imentor_service.exam_questions_add_translations", side_effect=lambda q, _lang: q)
     @mock.patch("apps.api.imentor_service.imentor_get_test")
     @mock.patch("apps.api.imentor_service.imentor_collect_tests_for_subject")
+    @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
     @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
-    def test_fetch_random_uses_api_question_limit(self, _bounds, mock_collect, mock_get, _tr):
+    def test_fetch_random_uses_api_question_limit(self, _bounds, _resolve, mock_collect, mock_get, _tr):
         mock_collect.return_value = [{"id": 42, "subject_code": "ANAT", "topic": "T"}]
         mock_get.return_value = {
             "topic": "T",
@@ -102,8 +130,9 @@ class IMentorServiceTests(TestCase):
     @mock.patch("apps.api.imentor_service.exam_questions_add_translations", side_effect=lambda q, _lang: q)
     @mock.patch("apps.api.imentor_service.imentor_get_test")
     @mock.patch("apps.api.imentor_service.imentor_collect_tests_for_subject")
+    @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
     @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
-    def test_fetch_random_all_questions_when_zero(self, _bounds, mock_collect, mock_get, _tr):
+    def test_fetch_random_all_questions_when_zero(self, _bounds, _resolve, mock_collect, mock_get, _tr):
         mock_collect.return_value = [{"id": 7, "subject_code": "ANAT"}]
         mock_get.return_value = {
             "payload": {

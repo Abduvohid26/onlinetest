@@ -264,6 +264,70 @@ export function ImtixonTab({
               </AdminField>
             </div>
 
+            <div className="space-y-3">
+              <div>
+                <AdminLabel required>{t.imentorSubjectsLabel}</AdminLabel>
+                <p className="text-[12px] text-gray-400 mt-1 mb-3">{t.imentorSubjectsHint}</p>
+                {!imentorConfigured ? (
+                  <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50 rounded-2xl border border-amber-100">
+                    {t.imentorNotConfigured}
+                  </div>
+                ) : imentorSubjects.length === 0 ? (
+                  <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50 rounded-2xl border border-amber-100">
+                    {t.imentorNoSubjects}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+                    {imentorSubjects.map((s) => {
+                      const selected = selSubjects.includes(s.subject_code);
+                      return (
+                        <label
+                          key={s.subject_code}
+                          className={`flex items-start gap-3 p-3.5 rounded-2xl border cursor-pointer transition-all ${
+                            selected
+                              ? 'border-indigo-400 bg-indigo-50/80 ring-1 ring-indigo-200'
+                              : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/80'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleSubject(s.subject_code)}
+                            className="w-4 h-4 mt-0.5 rounded border-gray-300 accent-indigo-600 shrink-0"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[14px] font-semibold text-gray-900 leading-snug">
+                              {s.subject_name}
+                            </span>
+                            <span className="block text-[12px] text-gray-400 mt-0.5 truncate">{s.subject_code}</span>
+                            <span className="inline-block mt-2 text-[11px] font-semibold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md">
+                              {s.test_count ?? 0}{' '}
+                              {lang === 'ru' ? 'тест' : lang === 'en' ? 'tests' : 'test'}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <AdminField label={t.imentorMaxQuestionsLabel}>
+                <AdminInput
+                  type="number"
+                  min={0}
+                  max={imentorQLimits.max}
+                  value={imentorMaxQ}
+                  onChange={(e) => setImentorMaxQ(Number(e.target.value))}
+                  className="max-w-[180px]"
+                />
+                <p className="text-[12px] text-gray-400 mt-1.5">
+                  {t.imentorMaxQuestionsHint
+                    .replace('{min}', String(imentorQLimits.min))
+                    .replace('{max}', String(imentorQLimits.max))}
+                </p>
+              </AdminField>
+            </div>
+
             <AdminField label={t.examResponsibleLabel}>
               <AdminSelect value={responsibleStaffId} onChange={(e) => setResponsibleStaffId(e.target.value)}>
                 <option value="">
@@ -339,61 +403,6 @@ export function ImtixonTab({
                 {t.exceptionsBtn}
                 {exceptionsPayload.length > 0 ? ` (${exceptionsPayload.length})` : ''}
               </AdminBtn>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <AdminLabel required>{t.imentorSubjectsLabel}</AdminLabel>
-                <p className="text-[12px] text-gray-400 mb-2">{t.imentorSubjectsHint}</p>
-                <div className="border border-gray-200 rounded-2xl overflow-hidden">
-                  {!imentorConfigured ? (
-                    <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50">
-                      {t.imentorNotConfigured}
-                    </div>
-                  ) : imentorSubjects.length === 0 ? (
-                    <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50">
-                      {t.imentorNoSubjects}
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-gray-100 max-h-52 overflow-y-auto">
-                      {imentorSubjects.map((s) => (
-                        <label
-                          key={s.subject_code}
-                          className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 cursor-pointer transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selSubjects.includes(s.subject_code)}
-                            onChange={() => toggleSubject(s.subject_code)}
-                            className="w-4 h-4 rounded border-gray-300 accent-indigo-600"
-                          />
-                          <span className="text-[14px] text-gray-800 font-medium flex-1 truncate">
-                            {s.subject_name}{' '}
-                            <span className="text-gray-400 font-normal">({s.subject_code})</span>
-                          </span>
-                          <span className="text-[12px] font-semibold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-md shrink-0">
-                            {s.test_count ?? 0}{' '}
-                            {lang === 'ru' ? 'тест.' : lang === 'en' ? 'tests' : 'test'}
-                          </span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <AdminField label={t.imentorMaxQuestionsLabel}>
-                <AdminInput
-                  type="number"
-                  min={0}
-                  max={imentorQLimits.max}
-                  value={imentorMaxQ}
-                  onChange={(e) => setImentorMaxQ(Number(e.target.value))}
-                  className="max-w-[180px]"
-                />
-                <p className="text-[12px] text-gray-400 mt-1.5">
-                  {t.imentorMaxQuestionsHint.replace('{min}', String(imentorQLimits.min)).replace('{max}', String(imentorQLimits.max))}
-                </p>
-              </AdminField>
             </div>
 
             <div className="pt-1">

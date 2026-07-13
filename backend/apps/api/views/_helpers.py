@@ -713,19 +713,20 @@ def _admin_exams_create_impl(request):
 
         raw_codes = d.get("imentor_subject_codes")
         if isinstance(raw_codes, list):
-            codes = [str(c).strip().upper() for c in raw_codes if str(c).strip()]
+            raw_list = [str(c).strip() for c in raw_codes if str(c).strip()]
         else:
-            codes = [
-                str(c).strip().upper()
+            raw_list = [
+                str(c).strip()
                 for c in safe_json_loads(raw_codes or "[]", [])
                 if str(c).strip()
             ]
-        ok, err, _total = validate_imentor_subjects(codes)
+        ok, err, _total = validate_imentor_subjects(raw_list)
         if not ok:
             return Response({"error": err}, status=400)
-        from apps.api.imentor_service import normalize_exam_question_count
+        from apps.api.imentor_service import normalize_exam_question_count, resolve_imentor_subject_codes
 
         try:
+            codes = resolve_imentor_subject_codes(raw_list)
             bank_count = normalize_exam_question_count(d.get("bank_question_count"))
         except Exception as ex:
             from apps.api.imentor_client import IMentorApiError

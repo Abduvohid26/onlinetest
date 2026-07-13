@@ -81,6 +81,41 @@ def subjects_from_stats() -> list[dict]:
     return out
 
 
+def _subject_stats_index(rows: list[dict] | None = None) -> dict[str, dict]:
+    """subject_code ni case-insensitive qidirish (API slug: akusherlik-va-ginekologiya)."""
+    stats = rows if rows is not None else subjects_from_stats()
+    idx: dict[str, dict] = {}
+    for row in stats:
+        code = str(row.get("subject_code") or "").strip()
+        if not code:
+            continue
+        idx[code] = row
+        idx[code.lower()] = row
+        idx[code.upper()] = row
+    return idx
+
+
+def resolve_imentor_subject_codes(subject_codes: list[str]) -> list[str]:
+    """Frontend/API dan kelgan kodlarni iMentor stats dagi canonical subject_code ga aylantirish."""
+    idx = _subject_stats_index()
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in subject_codes:
+        token = str(raw or "").strip()
+        if not token:
+            continue
+        row = idx.get(token) or idx.get(token.lower()) or idx.get(token.upper())
+        if not row:
+            raise IMentorApiError(f"Fan topilmadi yoki test yo'q: {token}", status=400)
+        canonical = str(row["subject_code"]).strip()
+        if canonical and canonical not in seen:
+            seen.add(canonical)
+            out.append(canonical)
+    if not out:
+        raise IMentorApiError("Kamida bitta fan tanlanishi kerak", status=400)
+    return out
+
+
 def _transform_imentor_questions(raw_questions: list[dict]) -> list[dict]:
     out: list[dict] = []
     for q in raw_questions:
@@ -124,9 +159,10 @@ def fetch_random_imentor_questions(
     bounds = question_limit_bounds()
     question_limit = validate_question_limit_value(int(max_questions or 0), bounds=bounds)
 
-    codes = [str(c).strip().upper() for c in subject_codes if str(c).strip()]
-    if not codes:
-        raise IMentorApiError("Kamida bitta fan tanlanishi kerak")
+    try:
+        codes = resolve_imentor_subject_codes(subject_codes)
+    except IMentorApiError:
+        raise
 
     list_min = question_limit if question_limit else IMENTOR_QUESTION_LIMIT_MIN
     list_max = IMENTOR_QUESTION_LIMIT_MAX
@@ -192,13 +228,14 @@ def validate_imentor_subjects(subject_codes: list[str]) -> tuple[bool, str, int]
     """Imtihon yaratishda: fanlar mavjudligi va kamida bitta test borligini tekshirish."""
     if not imentor_configured():
         return False, "iMentor API kaliti sozlanmagan (IMENTOR_API_KEY)", 0
-    codes = [str(c).strip().upper() for c in subject_codes if str(c).strip()]
-    if not codes:
-        return False, "Kamida bitta fan tanlang", 0
-    stats_rows = {r["subject_code"]: r for r in subjects_from_stats()}
+    try:
+        resolved = resolve_imentor_subject_codes(subject_codes)
+    except IMentorApiError as ex:
+        return False, str(ex), 0
+    idx = _subject_stats_index()
     total_tests = 0
-    for code in codes:
-        row = stats_rows.get(code)
+    for code in resolved:
+        row = idx.get(code)
         if not row:
             return False, f"Fan topilmadi yoki test yo'q: {code}", 0
         total_tests += int(row.get("test_count") or 0)
