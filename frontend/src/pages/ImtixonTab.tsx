@@ -65,6 +65,7 @@ export function ImtixonTab({
   const [responsibleStaffId, setResponsibleStaffId] = useState('');
   const [selSubjects, setSelSubjects] = useState<string[]>([]);
   const [imentorMaxQ, setImentorMaxQ] = useState(0);
+  const [imentorQLimits, setImentorQLimits] = useState({ min: 10, max: 30 });
 
   const [selGroups, setSelGroups] = useState<number[]>([]);
   const [exModal, setExModal] = useState(false);
@@ -84,12 +85,20 @@ export function ImtixonTab({
     const gj = gr.ok ? await readJsonSafe<any[]>(gr) : null;
     const sj = st.ok ? await readJsonSafe<unknown>(st) : null;
     const ij = im.ok
-      ? await readJsonSafe<{ configured?: boolean; subjects?: ImentorSubject[] }>(im)
+      ? await readJsonSafe<{
+          configured?: boolean;
+          subjects?: ImentorSubject[];
+          question_limit_bounds?: { min?: number; max?: number };
+        }>(im)
       : null;
     setGroups(Array.isArray(gj) ? gj : []);
     setStaffUsers(parseAdminUsersList<StaffRow>(sj));
     setImentorConfigured(ij?.configured !== false);
     setImentorSubjects(Array.isArray(ij?.subjects) ? ij!.subjects! : []);
+    const b = ij?.question_limit_bounds;
+    if (b && typeof b.min === 'number' && typeof b.max === 'number') {
+      setImentorQLimits({ min: b.min, max: b.max });
+    }
   }, [token]);
 
   useEffect(() => {
@@ -159,6 +168,9 @@ export function ImtixonTab({
       .filter((s) => selSubjects.includes(s.subject_code))
       .reduce((acc, s) => acc + Math.max(0, Number(s.test_count) || 0), 0);
     if (pool < 1) return t.imentorNoSubjects;
+    if (imentorMaxQ !== 0 && (imentorMaxQ < imentorQLimits.min || imentorMaxQ > imentorQLimits.max)) {
+      return t.imentorQuestionLimitInvalid;
+    }
     return null;
   };
 
@@ -373,12 +385,14 @@ export function ImtixonTab({
                 <AdminInput
                   type="number"
                   min={0}
-                  max={200}
+                  max={imentorQLimits.max}
                   value={imentorMaxQ}
                   onChange={(e) => setImentorMaxQ(Number(e.target.value))}
                   className="max-w-[180px]"
                 />
-                <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorMaxQuestionsHint}</p>
+                <p className="text-[12px] text-gray-400 mt-1.5">
+                  {t.imentorMaxQuestionsHint.replace('{min}', String(imentorQLimits.min)).replace('{max}', String(imentorQLimits.max))}
+                </p>
               </AdminField>
             </div>
 

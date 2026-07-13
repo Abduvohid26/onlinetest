@@ -976,14 +976,23 @@ def admin_imentor_subjects(request):
                 "error": "IMENTOR_API_KEY sozlanmagan",
             }
         )
+    from apps.api.imentor_service import question_limit_bounds
+
     try:
         subjects = subjects_from_stats()
+        bounds = question_limit_bounds()
     except Exception as ex:
         return Response(
             {"configured": True, "subjects": [], "error": str(ex)},
             status=502,
         )
-    return Response({"configured": True, "subjects": subjects})
+    return Response(
+        {
+            "configured": True,
+            "subjects": subjects,
+            "question_limit_bounds": bounds,
+        }
+    )
 
 
 @api_view(["GET", "POST"])

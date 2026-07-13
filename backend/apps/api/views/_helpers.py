@@ -723,12 +723,16 @@ def _admin_exams_create_impl(request):
         ok, err, _total = validate_imentor_subjects(codes)
         if not ok:
             return Response({"error": err}, status=400)
-        n_raw = d.get("bank_question_count")
+        from apps.api.imentor_service import normalize_exam_question_count
+
         try:
-            n = int(n_raw) if n_raw is not None and str(n_raw).strip() != "" else 0
-        except (TypeError, ValueError):
-            n = 0
-        bank_count = max(0, min(200, n))
+            bank_count = normalize_exam_question_count(d.get("bank_question_count"))
+        except Exception as ex:
+            from apps.api.imentor_client import IMentorApiError
+
+            if isinstance(ex, IMentorApiError):
+                return Response({"error": str(ex)}, status=400)
+            return Response({"error": "Noto'g'ri savollar soni"}, status=400)
         imentor_codes_json = json.dumps(codes)
     elif mode == "bank_mixed":
         raw_cat_ids = d.get("bank_category_ids")

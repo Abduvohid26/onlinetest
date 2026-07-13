@@ -5,13 +5,49 @@ import random
 from typing import Any
 
 from apps.api.imentor_client import (
+    DEFAULT_QUESTION_LIMIT_BOUNDS,
     IMentorApiError,
+    IMENTOR_QUESTION_LIMIT_MAX,
+    IMENTOR_QUESTION_LIMIT_MIN,
     imentor_collect_tests_for_subject,
     imentor_configured,
     imentor_get_test,
     imentor_stats,
+    parse_question_limit_bounds,
+    validate_question_limit_value,
 )
-from apps.api.services import exam_questions_add_translations, shuffle_in_place
+from apps.api.services import exam_questions_add_translations
+
+
+def question_limit_bounds() -> dict[str, int]:
+    """API stats dan yoki default 10–30."""
+    if not imentor_configured():
+        return dict(DEFAULT_QUESTION_LIMIT_BOUNDS)
+    try:
+        stats = imentor_stats()
+        return parse_question_limit_bounds(stats)
+    except IMentorApiError:
+        return dict(DEFAULT_QUESTION_LIMIT_BOUNDS)
+
+
+def normalize_exam_question_count(raw: int | str | None, *, bounds: dict[str, int] | None = None) -> int:
+    """
+    Imtihon yaratish: 0 = testdagi barcha savollar; aks holda bounds ichida (odatda 10–30).
+    """
+    b = bounds or DEFAULT_QUESTION_LIMIT_BOUNDS
+    lo, hi = int(b["min"]), int(b["max"])
+    try:
+        n = int(raw) if raw is not None and str(raw).strip() != "" else 0
+    except (TypeError, ValueError):
+        n = 0
+    if n == 0:
+        return 0
+    if n < lo or n > hi:
+        raise IMentorApiError(
+            f"Savollar soni {lo} dan {hi} gacha bo'lishi kerak (0 = testdagi barcha savollar).",
+            status=400,
+        )
+    return n
 
 
 def subjects_from_stats() -> list[dict]:
@@ -22,6 +58,7 @@ def subjects_from_stats() -> list[dict]:
         stats = imentor_stats()
     except IMentorApiError:
         return []
+    bounds = parse_question_limit_bounds(stats)
     rows = stats.get("by_subject") or []
     if not isinstance(rows, list):
         return []
@@ -44,9 +81,9 @@ def subjects_from_stats() -> list[dict]:
     return out
 
 
-def _transform_imentor_questions(raw_questions: list[dict], *, limit: int = 0) -> list[dict]:
+def _transform_imentor_questions(raw_questions: list[dict]) -> list[dict]:
     out: list[dict] = []
-    for i, q in enumerate(raw_questions):
+    for q in raw_questions:
         if not isinstance(q, dict):
             continue
         opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()]
@@ -69,11 +106,6 @@ def _transform_imentor_questions(raw_questions: list[dict], *, limit: int = 0) -
                 "correctAnswer": opts[idx],
             }
         )
-    if limit and len(out) > limit:
-        shuffle_in_place(out)
-        out = out[:limit]
-        for j, qd in enumerate(out):
-            qd["id"] = j + 1
     return out
 
 
@@ -86,16 +118,29 @@ def fetch_random_imentor_questions(
 ) -> tuple[list[dict], dict[str, Any]]:
     """
     Tanlangan fanlardan tasodifiy bitta test tanlab savollarni qaytaradi.
-    max_questions=0 bo'lsa testdagi barcha savollar olinadi.
+    max_questions=0 bo'lsa API detail cheklovsiz (bazadagi barcha savollar).
+    max_questions>0 bo'lsa question_limit=10..30 API ga uzatiladi.
     """
+    bounds = question_limit_bounds()
+    question_limit = validate_question_limit_value(int(max_questions or 0), bounds=bounds)
+
     codes = [str(c).strip().upper() for c in subject_codes if str(c).strip()]
     if not codes:
         raise IMentorApiError("Kamida bitta fan tanlanishi kerak")
 
+    list_min = question_limit if question_limit else IMENTOR_QUESTION_LIMIT_MIN
+    list_max = IMENTOR_QUESTION_LIMIT_MAX
+
     pool: list[dict] = []
     for code in codes:
         try:
-            pool.extend(imentor_collect_tests_for_subject(code))
+            pool.extend(
+                imentor_collect_tests_for_subject(
+                    code,
+                    min_questions=list_min,
+                    max_questions=list_max,
+                )
+            )
         except IMentorApiError:
             continue
 
@@ -109,14 +154,16 @@ def fetch_random_imentor_questions(
     if not test_id:
         raise IMentorApiError("Test ID noto'g'ri")
 
-    detail = imentor_get_test(test_id)
+    detail = imentor_get_test(
+        test_id,
+        question_limit=question_limit if question_limit else None,
+    )
     payload = detail.get("payload") if isinstance(detail.get("payload"), dict) else {}
     raw_qs = payload.get("questions") or []
     if not isinstance(raw_qs, list) or not raw_qs:
         raise IMentorApiError("Testda savollar yo'q")
 
-    limit = max(1, int(max_questions)) if max_questions else 0
-    questions = _transform_imentor_questions(raw_qs, limit=limit)
+    questions = _transform_imentor_questions(raw_qs)
     if not questions:
         raise IMentorApiError("Testdan foydali savol ajratib bo'lmadi")
 
@@ -129,7 +176,14 @@ def fetch_random_imentor_questions(
         "subject_code": str(detail.get("subject_code") or pick.get("subject_code") or ""),
         "subject_name": str(detail.get("subject_name") or pick.get("subject_name") or ""),
         "question_count": len(questions),
+        "question_limit": int(detail.get("question_limit") or question_limit or 0),
+        "question_count_available": int(
+            detail.get("question_count_available") or detail.get("question_count") or pick.get("question_count") or 0
+        ),
+        "question_count_returned": int(detail.get("question_count_returned") or len(questions)),
+        "question_limit_bounds": parse_question_limit_bounds(detail),
         "verification_code": str(detail.get("verification_code") or pick.get("verification_code") or ""),
+        "document_id": str(detail.get("document_id") or pick.get("document_id") or ""),
     }
     return questions, meta
 
