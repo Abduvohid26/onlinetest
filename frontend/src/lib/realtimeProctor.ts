@@ -40,6 +40,16 @@ export type FaceStatusLive =
   | 'TURNED'
   | 'GAZE_AWAY';
 
+/**
+ * "Davomiy" tabiatga ega signallar (gapirish, boshning burilishi, pozitsiya) uchun
+ * kichik/vizual bosqich — hali rasmiy ogohlantirish emas. Faqat uzluksiz
+ * LIVE_SIGNAL_ESCALATE_MS davom etsa, haqiqiy (backendga yuboriladigan) violation'ga
+ * aylanadi. Bir martalik hodisalar (tab-switch, print-screen va h.k.) bu mexanizmga
+ * kirmaydi — ular hozirgidek darhol qoladi.
+ */
+export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER';
+export const LIVE_SIGNAL_ESCALATE_MS = 5000;
+
 const env = (import.meta as any).env || {};
 const WASM_BASE: string =
   env.VITE_MEDIAPIPE_WASM_BASE ||
@@ -91,6 +101,9 @@ export interface RealtimeProctorCallbacks {
   onRecheckIdentity?: () => void;
   /** Har kadrda real-time yuz holati — kamera overlay uchun, violation emas. */
   onFaceStatus?: (status: FaceStatusLive) => void;
+  /** Davomiy signal (gapirish/bosh burilishi/pozitsiya) hozir faolmi va necha ms'dan
+   *  beri uzluksiz davom etyapti. Faol signal yo'q bo'lsa `type=null` bilan chaqiriladi. */
+  onLiveSignal?: (type: LiveSignalType | null, elapsedMs: number) => void;
   onReady?: (ok: boolean) => void;
   onStatus?: (msg: string) => void;
 }
@@ -113,6 +126,9 @@ export class RealtimeProctor {
 
   private lastEmit: Record<string, number> = {};
   private streaks: Record<string, number> = {};
+  // Davomiy signal (kichik→katta eskalatsiya) uchun — necha vaqtdan beri uzluksiz faol.
+  private activeSince: Record<string, number> = {};
+  private lastActiveAt: Record<string, number> = {};
   private prevNose: { x: number; y: number } | null = null;
   private moveEma = 0;
   // Yuz almashishi (person-swap) triggeri uchun
@@ -121,6 +137,15 @@ export class RealtimeProctor {
   // Og'iz qimirlashi (gapirish) aniqlash
   private mouthHistory: number[] = [];
   private jawOpenHistory: number[] = [];
+  // Shu freym uchun davomiy signallarning uzluksiz davomiyligi (ms) — kadr oxirida
+  // eng "shoshilinch"i tanlanib onLiveSignal orqali xabar qilinadi.
+  private liveMs: Record<LiveSignalType, number> = {
+    TALKING: 0,
+    HEAD_AWAY: 0,
+    TOO_FAR: 0,
+    TOO_CLOSE: 0,
+    OFF_CENTER: 0,
+  };
 
   constructor(video: HTMLVideoElement, cb: RealtimeProctorCallbacks) {
     this.video = video;
@@ -216,6 +241,27 @@ export class RealtimeProctor {
     this.cb.onRecheckIdentity?.();
   }
 
+  /**
+   * Xom signal necha ms'dan beri uzluksiz faolligini qaytaradi (0 = faol emas).
+   * Freym-flicker (bitta kadr o'tkazib yuborilishi) hisoblagichni buzmasin deb,
+   * qisqa uzilishga (graceMs) toqat qilinadi.
+   */
+  private trackContinuous(key: string, rawActive: boolean, graceMs = 500): number {
+    const now = Date.now();
+    if (rawActive) {
+      if (!this.activeSince[key]) this.activeSince[key] = now;
+      this.lastActiveAt[key] = now;
+      return now - this.activeSince[key];
+    }
+    const last = this.lastActiveAt[key];
+    if (last && now - last <= graceMs) {
+      return this.activeSince[key] ? now - this.activeSince[key] : 0;
+    }
+    delete this.activeSince[key];
+    delete this.lastActiveAt[key];
+    return 0;
+  }
+
   /** Streak hisoblagich: kerakli ketma-ketlikka yetganda true qaytaradi (va resetlaydi). */
   private streak(key: string, active: boolean, need: number): boolean {
     if (!active) {
@@ -271,16 +317,22 @@ export class RealtimeProctor {
       const posStatus = this.checkFacePosition(faces[0]);
       this.cb.onFaceStatus?.(posStatus);
 
-      // Pozitsiya violations — sustained streak orqali
-      if (this.streak('tooFar', posStatus === 'TOO_FAR', STREAK.tooFar)) this.emit('FACE_TOO_FAR');
-      if (this.streak('tooClose', posStatus === 'TOO_CLOSE', STREAK.tooClose)) this.emit('FACE_TOO_CLOSE');
-      if (this.streak('offCenter', posStatus === 'OFF_CENTER', STREAK.offCenter)) this.emit('FACE_OFF_CENTER');
+      // Pozitsiya — kichik→katta eskalatsiya: uzluksiz LIVE_SIGNAL_ESCALATE_MS
+      // davom etsagina rasmiy violation yuboriladi.
+      this.liveMs.TOO_FAR = this.trackContinuous('tooFar', posStatus === 'TOO_FAR');
+      this.liveMs.TOO_CLOSE = this.trackContinuous('tooClose', posStatus === 'TOO_CLOSE');
+      this.liveMs.OFF_CENTER = this.trackContinuous('offCenter', posStatus === 'OFF_CENTER');
+      if (this.liveMs.TOO_FAR >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TOO_FAR');
+      if (this.liveMs.TOO_CLOSE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TOO_CLOSE');
+      if (this.liveMs.OFF_CENTER >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_OFF_CENTER');
 
       this.analyzeHeadAndMovement(faces[0], faceBlendshapes);
     } else {
-      this.streaks['tooFar'] = 0;
-      this.streaks['tooClose'] = 0;
-      this.streaks['offCenter'] = 0;
+      this.liveMs.TOO_FAR = this.trackContinuous('tooFar', false);
+      this.liveMs.TOO_CLOSE = this.trackContinuous('tooClose', false);
+      this.liveMs.OFF_CENTER = this.trackContinuous('offCenter', false);
+      this.liveMs.HEAD_AWAY = 0;
+      this.liveMs.TALKING = this.trackContinuous('mouth', false);
       this.prevNose = null;
       this.mouthHistory = [];
       this.jawOpenHistory = [];
@@ -296,6 +348,12 @@ export class RealtimeProctor {
         /* ignore */
       }
     }
+
+    // Shu freymdagi eng "shoshilinch" davomiy signalni kamera panelida ko'rsatish uchun tanlaymiz.
+    const best = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>)
+      .filter(([, ms]) => ms > 0)
+      .sort((a, b) => b[1] - a[1])[0];
+    this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
   }
 
   /** Yuzning kadr ichidagi holati — overlay uchun tez javob. */
@@ -345,23 +403,26 @@ export class RealtimeProctor {
     const height = chin.y - top.y || 1e-6;
     const noseRelY = (nose.y - top.y) / height; // ~0.5 markaz
 
+    // Bosh burilishi/gaze — kichik→katta eskalatsiya: yo'nalish qaysi bo'lishidan
+    // qat'iy nazar, kamera panelida umumiy "HEAD_AWAY" sifatida ko'rsatiladi;
+    // rasmiy violation esa aniq yo'nalish bo'yicha alohida hisoblanadi.
     const absYaw = Math.abs(noseRelX);
-    if (absYaw >= YAW_HARD) {
-      if (this.streak('turn', true, STREAK.gaze)) this.emit('FACE_TURNED_AWAY');
-    } else if (absYaw >= YAW_TURN) {
-      this.streaks['turn'] = 0;
-      const key = noseRelX < 0 ? 'gazeR' : 'gazeL';
-      if (this.streak(key, true, STREAK.gaze)) {
-        this.emit(noseRelX < 0 ? 'GAZE_AWAY_RIGHT' : 'GAZE_AWAY_LEFT');
-      }
-    } else {
-      this.streaks['turn'] = 0;
-      this.streaks['gazeL'] = 0;
-      this.streaks['gazeR'] = 0;
-    }
+    const turnMs = this.trackContinuous('turn', absYaw >= YAW_HARD);
+    if (turnMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TURNED_AWAY');
 
-    if (this.streak('gazeUp', noseRelY <= PITCH_UP, STREAK.gaze)) this.emit('GAZE_AWAY_UP');
-    if (this.streak('gazeDown', noseRelY >= PITCH_DOWN, STREAK.gaze)) this.emit('GAZE_AWAY_DOWN');
+    const gazeLActive = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;
+    const gazeRActive = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX < 0;
+    const gazeLMs = this.trackContinuous('gazeL', gazeLActive);
+    const gazeRMs = this.trackContinuous('gazeR', gazeRActive);
+    if (gazeLMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_LEFT');
+    if (gazeRMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_RIGHT');
+
+    const gazeUpMs = this.trackContinuous('gazeUp', noseRelY <= PITCH_UP);
+    const gazeDownMs = this.trackContinuous('gazeDown', noseRelY >= PITCH_DOWN);
+    if (gazeUpMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_UP');
+    if (gazeDownMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_DOWN');
+
+    this.liveMs.HEAD_AWAY = Math.max(turnMs, gazeLMs, gazeRMs, gazeUpMs, gazeDownMs);
 
     // 3) Ortiqcha qimirlash: burun nuqtasining frame'lararo siljishi (EMA bilan tekislash).
     if (this.prevNose) {
@@ -430,6 +491,10 @@ export class RealtimeProctor {
       }
     }
 
-    if (this.streak('mouth', talking, 3)) this.emit('MOUTH_MOVEMENT_TALKING');
+    // Gapirish — kichik→katta eskalatsiya. Tabiiy nutqda so'zlar orasida qisqa
+    // pauza bo'ladi, shu sabab grace oynasi boshqa signallardan kattaroq (1000ms).
+    const talkMs = this.trackContinuous('mouth', talking, 1000);
+    if (talkMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('MOUTH_MOVEMENT_TALKING');
+    this.liveMs.TALKING = talkMs;
   }
 }

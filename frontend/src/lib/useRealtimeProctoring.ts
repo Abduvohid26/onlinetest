@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { RealtimeProctor, type RealtimeViolation, type FaceStatusLive } from './realtimeProctor';
+import { RealtimeProctor, type RealtimeViolation, type FaceStatusLive, type LiveSignalType } from './realtimeProctor';
 
 interface UseRealtimeProctoringOpts {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -9,6 +9,8 @@ interface UseRealtimeProctoringOpts {
   onRecheckIdentity?: () => void;
   /** Har kadrda real-time yuz holati — kamera overlay uchun. */
   onFaceStatus?: (status: FaceStatusLive) => void;
+  /** Davomiy signal (gapirish/bosh burilishi/pozitsiya) kichik→katta eskalatsiya holati. */
+  onLiveSignal?: (type: LiveSignalType | null, elapsedMs: number) => void;
   /** Stream tayyor bo'lgani: shu o'zgarganda engine qayta ishga tushadi. */
   streamRevision?: number;
   disabled?: boolean;
@@ -25,6 +27,7 @@ export function useRealtimeProctoring({
   onViolation,
   onRecheckIdentity,
   onFaceStatus,
+  onLiveSignal,
   streamRevision = 0,
   disabled = false,
   onReady,
@@ -39,6 +42,7 @@ export function useRealtimeProctoring({
       onViolation,
       onRecheckIdentity,
       onFaceStatus,
+      onLiveSignal,
       onReady,
       onStatus: (m) => console.info('[realtime-proctor]', m),
     });

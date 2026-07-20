@@ -31,6 +31,9 @@ test.describe('Student exam flow (end-to-end)', () => {
     request,
     baseURL,
   }) => {
+    // Real identity/liveness rejimida (MOCK_IDENTITY=0) har bir bosqich haqiqiy
+    // backend/AI round-trip qiladi — standart 90s global timeout yetarli emas.
+    if (!MOCK_IDENTITY) test.setTimeout(180_000);
     const base = baseURL!;
 
     // ── 1) Setup: demo_student guruhiga tayinlangan qisqa imtihon yaratish (real API) ──
@@ -69,6 +72,16 @@ test.describe('Student exam flow (end-to-end)', () => {
     });
 
     try {
+      // ── 1.5) Playwright brauzeri navigator.webdriver=true qo'yadi — ilovaning
+      // VAC qatlami buni (to'g'ri) "masofaviy boshqaruv" deb belgilab, ogohlantirish
+      // modalini ochib qo'yardi va bu qadam qachon sodir bo'lishi ExamRoom mount
+      // tafsilotlariga bog'liq (timing-sensitive). Haqiqiy talaba brauzerida bu
+      // flag yo'q — shu sabab test uchun uni standart Playwright usuli bilan spoof
+      // qilamiz (ilova kodini emas, faqat test muhitini o'zgartiradi).
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'webdriver', { get: () => false });
+      });
+
       // ── 2) MediaPipe CDN'ni bloklaymiz — position-gate va active yaw-challenge
       // ilovaning o'zida mavjud "model yuklanmadi" graceful-degradation yo'liga
       // o'tadi (haqiqiy, production'da ham ishlaydigan kod yo'li).
@@ -131,11 +144,17 @@ test.describe('Student exam flow (end-to-end)', () => {
       await page.getByRole('button', { name: 'Imtihonni boshlash' }).click();
 
       // ── 9) ExamRoom: ikkala savolga to'g'ri javob berish va topshirish ──
+      // Radio input `sr-only` (vizual jihatdan yashirilgan) — label ustidan klik
+      // native forward qilishi kerak, lekin ba'zi hollarda inputning o'zini
+      // to'g'ridan-to'g'ri (force bilan, actionability tekshiruvini chetlab)
+      // bosish ishonchliroq.
       await expect(page.getByText('E2E: 2+2=?')).toBeVisible({ timeout: 20_000 });
-      await page.locator('label').filter({ has: page.locator('input[name="q-1"][value="4"]') }).click();
+      await page.locator('input[name="q-1"][value="4"]').click({ force: true });
+      await expect(page.locator('input[name="q-1"][value="4"]')).toBeChecked();
       await page.getByRole('button', { name: 'Keyingi →' }).click();
       await expect(page.getByText('E2E: 3+1=?')).toBeVisible();
-      await page.locator('label').filter({ has: page.locator('input[name="q-2"][value="4"]') }).click();
+      await page.locator('input[name="q-2"][value="4"]').click({ force: true });
+      await expect(page.locator('input[name="q-2"][value="4"]')).toBeChecked();
       await page.getByRole('button', { name: 'Yakunlash' }).click();
 
       // ── 10) Natija sahifasi — 2/2 to'g'ri javob ──

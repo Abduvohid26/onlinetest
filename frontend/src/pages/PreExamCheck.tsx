@@ -54,6 +54,7 @@ export function PreExamCheck({
   token,
   user,
   lang,
+  isRetake,
   onComplete,
   onCancel,
 }: {
@@ -61,6 +62,8 @@ export function PreExamCheck({
   token: string;
   user: any;
   lang: Language;
+  /** Qoidabuzarlik tufayli qayta topshirish uchun qaytadan kirilganmi — true bo'lsa pozitsiya gate talab qilinmaydi. */
+  isRetake?: boolean;
   onComplete: (examData: any, seId: number) => void;
   onCancel: () => void;
 }) {
@@ -837,7 +840,7 @@ export function PreExamCheck({
                   </div>
                 </div>
 
-                {!verified && (
+                {!verified && !isRetake && (
                   <div className={`rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors ${positionOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                     <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${positionOk ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
                     <p className={`text-[12.5px] font-medium leading-snug ${positionOk ? 'text-emerald-700' : 'text-amber-700'}`}>{positionLabel}</p>
@@ -846,7 +849,7 @@ export function PreExamCheck({
 
                 <AdminBtn
                   onClick={verifyIdentity}
-                  disabled={!cameraReady || verifying || verified || !positionOk}
+                  disabled={!cameraReady || verifying || verified || (!positionOk && !isRetake)}
                   variant={verified ? 'emerald' : 'blue'}
                   size="md"
                   loading={verifying}

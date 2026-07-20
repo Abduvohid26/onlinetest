@@ -122,6 +122,8 @@ function AppContent() {
   const [activeExam, setActiveExam] = useState<any>(null);
   const [studentExamId, setStudentExamId] = useState<number | null>(null);
   const [examStatus, setExamStatus] = useState<'pending' | 'checking' | 'taking' | 'finished'>('pending');
+  /** Qayta topshirish (retake) tufayli qaytadan kirilganmi — true bo'lsa PreExamCheck pozitsiya gate'ni bekor qiladi. */
+  const [isRetakeCheck, setIsRetakeCheck] = useState(false);
   const [lastSubmitResult, setLastSubmitResult] = useState<ExamResultPayload | null>(null);
   const [lang, setLang] = useState<Language>(() => {
     const raw = (safeStorageGet('lang') || 'uz').trim() as Language;
@@ -276,6 +278,7 @@ function AppContent() {
   const startExamCheck = (exam: any, seId: number) => {
     setActiveExam(exam);
     setStudentExamId(seId);
+    setIsRetakeCheck(false);
     setExamStatus('checking');
     navigate(`/exam/${exam.id}/check`);
   };
@@ -290,6 +293,7 @@ function AppContent() {
   const retakeRestartExam = () => {
     if (!activeExam) return;
     clearExamFlow();
+    setIsRetakeCheck(true);
     setExamStatus('checking');
     navigate(`/exam/${activeExam.id}/check`);
   };
@@ -298,6 +302,7 @@ function AppContent() {
     if (!token) return;
     if (exam.identity_refresh_required || exam.session_phase === 'after_retake') {
       startExamCheck(exam, exam.student_exam_id ?? 0);
+      if (exam.session_phase === 'after_retake') setIsRetakeCheck(true);
       return;
     }
     try {
@@ -498,13 +503,14 @@ function AppContent() {
               </div>
             )}
             {user.role === 'student' && examStatus === 'checking' && activeExam && (
-              <PreExamCheck 
-                exam={activeExam} 
-                token={token} 
+              <PreExamCheck
+                exam={activeExam}
+                token={token}
                 lang={lang}
                 user={user}
-                onComplete={beginExam} 
-                onCancel={exitExamFlow} 
+                isRetake={isRetakeCheck}
+                onComplete={beginExam}
+                onCancel={exitExamFlow}
               />
             )}
             {user.role === 'student' && examStatus === 'taking' && activeExam && (

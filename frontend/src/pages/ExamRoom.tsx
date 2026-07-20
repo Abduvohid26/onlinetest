@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
-import type { FaceStatusLive } from '../lib/realtimeProctor';
+import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, isFaceVisibleForTalk, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
@@ -22,7 +22,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -33,6 +33,11 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     faceMulti: 'Bir nechta yuz!',
     faceTooFar: "Yaqinroq o'ting",
     faceTooClose: "Uzoqroq toring",
+    liveTalking: "Gapirish aniqlandi — jim bo'ling",
+    liveHeadAway: "Kameraga qarang",
+    liveTooFar: "Kameradan uzoqsiz",
+    liveTooClose: "Kameraga yaqinsiz",
+    liveOffCenter: "Kadr markaziga o'ting",
   },
   ru: {
     answered: 'Отвечено',
@@ -44,6 +49,11 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     faceMulti: 'Несколько лиц!',
     faceTooFar: 'Ближе к камере',
     faceTooClose: 'Дальше от камеры',
+    liveTalking: 'Обнаружен разговор — соблюдайте тишину',
+    liveHeadAway: 'Смотрите в камеру',
+    liveTooFar: 'Вы далеко от камеры',
+    liveTooClose: 'Вы слишком близко к камере',
+    liveOffCenter: 'Встаньте по центру кадра',
   },
   en: {
     answered: 'Answered',
@@ -55,6 +65,11 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     faceMulti: 'Multiple faces!',
     faceTooFar: 'Move closer',
     faceTooClose: 'Move back',
+    liveTalking: 'Talking detected — please stay silent',
+    liveHeadAway: 'Look at the camera',
+    liveTooFar: 'You are too far from the camera',
+    liveTooClose: 'You are too close to the camera',
+    liveOffCenter: 'Move to the center of the frame',
   },
 };
 
@@ -239,6 +254,30 @@ function WarningStepRow({
   );
 }
 
+/** Shu urinishdagi barcha qoidabuzarliklar ro'yxati — ogohlantirish/retake/ban modallarida bir xil ko'rinishda. */
+function ViolationHistoryList({
+  history,
+  label,
+}: {
+  history: WarningHistoryItem[];
+  label: string;
+}) {
+  if (history.length === 0) return null;
+  return (
+    <div className="mb-4 text-left">
+      <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold mb-2">{label}</p>
+      <ul className="space-y-1.5 text-[13px] text-gray-700 max-h-40 overflow-y-auto pr-1">
+        {history.map((w) => (
+          <li key={w.number} className="flex gap-2">
+            <span className="shrink-0 font-bold text-orange-700">{w.number}.</span>
+            <span className="break-words">{w.reason}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamId, token, user, lang, onFinish, onRetakeRestart }: ExamRoomProps) {
   const t = translations[lang];
   const [maxOfficialWarnings, setMaxOfficialWarnings] = useState(3);
@@ -324,6 +363,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [proctorStreamRevision, setProctorStreamRevision] = useState(0);
   const [faceStatus, setFaceStatus] = useState<FaceStatusLive>('WAITING');
   const faceStatusRef = useRef<FaceStatusLive>('WAITING');
+  /** Davomiy signal (gapirish/pozitsiya) — rising edge'da bir marta kichik toast, keyin
+   *  5s uzluksiz davom etsa mavjud logViolation oqimi rasmiy ogohlantirish modalini ochadi. */
+  const lastLiveSignalRef = useRef<LiveSignalType | null>(null);
   const [identityStatus, setIdentityStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
   const identityStatusTimerRef = useRef<number | null>(null);
   const [proctorRetryNonce, setProctorRetryNonce] = useState(0);
@@ -756,6 +798,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const focusBurstLockUntilRef = useRef(0);
   const blurViolationTimerRef = useRef<number | null>(null);
   const hiddenViolationTimerRef = useRef<number | null>(null);
+  const hiddenHardViolationTimerRef = useRef<number | null>(null);
   const FOCUS_BURST_TYPES = new Set([
     'DEVTOOLS_OPEN',
     'CLIPBOARD_ATTEMPT',
@@ -1053,6 +1096,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 }
                 setBanned(false);
                 setUnblockReady(false);
+                if (reason) {
+                  setWarningHistory((prev) => {
+                    if (prev.some((w) => w.reason === reason && w.number === prev.length)) return prev;
+                    return [...prev, { number: prev.length + 1, reason }];
+                  });
+                }
                 setExamRetakeNotice({
                   remaining,
                   used: typeof md.retakes_used === 'number' ? md.retakes_used : 0,
@@ -1349,6 +1398,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           releaseCameraAndMic();
           return;
         }
+        if (reasonText) {
+          setWarningHistory((prev) => {
+            if (prev.some((w) => w.reason === reasonText && w.number === prev.length)) return prev;
+            return [...prev, { number: prev.length + 1, reason: reasonText }];
+          });
+        }
         setExamRetakeNotice({
           remaining,
           used,
@@ -1419,6 +1474,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     },
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
     onFaceStatus: setFaceStatus,
+    onLiveSignal: (type) => {
+      if (!type) {
+        lastLiveSignalRef.current = null;
+        return;
+      }
+      if (lastLiveSignalRef.current === type) return;
+      lastLiveSignalRef.current = type;
+      const msg = {
+        TALKING: EXAM_L[langRef.current].liveTalking,
+        HEAD_AWAY: EXAM_L[langRef.current].liveHeadAway,
+        TOO_FAR: EXAM_L[langRef.current].liveTooFar,
+        TOO_CLOSE: EXAM_L[langRef.current].liveTooClose,
+        OFF_CENTER: EXAM_L[langRef.current].liveOffCenter,
+      }[type];
+      showWarningMsg(msg, 4000);
+    },
   });
 
   // --- Periodic identity match (Gemini serverda) ---
@@ -1507,11 +1578,19 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }, [banned, user.profile_image, nextGuardHeaders, sessionStarted]);
 
   // --- Tab / visibility (masofaviy nazorat) ---
+  // SOFT: darhol (500ms) — qisqa alt-tab, false-positive ko'p.
+  // HARD: TAB_SWITCH_HARD_DELAY_MS davomida uzluksiz yashiringan bo'lsa — talaba
+  // uzoq vaqt imtihon oynasidan chiqib ketgan, bu ancha jiddiy signal.
+  const TAB_SWITCH_HARD_DELAY_MS = 5000;
   useEffect(() => {
     const clearHiddenTimer = () => {
       if (hiddenViolationTimerRef.current !== null) {
         window.clearTimeout(hiddenViolationTimerRef.current);
         hiddenViolationTimerRef.current = null;
+      }
+      if (hiddenHardViolationTimerRef.current !== null) {
+        window.clearTimeout(hiddenHardViolationTimerRef.current);
+        hiddenHardViolationTimerRef.current = null;
       }
     };
 
@@ -1527,6 +1606,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             void logViolationRef.current('TAB_SWITCH_SOFT');
           }
         }, 500);
+        hiddenHardViolationTimerRef.current = window.setTimeout(() => {
+          hiddenHardViolationTimerRef.current = null;
+          if (bannedRef.current || !sessionStartedRef.current) return;
+          if (document.visibilityState === 'hidden') {
+            void logViolationRef.current('TAB_SWITCH_HARD');
+          }
+        }, TAB_SWITCH_HARD_DELAY_MS);
       } else {
         clearHiddenTimer();
       }
@@ -1816,6 +1902,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               />
             </div>
 
+            <ViolationHistoryList history={warningHistory} label={t.banWarningHistoryLabel} />
+
             {isFinal ? (
               <p className="text-[11px] sm:text-xs text-red-800/90 text-center mb-4 font-medium leading-relaxed">
                 {t.violationFinalNotice}
@@ -1870,6 +1958,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               </p>
               <p className="text-[14px] font-semibold text-gray-900 leading-relaxed">{reasonText}</p>
             </div>
+            <ViolationHistoryList history={warningHistory} label={t.banWarningHistoryLabel} />
             <p className="text-gray-800 mb-2 leading-relaxed text-sm font-semibold">
               {t.technicalRetakeUsedRemaining
                 .replace('{used}', String(examRetakeNotice.used))
