@@ -4,6 +4,7 @@ from __future__ import annotations
 from django.db.models import F
 
 from apps.api.views._helpers import *  # noqa: F401,F403
+from apps.api.proctor_attempt_history import build_attempt_history
 
 
 @api_view(["GET", "POST"])
@@ -109,6 +110,7 @@ def student_results(request):
         else:
             total = len(safe_json_loads(se.exam.questions_json, []))
         pct = round((se.score / total) * 100) if total and se.score is not None else None
+        attempts_count = 1 + int(se.technical_retakes_used or 0) + int(se.identity_retakes_used or 0)
         out.append(
             {
                 "id": se.id,
@@ -121,6 +123,8 @@ def student_results(request):
                 "completed_at": se.completed_at.isoformat() if se.completed_at else None,
                 "result_public_id": se.result_public_id,
                 "ban_reason": (getattr(se, "ban_reason", "") or "").strip(),
+                "attempts_count": attempts_count,
+                "attempt_history": build_attempt_history(u.id, se.exam_id) if attempts_count > 1 else [],
             }
         )
     return Response(out)

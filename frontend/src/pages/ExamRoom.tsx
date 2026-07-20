@@ -363,9 +363,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [proctorStreamRevision, setProctorStreamRevision] = useState(0);
   const [faceStatus, setFaceStatus] = useState<FaceStatusLive>('WAITING');
   const faceStatusRef = useRef<FaceStatusLive>('WAITING');
-  /** Davomiy signal (gapirish/pozitsiya) — rising edge'da bir marta kichik toast, keyin
-   *  5s uzluksiz davom etsa mavjud logViolation oqimi rasmiy ogohlantirish modalini ochadi. */
-  const lastLiveSignalRef = useRef<LiveSignalType | null>(null);
+  /** Kamera panelida ko'rsatiladigan kichik ogohlantirish yorlig'i — signal faol bo'lgan
+   *  davrda ko'rinib turadi, signal to'xtasa yashiriladi. 5s uzluksiz davom etsa mavjud
+   *  logViolation oqimi rasmiy ogohlantirish modalini ochadi. */
+  const [liveSignalLabel, setLiveSignalLabel] = useState<string | null>(null);
   const [identityStatus, setIdentityStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
   const identityStatusTimerRef = useRef<number | null>(null);
   const [proctorRetryNonce, setProctorRetryNonce] = useState(0);
@@ -1179,7 +1180,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         setCameraPreviewOk(false);
         if (err instanceof DOMException && err.message === VIRTUAL_CAMERA_BLOCKED_MESSAGE) {
           setCameraErrorHint(translations[langRef.current].virtualCameraBlocked);
-          showWarningMsg(translations[langRef.current].virtualCameraBlocked, 8000);
+          // Alohida mahalliy xabar YO'Q — bu haqiqiy qoidabuzarlik, logViolation
+          // o'zi rasmiy ogohlantirish modalini (bir xil dizayn) ochadi.
           void logViolationRef.current('VIRTUAL_WEBCAM_SUSPECTED');
         } else {
           console.error('Failed to setup AI proctoring:', err);
@@ -1476,11 +1478,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     onFaceStatus: setFaceStatus,
     onLiveSignal: (type) => {
       if (!type) {
-        lastLiveSignalRef.current = null;
+        setLiveSignalLabel(null);
         return;
       }
-      if (lastLiveSignalRef.current === type) return;
-      lastLiveSignalRef.current = type;
       const msg = {
         TALKING: EXAM_L[langRef.current].liveTalking,
         HEAD_AWAY: EXAM_L[langRef.current].liveHeadAway,
@@ -1488,7 +1488,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         TOO_CLOSE: EXAM_L[langRef.current].liveTooClose,
         OFF_CENTER: EXAM_L[langRef.current].liveOffCenter,
       }[type];
-      showWarningMsg(msg, 4000);
+      // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Signal jami
+      // LIVE_SIGNAL_ESCALATE_MS (3s) ga yetsa, logViolation orqali mavjud rasmiy
+      // ogohlantirish modali o'zi chiqadi (realtimeProctor.ts).
+      setLiveSignalLabel(msg);
     },
   });
 
@@ -2503,6 +2506,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                     </span>
                   )}
                 </div>
+                {liveSignalLabel && (
+                  <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    <span className="text-[11px] font-medium text-amber-800 truncate">{liveSignalLabel}</span>
+                  </div>
+                )}
                 <div className="p-2 pb-2">
                   <div className={`rounded-lg overflow-hidden bg-black/5 border-2 relative aspect-[4/3] max-h-[200px] mx-auto transition-colors duration-300 ${fsCfg.border}`}>
                     <video

@@ -874,6 +874,27 @@ export function StudentDashboard({
                             </div>
                           </div>
                         )}
+
+                        {typeof r.attempts_count === 'number' && r.attempts_count > 1 && (
+                          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                              {L.attemptHistory} · {r.attempts_count}
+                            </p>
+                            {Array.isArray(r.attempt_history) && r.attempt_history.length > 0 && (
+                              <ul className="space-y-1">
+                                {r.attempt_history.slice(-4).map((item: any, idx: number) => (
+                                  <li key={`${item.at || idx}-${item.violation_type || idx}`} className="text-[12px] text-gray-700 leading-snug">
+                                    <span className="text-gray-500 tabular-nums">
+                                      {item.at ? new Date(item.at).toLocaleString() : '—'}
+                                    </span>
+                                    {' · '}
+                                    <span className="font-medium">{item.reason || item.violation_type}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Footer: actions (only completed with public id) */}

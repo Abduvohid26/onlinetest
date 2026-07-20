@@ -42,13 +42,17 @@ export type FaceStatusLive =
 
 /**
  * "Davomiy" tabiatga ega signallar (gapirish, boshning burilishi, pozitsiya) uchun
- * kichik/vizual bosqich — hali rasmiy ogohlantirish emas. Faqat uzluksiz
- * LIVE_SIGNAL_ESCALATE_MS davom etsa, haqiqiy (backendga yuboriladigan) violation'ga
- * aylanadi. Bir martalik hodisalar (tab-switch, print-screen va h.k.) bu mexanizmga
+ * ikki bosqichli qoida (README.md "Proctoring eskalatsiya qoidasi"):
+ *   1) LIVE_SIGNAL_CONFIRM_MS (1.5s) uzluksiz davom etsa — kamera panelida kichik
+ *      vizual ogohlantirish chiqadi (hali rasmiy emas, backendga yuborilmaydi).
+ *   2) Signal shundan keyin ham davom etib, jami LIVE_SIGNAL_ESCALATE_MS (3s) ga
+ *      yetsa — haqiqiy (backendga yuboriladigan) rasmiy ogohlantirishga aylanadi.
+ * Bir martalik hodisalar (tab-switch, print-screen va h.k.) bu mexanizmga
  * kirmaydi — ular hozirgidek darhol qoladi.
  */
 export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER';
-export const LIVE_SIGNAL_ESCALATE_MS = 5000;
+export const LIVE_SIGNAL_CONFIRM_MS = 1500;
+export const LIVE_SIGNAL_ESCALATE_MS = 3000;
 
 const env = (import.meta as any).env || {};
 const WASM_BASE: string =
@@ -351,7 +355,7 @@ export class RealtimeProctor {
 
     // Shu freymdagi eng "shoshilinch" davomiy signalni kamera panelida ko'rsatish uchun tanlaymiz.
     const best = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>)
-      .filter(([, ms]) => ms > 0)
+      .filter(([, ms]) => ms >= LIVE_SIGNAL_CONFIRM_MS)
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
   }
