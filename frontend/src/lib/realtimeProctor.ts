@@ -50,7 +50,7 @@ export type FaceStatusLive =
  * Bir martalik hodisalar (tab-switch, print-screen va h.k.) bu mexanizmga
  * kirmaydi — ular hozirgidek darhol qoladi.
  */
-export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER' | 'MOVEMENT';
+export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER' | 'MOVEMENT' | 'HAND';
 export const LIVE_SIGNAL_CONFIRM_MS = 1500;
 export const LIVE_SIGNAL_ESCALATE_MS = 3000;
 
@@ -71,12 +71,13 @@ const PER_TYPE_COOLDOWN_MS = 3500; // bir tur uchun emit oralig'i (server ham de
 
 // Streak: signal "rost" deb hisoblanishidan oldin necha ketma-ket frame kerak.
 // Past qiymat = tezroq aniqlash (~ frame * 130ms).
-// gaze/mouth/tooFar/tooClose/offCenter/movement — kichik→katta eskalatsiya qoidasiga
-// o'tkazilgan (trackContinuous + LIVE_SIGNAL_ESCALATE_MS), shu yerda streak shart emas.
+// gaze/mouth/tooFar/tooClose/offCenter/movement/hand — kichik→katta eskalatsiya
+// qoidasiga o'tkazilgan (trackContinuous + LIVE_SIGNAL_ESCALATE_MS), shu yerda
+// streak shart emas. FACE_NOT_VISIBLE/MULTIPLE_FACES — identity xavfsizligi bilan
+// bog'liq, ataylab darhol (qonun mustasnosi) qoladi.
 const STREAK = {
   noFace: 6, // ~0.8s yuz yo'q
   multiFace: 3, // ~0.4s 2+ yuz (tez!)
-  hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
 };
 
 // Yuz o'lchami va pozitsiya chegaralari (normalized; facePositionCheck.ts bilan moslangan).
@@ -149,6 +150,7 @@ export class RealtimeProctor {
     TOO_CLOSE: 0,
     OFF_CENTER: 0,
     MOVEMENT: 0,
+    HAND: 0,
   };
 
   constructor(video: HTMLVideoElement, cb: RealtimeProctorCallbacks) {
@@ -285,6 +287,25 @@ export class RealtimeProctor {
     if (!v || v.readyState < 2 || v.videoWidth === 0) return;
     const ts = performance.now();
 
+    // 0) Qo'l/imo-ishora — YUZDAN OLDIN tekshiramiz: qo'l yuzga yaqin/ustida bo'lsa,
+    // FaceLandmarker og'iz nuqtalarini noto'g'ri o'qib, soxta "gapiryapti" signali
+    // berishi mumkin (occlusion) — shu holatni og'iz tekshiruviga xabar beramiz.
+    let handsPresent = false;
+    if (this.handLandmarker) {
+      try {
+        const hres = this.handLandmarker.detectForVideo(v, ts + 0.001);
+        handsPresent = (hres?.landmarks?.length || 0) > 0;
+      } catch {
+        /* ignore */
+      }
+    }
+    // Qo'l ko'tarish — endi ham kichik→katta eskalatsiya qoidasiga bo'ysunadi
+    // (README.md "Proctoring eskalatsiya qoidasi"): 1.5s kichik, 3s rasmiy.
+    // Oldin darhol (~0.4s) rasmiy ogohlantirish berardi — qo'lni bir zum ko'tarish
+    // ham darhol blokka olib kelardi, bu qonunga zid edi.
+    this.liveMs.HAND = this.trackContinuous('hand', handsPresent);
+    if (this.liveMs.HAND >= LIVE_SIGNAL_ESCALATE_MS) this.emit('HAND_GESTURE_SUSPECTED');
+
     let faces: FaceLandmark[][] = [];
     let faceBlendshapes: Array<{ categoryName: string; score: number }> | undefined;
     try {
@@ -330,7 +351,7 @@ export class RealtimeProctor {
       if (this.liveMs.TOO_CLOSE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TOO_CLOSE');
       if (this.liveMs.OFF_CENTER >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_OFF_CENTER');
 
-      this.analyzeHeadAndMovement(faces[0], faceBlendshapes);
+      this.analyzeHeadAndMovement(faces[0], faceBlendshapes, handsPresent);
     } else {
       this.liveMs.TOO_FAR = this.trackContinuous('tooFar', false);
       this.liveMs.TOO_CLOSE = this.trackContinuous('tooClose', false);
@@ -340,17 +361,6 @@ export class RealtimeProctor {
       this.prevNose = null;
       this.mouthHistory = [];
       this.jawOpenHistory = [];
-    }
-
-    // 2) Qo'l / imo-ishora (yuklangani bo'lsa)
-    if (this.handLandmarker) {
-      try {
-        const hres = this.handLandmarker.detectForVideo(v, ts + 0.001);
-        const hands = hres?.landmarks?.length || 0;
-        if (this.streak('hand', hands > 0, STREAK.hand)) this.emit('HAND_GESTURE_SUSPECTED');
-      } catch {
-        /* ignore */
-      }
     }
 
     // Shu freymdagi eng "shoshilinch" davomiy signalni kamera panelida ko'rsatish uchun tanlaymiz.
@@ -391,6 +401,7 @@ export class RealtimeProctor {
   private analyzeHeadAndMovement(
     lm: FaceLandmark[],
     blendshapes?: Array<{ categoryName: string; score: number }>,
+    handsPresent = false,
   ): void {
     // MediaPipe FaceMesh indekslari: burun=1, chap yuz cheti=234, o'ng=454, manglay=10, iyak=152
     const nose = lm[1];
@@ -442,12 +453,13 @@ export class RealtimeProctor {
     this.prevNose = { x: nose.x, y: nose.y };
 
     // 4) Og'iz qimirlashi (gapirish): blendshape jawOpen + lab landmark tebranishi.
-    this.detectMouthMovement(lm, blendshapes);
+    this.detectMouthMovement(lm, blendshapes, handsPresent);
   }
 
   private detectMouthMovement(
     lm: FaceLandmark[],
     blendshapes?: Array<{ categoryName: string; score: number }>,
+    handsPresent = false,
   ): void {
     let talking = false;
 
@@ -496,9 +508,14 @@ export class RealtimeProctor {
       }
     }
 
+    // Qo'l yuz/og'iz ustida yoki yaqinida bo'lsa — landmark occlusion soxta
+    // "gapiryapti" signali berishi mumkin, shu sabab bu freymda hisobga olinmaydi
+    // (hisoblagich to'xtaydi, lekin darhol nolga tushmaydi — grace o'z ishini qiladi).
+    const talking2 = talking && !handsPresent;
+
     // Gapirish — kichik→katta eskalatsiya. Tabiiy nutqda so'zlar orasida qisqa
     // pauza bo'ladi, shu sabab grace oynasi boshqa signallardan kattaroq (1000ms).
-    const talkMs = this.trackContinuous('mouth', talking, 1000);
+    const talkMs = this.trackContinuous('mouth', talking2, 1000);
     if (talkMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('MOUTH_MOVEMENT_TALKING');
     this.liveMs.TALKING = talkMs;
   }

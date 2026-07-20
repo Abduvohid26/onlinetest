@@ -24,7 +24,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -42,6 +42,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveOffCenter: "Kadr markaziga o'ting",
     liveMovement: "Haddan tashqari qimirlash — tinch o'tiring",
     liveAmbientNoise: "Tashqi shovqin bor — jimlikni saqlang",
+    liveHand: "Qo'l ko'tarilgan — qo'llaringizni stolda ushlang",
   },
   ru: {
     answered: 'Отвечено',
@@ -60,6 +61,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveOffCenter: 'Встаньте по центру кадра',
     liveMovement: 'Слишком много движений — сидите спокойно',
     liveAmbientNoise: 'Посторонний шум — соблюдайте тишину',
+    liveHand: 'Рука поднята — держите руки на столе',
   },
   en: {
     answered: 'Answered',
@@ -78,6 +80,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveOffCenter: 'Move to the center of the frame',
     liveMovement: 'Excessive movement — please stay still',
     liveAmbientNoise: 'Background noise detected — please stay quiet',
+    liveHand: 'Hand raised — keep your hands on the desk',
   },
 };
 
@@ -1288,19 +1291,27 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     return () => clearInterval(id);
   }, [banned, analyserRef.current]);
 
-  // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi.
+  // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi. Davomiy holat
+  // (mikrofon tuzatilmaguncha davom etadi) — qonun bo'yicha uzluksiz kuzatiladi,
+  // har tekshiruvda emas, faqat eskalatsiya bosqichida (3s) va undan keyin resetdan
+  // so'ng yana to'liq muddatdan keyin qayta yuboriladi (tinimsiz spam bo'lmasin).
+  const micDownContinuousRef = useRef<ContinuousSignalTracker | null>(null);
   useEffect(() => {
     if (banned || !sessionStarted) return;
     const graceUntil = Date.now() + 12_000;
+    if (!micDownContinuousRef.current) micDownContinuousRef.current = new ContinuousSignalTracker(1000);
     const id = window.setInterval(() => {
       if (bannedRef.current || !sessionStartedRef.current) return;
       if (Date.now() < graceUntil) return;
       const tracks = streamRef.current?.getAudioTracks() ?? [];
       const audioLive = tracks.some((t) => t.readyState === 'live' && t.enabled && !t.muted);
-      if (!analyserRef.current || !audioLive) {
+      const micDown = !analyserRef.current || !audioLive;
+      const ms = micDownContinuousRef.current!.push(micDown);
+      if (ms >= LIVE_SIGNAL_ESCALATE_MS) {
+        micDownContinuousRef.current!.reset();
         void logViolationRef.current('CAMERA_MIC_ACCESS_FAILED');
       }
-    }, 8000);
+    }, 2000);
     return () => clearInterval(id);
   }, [banned, sessionStarted]);
 
@@ -1516,6 +1527,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         TOO_CLOSE: EXAM_L[langRef.current].liveTooClose,
         OFF_CENTER: EXAM_L[langRef.current].liveOffCenter,
         MOVEMENT: EXAM_L[langRef.current].liveMovement,
+        HAND: EXAM_L[langRef.current].liveHand,
       }[type];
       // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Signal jami
       // LIVE_SIGNAL_ESCALATE_MS (3s) ga yetsa, logViolation orqali mavjud rasmiy
@@ -1610,10 +1622,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }, [banned, user.profile_image, nextGuardHeaders, sessionStarted]);
 
   // --- Tab / visibility (masofaviy nazorat) ---
-  // SOFT: darhol (500ms) — qisqa alt-tab, false-positive ko'p.
-  // HARD: TAB_SWITCH_HARD_DELAY_MS davomida uzluksiz yashiringan bo'lsa — talaba
-  // uzoq vaqt imtihon oynasidan chiqib ketgan, bu ancha jiddiy signal.
-  const TAB_SWITCH_HARD_DELAY_MS = 5000;
+  // SOFT: darhol (500ms) — qisqa alt-tab, false-positive ko'p (bir martalik hodisa,
+  // qonun mustasnosi — chunki oyna yashiringanida kamera panelidagi kichik yorliqni
+  // talaba baribir ko'ra olmaydi).
+  // HARD: talaba LIVE_SIGNAL_ESCALATE_MS (qonun bilan bir xil, 3s) davomida uzluksiz
+  // boshqa oynada qolsa — bu ancha jiddiy signal, rasmiy ogohlantirishga aylanadi.
   useEffect(() => {
     const clearHiddenTimer = () => {
       if (hiddenViolationTimerRef.current !== null) {
@@ -1644,7 +1657,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           if (document.visibilityState === 'hidden') {
             void logViolationRef.current('TAB_SWITCH_HARD');
           }
-        }, TAB_SWITCH_HARD_DELAY_MS);
+        }, LIVE_SIGNAL_ESCALATE_MS);
       } else {
         clearHiddenTimer();
       }
