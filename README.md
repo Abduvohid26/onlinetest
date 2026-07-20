@@ -133,14 +133,16 @@ Login → Dashboard → PreExamCheck (kamera, qoidalar, shaxs, liveness)
 
 Bir martalik hodisalar (tab-switch, print-screen, clipboard, devtools, remote-control, forbidden object, identity-substitution) — aniqlangan zahoti to‘g‘ridan-to‘g‘ri rasmiy ogohlantirish/ban sifatida backendga yuboriladi (`apps/api/views/student.py: student_violations`).
 
-**Davomiy tabiatga ega signallar** (gapirish, bosh burilishi/gaze, kameradan uzoq/yaqin/markazdan chetda turish — `frontend/src/lib/realtimeProctor.ts`) ikki bosqichda ishlaydi:
+**Davomiy tabiatga ega signallar** — bosh burilishi/gaze, kameradan uzoq/yaqin/markazdan chetda turish, haddan tashqari qimirlash (`frontend/src/lib/realtimeProctor.ts`, video/MediaPipe), gapirish va tashqi shovqin (`frontend/src/lib/voiceActivity.ts`, audio/mikrofon) — barchasi bitta umumiy `ContinuousSignalTracker` (`frontend/src/lib/continuousSignal.ts`) orqali ikki bosqichda ishlaydi:
 
-1. **`LIVE_SIGNAL_CONFIRM_MS` (1.5s)** — signal uzluksiz shuncha vaqt davom etsa, kamera panelida (ExamRoom o‘ng panel, video ustida) kichik vizual ogohlantirish chiqadi. Bu bosqich hali **rasmiy emas** — backendga hech narsa yuborilmaydi, faqat talabaga tezkor signal.
-2. **`LIVE_SIGNAL_ESCALATE_MS` (3s, jami)** — signal shu bosqichdan keyin ham davom etib, umumiy uzluksiz davomiyligi shu qiymatga yetsa, endi haqiqiy (backendga yuboriladigan, `logViolation` orqali) rasmiy ogohlantirishga aylanadi — mavjud ogohlantirish modali (`violationWarning`) ochiladi.
+1. **`LIVE_SIGNAL_CONFIRM_MS` (1.5s)** — signal uzluksiz shuncha vaqt davom etsa, kamera panelida (ExamRoom o‘ng panel, video ustida) kichik vizual ogohlantirish chiqadi. Bu bosqich hali **rasmiy emas** — backendga hech narsa yuborilmaydi, faqat talabaga tezkor signal. Video-manba (pozitsiya/harakat/og‘iz) va audio-manba (nutq/shovqin) alohida qatorlarda, **farqli matn bilan** ko‘rsatiladi — masalan "Gapirish aniqlandi" (audio, o‘z ovozi/og‘iz) va "Tashqi shovqin bor" (audio, notekis manba) aralashtirilmaydi.
+2. **`LIVE_SIGNAL_ESCALATE_MS` (3s, jami)** — signal shu bosqichdan keyin ham davom etib, umumiy uzluksiz davomiyligi shu qiymatga yetsa, endi haqiqiy (backendga yuboriladigan, `logViolation` orqali) rasmiy ogohlantirishga aylanadi — mavjud ogohlantirish modali (`violationWarning`) ochiladi. Eskalatsiyadan so‘ng hisoblagich `reset()` qilinadi — signal davom etayotgan bo‘lsa ham keyingi ogohlantirish yana to‘liq 3s dan keyin keladi (tinimsiz takrorlanmaydi).
 
-Qisqa uzilish (freym flicker, so‘zlar orasidagi tabiiy pauza) hisoblagichni buzmasligi uchun har bir signal turi uchun grace-oyna bor (`trackContinuous`, odatda 500ms, gapirish uchun 1000ms).
+Qisqa uzilish (freym flicker, so‘zlar orasidagi tabiiy pauza) hisoblagichni buzmasligi uchun har bir signal turi uchun grace-oyna bor (odatda 500–700ms, gapirish uchun 1000ms).
 
-Yangi davomiy-tabiatli signal turi qo‘shilganda ushbu ikki bosqichli qoidaga rioya qilinsin — bir martalik hodisalarga bu mexanizm qo‘llanilmaydi.
+Gapirishni ikki xil yo‘l bilan aniqlash mumkin — talabaning o‘z og‘iz harakati (video) yoki mikrofondagi inson ovozi (audio); qaysi biri sodir bo‘lsa ham xuddi shu 1.5s/3s qoidasiga bo‘ysunadi. Audio eskalatsiya paytida video og‘iz harakati faolmi (`mouthActiveRef`) tekshiriladi: talabaning o‘zi gapirsa `MOUTH_MOVEMENT_TALKING`, aks holda atrofda/orqada boshqa odam gapirishi shubhasi (`WHISPER_OR_CONVERSATION_SUSPECTED`) sifatida yuboriladi. Qimirlash uchun chegara ataylab bo‘shashtirilgan — uzoq imtihon davomida oddiy holatni to‘g‘irlash/charchoq harakati jazolanmaydi, faqat haqiqatan uzluksiz haddan tashqari harakat eskalatsiya qiladi.
+
+Yangi davomiy-tabiatli signal turi qo‘shilganda ushbu ikki bosqichli qoidaga rioya qilinsin — bir martalik hodisalarga (tab-switch, print-screen va h.k.) bu mexanizm qo‘llanilmaydi.
 
 ---
 

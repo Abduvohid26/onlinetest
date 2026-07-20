@@ -89,6 +89,24 @@ function sortResultsNewestFirst<T extends { completed_at?: string | null; id?: n
   });
 }
 
+/** Qayta topshirish imkoniyatlarini dumaloq nuqtalar bilan ko'rsatadi — sarflangani to'ldirilgan, qolgani bo'sh. */
+function RetakeDots({ used, remaining }: { used: number; remaining: number }) {
+  const total = Math.max(1, used + remaining);
+  const dots = Array.from({ length: total }, (_, i) => i < used);
+  return (
+    <div className="flex items-center gap-1">
+      {dots.map((spent, i) => (
+        <span
+          key={i}
+          className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+            spent ? 'bg-amber-400' : 'bg-white border-2 border-amber-400'
+          }`}
+        />
+      ))}
+    </div>
+  );
+}
+
 /* Kichik statistika plitkasi. */
 function StatTile({
   label,
@@ -625,48 +643,30 @@ export function StudentDashboard({
                           )}
                         </dl>
 
-                        {((e.violation_retakes_used ?? 0) > 0 || (e.identity_retakes_used ?? 0) > 0) && (
-                          <div className="mt-3.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left">
-                            <p className="text-[12px] text-amber-900 leading-relaxed font-medium">
-                              {e.last_violation_reason
-                                ? t.examCardRetakeBanner
-                                    .replace('{reason}', String(e.last_violation_reason))
-                                    .replace(
-                                      '{used}',
-                                      String(
-                                        (e.violation_retakes_used ?? 0) > 0
-                                          ? e.violation_retakes_used
-                                          : e.identity_retakes_used ?? 0,
-                                      ),
-                                    )
-                                    .replace(
-                                      '{remaining}',
-                                      String(
-                                        (e.violation_retakes_used ?? 0) > 0
-                                          ? e.violation_retakes_remaining ?? 0
-                                          : e.identity_retakes_remaining ?? 0,
-                                      ),
-                                    )
-                                : t.examCardRetakeBannerShort
-                                    .replace(
-                                      '{used}',
-                                      String(
-                                        (e.violation_retakes_used ?? 0) > 0
-                                          ? e.violation_retakes_used
-                                          : e.identity_retakes_used ?? 0,
-                                      ),
-                                    )
-                                    .replace(
-                                      '{remaining}',
-                                      String(
-                                        (e.violation_retakes_used ?? 0) > 0
-                                          ? e.violation_retakes_remaining ?? 0
-                                          : e.identity_retakes_remaining ?? 0,
-                                      ),
-                                    )}
-                            </p>
-                          </div>
-                        )}
+                        {((e.violation_retakes_used ?? 0) > 0 || (e.identity_retakes_used ?? 0) > 0) && (() => {
+                          const isViolation = (e.violation_retakes_used ?? 0) > 0;
+                          const used = isViolation ? (e.violation_retakes_used ?? 0) : (e.identity_retakes_used ?? 0);
+                          const remaining = isViolation
+                            ? (e.violation_retakes_remaining ?? 0)
+                            : (e.identity_retakes_remaining ?? 0);
+                          return (
+                            <div className="mt-3.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left space-y-1.5">
+                              {e.last_violation_reason && (
+                                <p className="text-[12px] text-amber-900 leading-relaxed font-medium">
+                                  {e.last_violation_reason}
+                                </p>
+                              )}
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[12px] font-semibold text-amber-800">
+                                  {t.examCardRetakeCount
+                                    .replace('{used}', String(used))
+                                    .replace('{remaining}', String(remaining))}
+                                </span>
+                                <RetakeDots used={used} remaining={remaining} />
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {Array.isArray(e.attempt_history) && e.attempt_history.length > 0 && (
                           <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left">

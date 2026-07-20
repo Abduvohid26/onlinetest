@@ -50,7 +50,7 @@ export type FaceStatusLive =
  * Bir martalik hodisalar (tab-switch, print-screen va h.k.) bu mexanizmga
  * kirmaydi — ular hozirgidek darhol qoladi.
  */
-export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER';
+export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER' | 'MOVEMENT';
 export const LIVE_SIGNAL_CONFIRM_MS = 1500;
 export const LIVE_SIGNAL_ESCALATE_MS = 3000;
 
@@ -71,16 +71,12 @@ const PER_TYPE_COOLDOWN_MS = 3500; // bir tur uchun emit oralig'i (server ham de
 
 // Streak: signal "rost" deb hisoblanishidan oldin necha ketma-ket frame kerak.
 // Past qiymat = tezroq aniqlash (~ frame * 130ms).
+// gaze/mouth/tooFar/tooClose/offCenter/movement — kichik→katta eskalatsiya qoidasiga
+// o'tkazilgan (trackContinuous + LIVE_SIGNAL_ESCALATE_MS), shu yerda streak shart emas.
 const STREAK = {
   noFace: 6, // ~0.8s yuz yo'q
   multiFace: 3, // ~0.4s 2+ yuz (tez!)
-  gaze: 6, // ~0.8s uzoq qaragan
-  movement: 5,
   hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
-  mouth: 3, // ~0.4s barqaror og'iz harakati
-  tooFar: 10, // ~1.3s juda uzoq
-  tooClose: 8, // ~1s juda yaqin
-  offCenter: 10, // ~1.3s markazdan chetda
 };
 
 // Yuz o'lchami va pozitsiya chegaralari (normalized; facePositionCheck.ts bilan moslangan).
@@ -96,7 +92,10 @@ const YAW_TURN = 0.18; // markazdan gorizontal og'ish ulushi
 const YAW_HARD = 0.30; // kuchli yuz burilishi
 const PITCH_UP = 0.30;
 const PITCH_DOWN = 0.72;
-const MOVE_THRESHOLD = 0.045; // burun nuqtasining frame'lararo o'rtacha siljishi
+// Burun nuqtasining frame'lararo o'rtacha siljishi. Uzoq imtihon davomida talaba
+// charchab, oddiy o'tirishda ham biroz qimirlaydi — bu tabiiy, jazolanmasin.
+// Faqat HADDAN TASHQARI (doimiy) qimirlash uchun (qonun: 1.5s kichik, 3s rasmiy).
+const MOVE_THRESHOLD = 0.085;
 
 export interface RealtimeProctorCallbacks {
   onViolation: (type: RealtimeViolation) => void;
@@ -149,6 +148,7 @@ export class RealtimeProctor {
     TOO_FAR: 0,
     TOO_CLOSE: 0,
     OFF_CENTER: 0,
+    MOVEMENT: 0,
   };
 
   constructor(video: HTMLVideoElement, cb: RealtimeProctorCallbacks) {
@@ -429,14 +429,15 @@ export class RealtimeProctor {
     this.liveMs.HEAD_AWAY = Math.max(turnMs, gazeLMs, gazeRMs, gazeUpMs, gazeDownMs);
 
     // 3) Ortiqcha qimirlash: burun nuqtasining frame'lararo siljishi (EMA bilan tekislash).
+    // Oddiy o'tirishdagi mayda harakat (charchoq, holatni to'g'irlash) jazolanmasin —
+    // kichik→katta eskalatsiya (qonun): 1.5s kichik, 3s rasmiy.
     if (this.prevNose) {
       const dx = nose.x - this.prevNose.x;
       const dy = nose.y - this.prevNose.y;
       const d = Math.sqrt(dx * dx + dy * dy);
       this.moveEma = this.moveEma * 0.7 + d * 0.3;
-      if (this.streak('move', this.moveEma >= MOVE_THRESHOLD, STREAK.movement)) {
-        this.emit('EXCESSIVE_MOVEMENT');
-      }
+      this.liveMs.MOVEMENT = this.trackContinuous('move', this.moveEma >= MOVE_THRESHOLD);
+      if (this.liveMs.MOVEMENT >= LIVE_SIGNAL_ESCALATE_MS) this.emit('EXCESSIVE_MOVEMENT');
     }
     this.prevNose = { x: nose.x, y: nose.y };
 

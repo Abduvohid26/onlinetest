@@ -224,10 +224,7 @@ export const translations = {
     proctorProfileSoft: "Yumshoq",
     proctorProfileStandard: "Standart",
     proctorProfileStrict: "Qattiq",
-    examCardRetakeBanner:
-      "{reason} · {used} marta sarflandi · Yana {remaining} ta imkoniyat",
-    examCardRetakeBannerShort:
-      "{used} marta topshirilgan · Yana {remaining} ta qayta urinish",
+    examCardRetakeCount: "{used} marta sarflangan · {remaining} ta imkoniyat qoldi",
     examCardRetakesBlocked:
       "Qayta topshirish imkoniyati tugadi. Administratorga murojaat qiling.",
     sessionPhaseAfterRetake: "Qayta topshirishdan keyin",
@@ -268,11 +265,10 @@ export const translations = {
     identityVerified: "Tasdiqlandi ✓",
     identityVerifySuccessTitle: "Shaxs tasdiqlandi!",
     identityVerifySuccessSubtitle: "Profil suratingiz bilan mos keldi. Jonlilik tekshiruvi davom etadi.",
-    identityVerifyScore: "O‘xshashlik: {score}%",
     identityVerifyFaceNotDetected:
       "Yuz aniqlanmadi. Kameraga yaqinroq qarang, yuz to‘liq va yaxshi yoritilgan bo‘lsin.",
     identityVerifyBtn: "Yuzni tekshirish",
-    identityVerifyFailed: "Profil rasmingiz bilan mos kelmedi. Yuzingiz yaxshi yoritilgan va kamerada aniq ko‘rinsin.",
+    identityVerifyFailed: "Profil rasmingiz bilan mos kelmadi. Qayta urinishdan oldin: kamera linzasini arting, yorug‘likni yaxshilang (yuzingizga qarab yoritilsin, orqadan yorug‘lik tushmasin), ko‘zoynak/niqobni oling va kameraga to‘g‘ridan to‘g‘ri qarang.",
     identityVerifyTips:
       "Kameraga to‘g‘ri qarang, yuz to‘liq ko‘rinsin, telefon yoki qo‘l yuzni yopmasin. Profil surati ham xuddi shu shaxs bo‘lishi kerak.",
     identityVerifyError: "Tekshirishda xatolik. Qayta urinib ko‘ring.",
@@ -922,10 +918,7 @@ export const translations = {
     proctorProfileSoft: "Мягкий",
     proctorProfileStandard: "Стандарт",
     proctorProfileStrict: "Строгий",
-    examCardRetakeBanner:
-      "{reason} · Использовано {used} · Осталось {remaining} попыток",
-    examCardRetakeBannerShort:
-      "Сдано {used} раз · Осталось {remaining} пересдач",
+    examCardRetakeCount: "Использовано {used} · Осталось {remaining} попыток",
     examCardRetakesBlocked:
       "Повторные попытки исчерпаны. Обратитесь к администратору.",
     sessionPhaseAfterRetake: "После пересдачи",
@@ -966,11 +959,10 @@ export const translations = {
     identityVerified: "Подтверждено ✓",
     identityVerifySuccessTitle: "Личность подтверждена!",
     identityVerifySuccessSubtitle: "Совпадает с фото профиля. Продолжается проверка живости.",
-    identityVerifyScore: "Сходство: {score}%",
     identityVerifyFaceNotDetected:
       "Лицо не обнаружено. Подойдите ближе к камере, лицо должно быть полностью и хорошо освещено.",
     identityVerifyBtn: "Проверить лицо",
-    identityVerifyFailed: "Не совпадает с фото профиля. Убедитесь, что лицо хорошо видно.",
+    identityVerifyFailed: "Не совпадает с фото профиля. Перед повторной попыткой: протрите объектив камеры, улучшите освещение (свет должен падать на лицо, не сзади), снимите очки/маску и смотрите прямо в камеру.",
     identityVerifyTips:
       "Смотрите прямо в камеру, лицо полностью в кадре, без телефона перед лицом. Фото профиля должно быть тем же человеком.",
     identityVerifyError: "Ошибка проверки. Попробуйте снова.",
@@ -1616,10 +1608,7 @@ export const translations = {
     proctorProfileSoft: "Soft",
     proctorProfileStandard: "Standard",
     proctorProfileStrict: "Strict",
-    examCardRetakeBanner:
-      "{reason} · {used} used · {remaining} attempt(s) left",
-    examCardRetakeBannerShort:
-      "{used} attempt(s) used · {remaining} retake(s) left",
+    examCardRetakeCount: "{used} used · {remaining} attempt(s) left",
     examCardRetakesBlocked:
       "No retakes left. Contact your administrator.",
     sessionPhaseAfterRetake: "After retake",
@@ -1660,11 +1649,10 @@ export const translations = {
     identityVerified: "Verified ✓",
     identityVerifySuccessTitle: "Identity verified!",
     identityVerifySuccessSubtitle: "Your live capture matches your profile photo. Liveness check continues.",
-    identityVerifyScore: "Similarity: {score}%",
     identityVerifyFaceNotDetected:
       "No face detected. Move closer to the camera with your full face clearly lit.",
     identityVerifyBtn: "Verify face",
-    identityVerifyFailed: "Does not match your profile photo. Ensure your face is clearly visible.",
+    identityVerifyFailed: "Does not match your profile photo. Before trying again: wipe the camera lens, improve lighting (light should face you, not come from behind), remove glasses/mask, and look straight at the camera.",
     identityVerifyTips:
       "Look straight at the camera with your full face visible; do not block your face. Your profile photo must be the same person.",
     identityVerifyError: "Verification failed. Please try again.",

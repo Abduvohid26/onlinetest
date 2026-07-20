@@ -4,7 +4,9 @@ import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
-import { analyzeVoiceFrame, AmbientNoiseTracker, isFaceVisibleForTalk, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
+import { LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS } from '../lib/realtimeProctor';
+import { analyzeVoiceFrame, AmbientNoiseTracker, isFaceVisibleForTalk, VoiceActivityTracker } from '../lib/voiceActivity';
+import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -22,7 +24,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -38,6 +40,8 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveTooFar: "Kameradan uzoqsiz",
     liveTooClose: "Kameraga yaqinsiz",
     liveOffCenter: "Kadr markaziga o'ting",
+    liveMovement: "Haddan tashqari qimirlash — tinch o'tiring",
+    liveAmbientNoise: "Tashqi shovqin bor — jimlikni saqlang",
   },
   ru: {
     answered: 'Отвечено',
@@ -54,6 +58,8 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveTooFar: 'Вы далеко от камеры',
     liveTooClose: 'Вы слишком близко к камере',
     liveOffCenter: 'Встаньте по центру кадра',
+    liveMovement: 'Слишком много движений — сидите спокойно',
+    liveAmbientNoise: 'Посторонний шум — соблюдайте тишину',
   },
   en: {
     answered: 'Answered',
@@ -70,6 +76,8 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveTooFar: 'You are too far from the camera',
     liveTooClose: 'You are too close to the camera',
     liveOffCenter: 'Move to the center of the frame',
+    liveMovement: 'Excessive movement — please stay still',
+    liveAmbientNoise: 'Background noise detected — please stay quiet',
   },
 };
 
@@ -1224,9 +1232,19 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }, [banned, exam.id, token, user.id, proctorRetryNonce, requestExamFullscreen]);
 
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
+  // Qonun (README.md "Proctoring eskalatsiya qoidasi") bilan bir xil ikki bosqich:
+  // 1.5s uzluksiz — kamera panelida kichik yorliq, 3s — rasmiy ogohlantirish.
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
   const ambientTrackerRef = useRef<AmbientNoiseTracker | null>(null);
-  const talkingCoordinatorRef = useRef<TalkingViolationCoordinator | null>(null);
+  const speechContinuousRef = useRef<ContinuousSignalTracker | null>(null);
+  const ambientContinuousRef = useRef<ContinuousSignalTracker | null>(null);
+  /** Video (og'iz harakati) hozir "gapiryapti" deb hisoblanadimi — ovoz eskalatsiyasida
+   *  WHISPER_OR_CONVERSATION_SUSPECTED (boshqa odam) vs MOUTH_MOVEMENT_TALKING (o'zi)
+   *  ni ajratish uchun. */
+  const mouthActiveRef = useRef(false);
+  /** Ovoz manbali kichik yorliq — kamera panelida video signalidan ALOHIDA qatorda
+   *  ko'rsatiladi (shovqin va gapirish matni farqlanishi uchun). */
+  const [audioLiveLabel, setAudioLiveLabel] = useState<string | null>(null);
 
   useEffect(() => {
     if (banned) return;
@@ -1234,21 +1252,38 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
     if (!ambientTrackerRef.current) ambientTrackerRef.current = new AmbientNoiseTracker();
-    if (!talkingCoordinatorRef.current) talkingCoordinatorRef.current = new TalkingViolationCoordinator();
+    if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(700);
+    if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(700);
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
       const now = Date.now();
-      const speechCtx = { faceOk: isFaceVisibleForTalk(faceStatusRef.current) };
-      const ambient = ambientTrackerRef.current?.push(frame);
-      if (ambient) void logViolationRef.current(ambient);
-      const signal = voiceTrackerRef.current?.push(frame);
-      if (signal) {
-        const coordinated = talkingCoordinatorRef.current?.onSpeechSignal(now, speechCtx);
-        if (coordinated) void logViolationRef.current(coordinated);
+
+      const ambientRaw = ambientTrackerRef.current!.push(frame);
+      const ambientMs = ambientContinuousRef.current!.push(ambientRaw, now);
+      const speechRaw = isFaceVisibleForTalk(faceStatusRef.current) && voiceTrackerRef.current!.push(frame);
+      const speechMs = speechContinuousRef.current!.push(speechRaw, now);
+
+      if (ambientMs >= LIVE_SIGNAL_CONFIRM_MS) {
+        setAudioLiveLabel(EXAM_L[langRef.current].liveAmbientNoise);
+      } else if (speechMs >= LIVE_SIGNAL_CONFIRM_MS) {
+        setAudioLiveLabel(EXAM_L[langRef.current].liveTalking);
+      } else {
+        setAudioLiveLabel(null);
       }
-      const deferred = talkingCoordinatorRef.current?.tick(now, speechCtx);
-      if (deferred) void logViolationRef.current(deferred);
+
+      if (ambientMs >= LIVE_SIGNAL_ESCALATE_MS) {
+        ambientContinuousRef.current!.reset();
+        void logViolationRef.current('SUSPICIOUS_AUDIO');
+      }
+      if (speechMs >= LIVE_SIGNAL_ESCALATE_MS) {
+        speechContinuousRef.current!.reset();
+        // Talabaning o'z og'zi ham qimirlayotgan bo'lsa — o'zi gapiryapti; aks holda
+        // atrofda/orqada boshqa odam gapirishi shubhasi.
+        void logViolationRef.current(
+          mouthActiveRef.current ? 'MOUTH_MOVEMENT_TALKING' : 'WHISPER_OR_CONVERSATION_SUSPECTED',
+        );
+      }
     }, 200);
     return () => clearInterval(id);
   }, [banned, analyserRef.current]);
@@ -1462,21 +1497,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     streamRevision: proctorStreamRevision,
     disabled: banned,
     onViolation: (type) => {
-      if (type === 'MOUTH_MOVEMENT_TALKING') {
-        if (!talkingCoordinatorRef.current) {
-          talkingCoordinatorRef.current = new TalkingViolationCoordinator();
-        }
-        const coordinated = talkingCoordinatorRef.current.onMouthSignal(Date.now(), {
-          faceOk: isFaceVisibleForTalk(faceStatusRef.current),
-        });
-        if (coordinated) void logViolationRef.current(coordinated);
-        return;
-      }
       void logViolationRef.current(type);
     },
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
     onFaceStatus: setFaceStatus,
     onLiveSignal: (type) => {
+      // Ovoz eskalatsiyasi (audio effekt) uchun — video og'iz harakati hozir
+      // faolmi (WHISPER vs MOUTH_MOVEMENT_TALKING ajratishda ishlatiladi).
+      mouthActiveRef.current = type === 'TALKING';
       if (!type) {
         setLiveSignalLabel(null);
         return;
@@ -1487,6 +1515,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         TOO_FAR: EXAM_L[langRef.current].liveTooFar,
         TOO_CLOSE: EXAM_L[langRef.current].liveTooClose,
         OFF_CENTER: EXAM_L[langRef.current].liveOffCenter,
+        MOVEMENT: EXAM_L[langRef.current].liveMovement,
       }[type];
       // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Signal jami
       // LIVE_SIGNAL_ESCALATE_MS (3s) ga yetsa, logViolation orqali mavjud rasmiy
@@ -2510,6 +2539,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />
                     <span className="text-[11px] font-medium text-amber-800 truncate">{liveSignalLabel}</span>
+                  </div>
+                )}
+                {audioLiveLabel && (
+                  <div className="px-3 py-1.5 bg-sky-50 border-b border-sky-100 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0" />
+                    <span className="text-[11px] font-medium text-sky-800 truncate">{audioLiveLabel}</span>
                   </div>
                 )}
                 <div className="p-2 pb-2">

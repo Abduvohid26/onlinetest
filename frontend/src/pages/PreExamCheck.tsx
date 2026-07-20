@@ -77,7 +77,6 @@ export function PreExamCheck({
   const [mediaHint, setMediaHint] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
-  const [verifyScore, setVerifyScore] = useState<number | null>(null);
   const [showVerifyCelebration, setShowVerifyCelebration] = useState(false);
   const [livenessPassed, setLivenessPassed] = useState(false);
   const [livenessChecking, setLivenessChecking] = useState(false);
@@ -578,7 +577,6 @@ export function PreExamCheck({
       }
       if (data.match === true) {
         setVerified(true);
-        setVerifyScore(typeof data.score === 'number' ? data.score : null);
         setError('');
       } else {
         const code = data?.code || '';
@@ -594,7 +592,7 @@ export function PreExamCheck({
   };
 
   const handleEnter = async () => {
-    if (exam.has_pin && !pin) {
+    if (exam.has_pin && !pin && !isRetake) {
       setError(t.enterPin);
       return;
     }
@@ -673,7 +671,7 @@ export function PreExamCheck({
   if (!micReady) blocked.push(t.preExamBlockedMic);
   if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
   if (!agreed) blocked.push(t.preExamBlockedAgree);
-  if (exam.has_pin && !pin) blocked.push(t.preExamBlockedPin);
+  if (exam.has_pin && !pin && !isRetake) blocked.push(t.preExamBlockedPin);
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
@@ -793,11 +791,6 @@ export function PreExamCheck({
                   <IdentityVerifiedSuccess
                     title={t.identityVerifySuccessTitle}
                     subtitle={t.identityVerifySuccessSubtitle}
-                    scoreLabel={
-                      verifyScore != null
-                        ? t.identityVerifyScore.replace('{score}', String(Math.round(verifyScore * 100)))
-                        : undefined
-                    }
                   />
                 )}
                 <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-black/55 backdrop-blur-sm rounded-full px-2 py-1">
@@ -926,7 +919,7 @@ export function PreExamCheck({
 
         {/* ── Footer action bar (doim ko'rinadi, scroll ustida emas) ── */}
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
-          {exam.has_pin && (
+          {exam.has_pin && !isRetake && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
               <div className="flex items-center gap-2.5 shrink-0">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500">

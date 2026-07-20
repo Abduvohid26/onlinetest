@@ -22,10 +22,6 @@ export interface VoiceFrame {
   harmonicity: number;
 }
 
-export type VoiceViolationSignal =
-  | 'WHISPER_OR_CONVERSATION_SUSPECTED'
-  | 'SUSPICIOUS_AUDIO';
-
 const RMS_VOICE = 0.042;
 const ZCR_MIN = 0.024;
 const ZCR_MAX = 0.17;
@@ -132,15 +128,16 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
 }
 
 /**
- * Faqat barqaror inson nutqi uchun signal (stul/klaviatura impulslari emas).
+ * Faqat barqaror inson nutqi uchun xom holat (stul/klaviatura impulslari emas).
+ * Davomiylik (kichik→katta eskalatsiya) endi tashqarida `ContinuousSignalTracker`
+ * bilan hisoblanadi — bu klass faqat shu freymda nutq bor-yo'qligini aytadi.
  */
 export class VoiceActivityTracker {
-  private voiceStreak = 0;
   private noiseFloor = 0.018;
   private calibrateLeft = 45;
   private prevRms = 0;
 
-  push(frame: VoiceFrame): VoiceViolationSignal | null {
+  push(frame: VoiceFrame): boolean {
     if (this.calibrateLeft > 0) {
       this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
       this.calibrateLeft -= 1;
@@ -148,40 +145,24 @@ export class VoiceActivityTracker {
 
     const spike = this.prevRms > 0.015 && frame.rms > this.prevRms * 3.2;
     this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
-    if (spike) {
-      this.voiceStreak = 0;
-      return null;
-    }
+    if (spike) return false;
 
     const aboveFloor = frame.rms > this.noiseFloor * 1.45;
-    const isSpeech = frame.humanVoice && aboveFloor;
-
-    if (isSpeech) {
-      this.voiceStreak += 1;
-      if (this.voiceStreak >= 6) {
-        this.voiceStreak = 0;
-        return 'WHISPER_OR_CONVERSATION_SUSPECTED';
-      }
-    } else {
-      this.voiceStreak = 0;
-    }
-    return null;
+    return frame.humanVoice && aboveFloor;
   }
 }
 
 const AMBIENT_RMS_MIN = 0.055;
-const AMBIENT_STREAK_MIN = 10;
 
 /**
- * Baland tashqi shovqin (musiqa, televizor, eshik — inson nutqi emas).
+ * Baland tashqi shovqin (musiqa, televizor, eshik — inson nutqi emas) — xom holat.
  */
 export class AmbientNoiseTracker {
-  private streak = 0;
   private noiseFloor = 0.018;
   private calibrateLeft = 45;
   private prevRms = 0;
 
-  push(frame: VoiceFrame): 'SUSPICIOUS_AUDIO' | null {
+  push(frame: VoiceFrame): boolean {
     if (this.calibrateLeft > 0) {
       this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
       this.calibrateLeft -= 1;
@@ -189,165 +170,18 @@ export class AmbientNoiseTracker {
 
     const spike = this.prevRms > 0.015 && frame.rms > this.prevRms * 3.2;
     this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
-    if (spike) {
-      this.streak = 0;
-      return null;
-    }
+    if (spike) return false;
 
-    const loudAmbient =
+    return (
       !frame.humanVoice &&
       frame.rms >= AMBIENT_RMS_MIN &&
       frame.rms > this.noiseFloor * 2.0 &&
-      (frame.lowFreqRatio > 0.35 || frame.speechRatio < 0.45);
-
-    if (loudAmbient) {
-      this.streak += 1;
-      if (this.streak >= AMBIENT_STREAK_MIN) {
-        this.streak = 0;
-        return 'SUSPICIOUS_AUDIO';
-      }
-    } else {
-      this.streak = 0;
-    }
-    return null;
+      (frame.lowFreqRatio > 0.35 || frame.speechRatio < 0.45)
+    );
   }
 }
-
-export type SpeechViolationContext = {
-  /** Talaba yuzi kamerada va holati normal (og'iz kuzatiladi). */
-  faceOk: boolean;
-};
 
 /** Og'iz/gapirish uchun yuz ko'rinadimi (WAITING va NO_FACE dan tashqari). */
 export function isFaceVisibleForTalk(status: string): boolean {
   return status !== 'NO_FACE' && status !== 'MULTIPLE_FACES' && status !== 'WAITING';
-}
-
-export type TalkingViolationSignal =
-  | 'WHISPER_OR_CONVERSATION_SUSPECTED'
-  | 'MOUTH_MOVEMENT_TALKING';
-
-const TALK_CROSS_WINDOW_MS = 3500;
-const MOUTH_QUIET_MS = 1000;
-const SPEECH_MOUTH_WAIT_MS = 800;
-const TALK_EMIT_COOLDOWN_MS = 8000;
-const MOUTH_BURST_WINDOW_MS = 9000;
-const MOUTH_STANDALONE_MIN = 2;
-
-/**
- * Nutq qoidabuzarligini ikki yo'l bilan aniqlaydi:
- * - talaba og'zi + mikrofon nutqi
- * - talaba og'izi jim, lekin atrofda inson nutqi (orqadagi odam)
- */
-export class TalkingViolationCoordinator {
-  private lastSpeechAt = 0;
-  private lastMouthAt = 0;
-  private lastEmitAt = 0;
-  private pendingSpeechAt = 0;
-  private mouthBurst = 0;
-  private mouthBurstStart = 0;
-
-  onSpeechSignal(
-    now = Date.now(),
-    ctx: SpeechViolationContext = { faceOk: false },
-  ): TalkingViolationSignal | null {
-    this.lastSpeechAt = now;
-
-    const mouthRecent =
-      this.lastMouthAt > 0 && now - this.lastMouthAt <= TALK_CROSS_WINDOW_MS;
-    if (mouthRecent) {
-      this.pendingSpeechAt = 0;
-      return this.emitWhisperIfCooldown(now);
-    }
-
-    // Og'iz uzoq vaqt jim bo'lsa — orqada gapirish (darhol).
-    if (ctx.faceOk && this.lastMouthAt > 0 && now - this.lastMouthAt >= MOUTH_QUIET_MS) {
-      this.pendingSpeechAt = 0;
-      return this.emitWhisperIfCooldown(now);
-    }
-
-    // Mikrofon nutq bor — og'iz kelishi mumkin, tick() fon suhbatini tekshiradi.
-    if (ctx.faceOk) {
-      this.pendingSpeechAt = now;
-      if (this.lastMouthAt > 0 && now - this.lastMouthAt >= MOUTH_QUIET_MS) {
-        return this.emitWhisperIfCooldown(now);
-      }
-    }
-    return null;
-  }
-
-  onMouthSignal(
-    now = Date.now(),
-    ctx: SpeechViolationContext = { faceOk: false },
-  ): TalkingViolationSignal | null {
-    this.lastMouthAt = now;
-    this.pendingSpeechAt = 0;
-
-    if (
-      this.lastSpeechAt > 0 &&
-      now - this.lastSpeechAt <= TALK_CROSS_WINDOW_MS
-    ) {
-      this.resetMouthBurst();
-      return this.emitWhisperIfCooldown(now);
-    }
-
-    if (!ctx.faceOk) {
-      this.resetMouthBurst();
-      return null;
-    }
-
-    if (!this.mouthBurstStart || now - this.mouthBurstStart > MOUTH_BURST_WINDOW_MS) {
-      this.mouthBurstStart = now;
-      this.mouthBurst = 1;
-    } else {
-      this.mouthBurst += 1;
-    }
-
-    // Mikrofon o'chirilgan yoki past bo'lsa ham og'iz harakati ogohlantirish beradi.
-    if (this.mouthBurst >= MOUTH_STANDALONE_MIN) {
-      this.resetMouthBurst();
-      return this.emitMouthIfCooldown(now);
-    }
-    return null;
-  }
-
-  /** Nutq keldi, og'iz kelmadi — fon suhbat ekanini tekshirish. */
-  tick(
-    now = Date.now(),
-    ctx: SpeechViolationContext = { faceOk: false },
-  ): TalkingViolationSignal | null {
-    if (!this.pendingSpeechAt) return null;
-    if (now - this.pendingSpeechAt < SPEECH_MOUTH_WAIT_MS) return null;
-
-    const mouthQuiet =
-      !this.lastMouthAt || now - this.lastMouthAt >= MOUTH_QUIET_MS;
-    this.pendingSpeechAt = 0;
-    if (!ctx.faceOk || !mouthQuiet) return null;
-    return this.emitWhisperIfCooldown(now);
-  }
-
-  private resetMouthBurst(): void {
-    this.mouthBurst = 0;
-    this.mouthBurstStart = 0;
-  }
-
-  private emitWhisperIfCooldown(now: number): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
-    if (now - this.lastEmitAt < TALK_EMIT_COOLDOWN_MS) return null;
-    this.lastEmitAt = now;
-    this.lastSpeechAt = 0;
-    this.lastMouthAt = 0;
-    this.pendingSpeechAt = 0;
-    this.resetMouthBurst();
-    return 'WHISPER_OR_CONVERSATION_SUSPECTED';
-  }
-
-  private emitMouthIfCooldown(now: number): 'MOUTH_MOVEMENT_TALKING' | null {
-    if (now - this.lastEmitAt < TALK_EMIT_COOLDOWN_MS) return null;
-    this.lastEmitAt = now;
-    this.lastSpeechAt = 0;
-    this.lastMouthAt = 0;
-    this.pendingSpeechAt = 0;
-    this.resetMouthBurst();
-    return 'MOUTH_MOVEMENT_TALKING';
-  }
 }

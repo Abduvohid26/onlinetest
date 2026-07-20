@@ -2,9 +2,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AmbientNoiseTracker,
-  TalkingViolationCoordinator,
   VoiceActivityTracker,
 } from '../src/lib/voiceActivity.ts';
+import { ContinuousSignalTracker } from '../src/lib/continuousSignal.ts';
 
 const quiet = {
   rms: 0.012,
@@ -50,7 +50,7 @@ describe('AmbientNoiseTracker', () => {
   it('ignores quiet background', () => {
     const tracker = new AmbientNoiseTracker();
     for (let i = 0; i < 60; i++) {
-      assert.equal(tracker.push(quiet), null);
+      assert.equal(tracker.push(quiet), false);
     }
   });
 
@@ -58,17 +58,17 @@ describe('AmbientNoiseTracker', () => {
     const tracker = new AmbientNoiseTracker();
     for (let i = 0; i < 50; i++) tracker.push(quiet);
     for (let i = 0; i < 20; i++) {
-      assert.equal(tracker.push(speech), null);
+      assert.equal(tracker.push(speech), false);
     }
   });
 
-  it('triggers SUSPICIOUS_AUDIO for sustained loud non-speech', () => {
+  it('flags sustained loud non-speech as active', () => {
     const tracker = new AmbientNoiseTracker();
     for (let i = 0; i < 50; i++) tracker.push(quiet);
+    // Birinchi kadr spike-filtr tufayli o'tkazilishi mumkin — bir necha kadr beramiz.
     let saw = false;
-    for (let i = 0; i < 14; i++) {
-      const hit = tracker.push(ambientTv);
-      if (hit === 'SUSPICIOUS_AUDIO') saw = true;
+    for (let i = 0; i < 5; i++) {
+      if (tracker.push(ambientTv)) saw = true;
     }
     assert.equal(saw, true);
   });
@@ -79,7 +79,7 @@ describe('VoiceActivityTracker', () => {
     const tracker = new VoiceActivityTracker();
     for (let i = 0; i < 50; i++) tracker.push(quiet);
     for (let i = 0; i < 20; i++) {
-      const hit = tracker.push({
+      const active = tracker.push({
         rms: 0.2,
         zcr: 0.35,
         humanVoice: false,
@@ -88,7 +88,7 @@ describe('VoiceActivityTracker', () => {
         crestFactor: 8,
         harmonicity: 0.15,
       });
-      assert.equal(hit, null);
+      assert.equal(active, false);
     }
   });
 
@@ -96,72 +96,58 @@ describe('VoiceActivityTracker', () => {
     const tracker = new VoiceActivityTracker();
     for (let i = 0; i < 50; i++) tracker.push(quiet);
     for (let i = 0; i < 15; i++) {
-      const hit = tracker.push(chairThud);
-      assert.equal(hit, null);
+      assert.equal(tracker.push(chairThud), false);
     }
   });
 
-  it('triggers only after sustained human voice', () => {
+  it('flags human voice as active', () => {
     const tracker = new VoiceActivityTracker();
     for (let i = 0; i < 50; i++) tracker.push(quiet);
-    let sawHit = false;
-    for (let i = 0; i < 10; i++) {
-      const hit = tracker.push(speech);
-      if (hit === 'WHISPER_OR_CONVERSATION_SUSPECTED') sawHit = true;
+    let saw = false;
+    for (let i = 0; i < 5; i++) {
+      if (tracker.push(speech)) saw = true;
     }
-    assert.equal(sawHit, true);
+    assert.equal(saw, true);
   });
 });
 
-describe('TalkingViolationCoordinator', () => {
-  it('requires both speech and mouth for student talking', () => {
-    const coord = new TalkingViolationCoordinator();
-    const t0 = Date.now();
-    assert.equal(coord.onSpeechSignal(t0, { faceOk: true }), null);
-    assert.equal(
-      coord.onMouthSignal(t0 + 500, { faceOk: true }),
-      'WHISPER_OR_CONVERSATION_SUSPECTED',
-    );
+describe('ContinuousSignalTracker (kichik->katta eskalatsiya qoidasi)', () => {
+  it('returns 0 while inactive', () => {
+    const t = new ContinuousSignalTracker(500);
+    assert.equal(t.push(false, 0), 0);
+    assert.equal(t.push(false, 1000), 0);
   });
 
-  it('detects background speech when mouth was quiet before speech', () => {
-    const coord = new TalkingViolationCoordinator();
-    const t0 = Date.now();
-    coord.onMouthSignal(t0 - 5000, { faceOk: true });
-    assert.equal(
-      coord.onSpeechSignal(t0, { faceOk: true }),
-      'WHISPER_OR_CONVERSATION_SUSPECTED',
-    );
+  it('accumulates duration while continuously active', () => {
+    const t = new ContinuousSignalTracker(500);
+    assert.equal(t.push(true, 0), 0);
+    assert.equal(t.push(true, 1000), 1000);
+    assert.equal(t.push(true, 2000), 2000);
   });
 
-  it('defers background check when mouth never moved yet', () => {
-    const coord = new TalkingViolationCoordinator();
-    const t0 = Date.now();
-    assert.equal(coord.onSpeechSignal(t0, { faceOk: true }), null);
-    assert.equal(
-      coord.tick(t0 + 900, { faceOk: true }),
-      'WHISPER_OR_CONVERSATION_SUSPECTED',
-    );
+  it('tolerates a short gap within the grace window', () => {
+    const t = new ContinuousSignalTracker(500);
+    t.push(true, 0);
+    t.push(true, 1000);
+    // 300ms uzilish — grace (500ms) ichida, hisoblagich uzilmaydi (davomiylik hisoblanaveradi).
+    assert.equal(t.push(false, 1300), 1300);
+    assert.equal(t.push(true, 1400), 1400);
   });
 
-  it('does not emit background speech without visible face', () => {
-    const coord = new TalkingViolationCoordinator();
-    assert.equal(coord.onSpeechSignal(Date.now(), { faceOk: false }), null);
+  it('resets after a gap longer than the grace window', () => {
+    const t = new ContinuousSignalTracker(500);
+    t.push(true, 0);
+    t.push(true, 1000);
+    assert.equal(t.push(false, 2000), 0);
+    assert.equal(t.push(true, 2100), 0);
+    assert.equal(t.push(true, 2600), 500);
   });
 
-  it('emits mouth violation after sustained mouth movement', () => {
-    const coord = new TalkingViolationCoordinator();
-    const t0 = Date.now();
-    assert.equal(coord.onMouthSignal(t0, { faceOk: true }), null);
-    assert.equal(
-      coord.onMouthSignal(t0 + 2500, { faceOk: true }),
-      'MOUTH_MOVEMENT_TALKING',
-    );
-  });
-
-  it('does not emit mouth violation without visible face', () => {
-    const coord = new TalkingViolationCoordinator();
-    assert.equal(coord.onMouthSignal(Date.now(), { faceOk: false }), null);
-    assert.equal(coord.onMouthSignal(Date.now() + 3000, { faceOk: false }), null);
+  it('reset() clears accumulated duration immediately', () => {
+    const t = new ContinuousSignalTracker(500);
+    t.push(true, 0);
+    t.push(true, 1000);
+    t.reset();
+    assert.equal(t.push(true, 1050), 0);
   });
 });
