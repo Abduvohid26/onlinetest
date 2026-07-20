@@ -4,11 +4,11 @@ import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive } from '../lib/realtimeProctor';
-import { analyzeVoiceFrame, AmbientNoiseTracker, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
+import { analyzeVoiceFrame, AmbientNoiseTracker, isFaceVisibleForTalk, TalkingViolationCoordinator, VoiceActivityTracker } from '../lib/voiceActivity';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
-import { translations, Language } from '../i18n';
+import { translations, Language, banReasonLabel } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
@@ -68,6 +68,7 @@ interface ExamRoomProps {
   user: any;
   lang: Language;
   onFinish: (submitPayload?: ExamResultPayload | null) => void;
+  onRetakeRestart?: () => void;
 }
 
 function extractQuestionImages(text: string): { cleanText: string; images: string[] } {
@@ -185,26 +186,27 @@ interface WarningHistoryItem {
   reason: string;
 }
 
-const MAX_OFFICIAL_WARNINGS = 3;
-
 function WarningStepRow({
   warningCount,
+  maxWarnings,
   banReached,
   isFinalPending,
   t,
 }: {
   warningCount: number;
+  maxWarnings: number;
   banReached: boolean;
   isFinalPending?: boolean;
   t: (typeof translations)['uz'];
 }) {
+  const steps = Array.from({ length: Math.max(1, maxWarnings) }, (_, i) => i + 1);
   return (
     <div className="flex flex-col items-center gap-2">
       <p className="text-[10px] sm:text-xs text-gray-500 uppercase tracking-wide font-medium">
         {t.violationProgressTitle}
       </p>
       <div className="flex justify-center items-center gap-1.5 sm:gap-2">
-        {[1, 2, 3].map((n) => {
+        {steps.map((n) => {
           const done = warningCount >= n;
           return (
             <div
@@ -237,8 +239,9 @@ function WarningStepRow({
   );
 }
 
-export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamId, token, user, lang, onFinish }: ExamRoomProps) {
+export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamId, token, user, lang, onFinish, onRetakeRestart }: ExamRoomProps) {
   const t = translations[lang];
+  const [maxOfficialWarnings, setMaxOfficialWarnings] = useState(3);
   const [exam, setExam] = useState(initialExam);
   const [studentExamId, setStudentExamId] = useState(initialStudentExamId);
   const examQuestions = React.useMemo(
@@ -297,9 +300,17 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }>>([]);
   /** Admin ban yechganda — "Davom etish" tugmasi chiqadi (WebSocket yoki polling). */
   const [unblockReady, setUnblockReady] = useState(false);
+  /** Qoidabuzarlik limiti — avtomatik qayta topshirish (ban emas). */
+  const [examRetakeNotice, setExamRetakeNotice] = useState<{
+    remaining: number;
+    used: number;
+    reason: string;
+    identityRetake?: boolean;
+  } | null>(null);
   /** BAN paytida serverdagi jami violation yozuvlari (3 ta "!" o'rniga) */
   const [banViolationsCount, setBanViolationsCount] = useState<number | null>(null);
   const [banLastReason, setBanLastReason] = useState<string | null>(null);
+  const [banReasonCode, setBanReasonCode] = useState<string | null>(null);
   const [warningHistory, setWarningHistory] = useState<WarningHistoryItem[]>([]);
   // Ogohlantirish modal
   const [violationWarning, setViolationWarning] = useState<ViolationWarning | null>(null);
@@ -392,6 +403,19 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     },
     [nextGuardHeaders],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiUrl('/api/student/proctor-config'), { headers: examAuthHeaders(token) })
+      .then(async (res) => {
+        const data = await readJsonSafe<{ max_warnings_before_ban?: number }>(res);
+        if (!cancelled && res.ok && typeof data?.max_warnings_before_ban === 'number') {
+          setMaxOfficialWarnings(Math.max(1, data.max_warnings_before_ban));
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [token]);
 
   useEffect(() => {
     const handleOnline = () => setIsOffline(false);
@@ -1008,6 +1032,35 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   showWarningMsg(translations[langRef.current].unblockDeniedMsg || 'Admin imtihonni tugatdi. Topshira olmaysiz.', 8000);
                 }
               }
+            } else if (msg.type === 'exam_retake' || msg.type === 'technical_retake') {
+              const md = msg as any;
+              if (String(md.student_id) === String(user.id)) {
+                const remaining =
+                  typeof md.retakes_remaining === 'number'
+                    ? md.retakes_remaining
+                    : typeof md.technical_retakes_remaining === 'number'
+                      ? md.technical_retakes_remaining
+                      : 0;
+                const reason = String(md.reason || '').trim();
+                const identityRetake = Boolean(md.identity_retake);
+                if (remaining <= 0 && !identityRetake) {
+                  setBanned(true);
+                  setBanLastReason(reason);
+                  setBanReasonCode('RETAKE_EXHAUSTED');
+                  setUnblockReady(false);
+                  releaseCameraAndMic();
+                  return;
+                }
+                setBanned(false);
+                setUnblockReady(false);
+                setExamRetakeNotice({
+                  remaining,
+                  used: typeof md.retakes_used === 'number' ? md.retakes_used : 0,
+                  reason,
+                  identityRetake,
+                });
+                releaseCameraAndMic();
+              }
             } else if (msg.type === 'offer') {
               const fromId = msg.from as string;
               const offer = msg.offer as RTCSessionDescriptionInit;
@@ -1060,6 +1113,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           analyser.fftSize = 2048;
           audioContextRef.current = audioCtx;
           analyserRef.current = analyser;
+          const onMicLost = () => {
+            if (!sessionStartedRef.current || bannedRef.current) return;
+            void logViolationRef.current('CAMERA_MIC_ACCESS_FAILED');
+          };
+          for (const tr of stream.getAudioTracks()) {
+            tr.addEventListener('ended', onMicLost);
+            tr.addEventListener('mute', onMicLost);
+          }
         } else {
           audioContextRef.current = null;
           analyserRef.current = null;
@@ -1127,7 +1188,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (bannedRef.current || !analyserRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
       const now = Date.now();
-      const speechCtx = { faceOk: faceStatusRef.current === 'OK' };
+      const speechCtx = { faceOk: isFaceVisibleForTalk(faceStatusRef.current) };
       const ambient = ambientTrackerRef.current?.push(frame);
       if (ambient) void logViolationRef.current(ambient);
       const signal = voiceTrackerRef.current?.push(frame);
@@ -1140,6 +1201,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     }, 200);
     return () => clearInterval(id);
   }, [banned, analyserRef.current]);
+
+  // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi.
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    const graceUntil = Date.now() + 12_000;
+    const id = window.setInterval(() => {
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      if (Date.now() < graceUntil) return;
+      const tracks = streamRef.current?.getAudioTracks() ?? [];
+      const audioLive = tracks.some((t) => t.readyState === 'live' && t.enabled && !t.muted);
+      if (!analyserRef.current || !audioLive) {
+        void logViolationRef.current('CAMERA_MIC_ACCESS_FAILED');
+      }
+    }, 8000);
+    return () => clearInterval(id);
+  }, [banned, sessionStarted]);
 
   const [identityTerminated, setIdentityTerminated] = useState(false);
 
@@ -1220,15 +1297,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (data.banned) {
         if (type === 'IDENTITY_SUBSTITUTION') setIdentityTerminated(true);
         setViolationWarning(null);
-        setStrikeLevel(MAX_OFFICIAL_WARNINGS);
+        setStrikeLevel(maxOfficialWarnings);
         const reasonText = data.violationReason || type;
         setBanLastReason(reasonText);
+        setBanReasonCode(typeof data.banReason === 'string' ? data.banReason : null);
         const warnNum =
           typeof data.warningNumber === 'number' && data.warningNumber > 0
             ? data.warningNumber
             : typeof data.officialWarnings === 'number' && data.officialWarnings > 0
               ? data.officialWarnings
-              : MAX_OFFICIAL_WARNINGS;
+              : maxOfficialWarnings;
         setWarningHistory((prev) => {
           if (prev.some((w) => w.number === warnNum)) return prev;
           return [...prev, { number: warnNum, reason: reasonText }].sort((a, b) => a.number - b.number);
@@ -1239,6 +1317,44 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           setBanViolationsCount(null);
         }
         setBanned(true);
+        releaseCameraAndMic();
+        return;
+      }
+
+      if (data.technicalRetake || data.examRetake) {
+        setViolationWarning(null);
+        const remaining =
+          typeof data.retakesRemaining === 'number'
+            ? data.retakesRemaining
+            : typeof data.technicalRetakesRemaining === 'number'
+              ? data.technicalRetakesRemaining
+              : 0;
+        const used =
+          typeof data.retakesUsed === 'number'
+            ? data.retakesUsed
+            : typeof data.technicalRetakesUsed === 'number'
+              ? data.technicalRetakesUsed
+              : 0;
+        const reasonText = String(data.violationReason || '').trim();
+        const identityRetake = Boolean(data.identityRetake);
+        if (remaining <= 0 && !identityRetake) {
+          setBanLastReason(reasonText);
+          setBanReasonCode(
+            typeof data.banReason === 'string' ? data.banReason : 'RETAKE_EXHAUSTED',
+          );
+          if (typeof data.violationsCount === 'number') {
+            setBanViolationsCount(data.violationsCount);
+          }
+          setBanned(true);
+          releaseCameraAndMic();
+          return;
+        }
+        setExamRetakeNotice({
+          remaining,
+          used,
+          reason: reasonText,
+          identityRetake,
+        });
         releaseCameraAndMic();
         return;
       }
@@ -1293,7 +1409,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         if (!talkingCoordinatorRef.current) {
           talkingCoordinatorRef.current = new TalkingViolationCoordinator();
         }
-        const coordinated = talkingCoordinatorRef.current.onMouthSignal();
+        const coordinated = talkingCoordinatorRef.current.onMouthSignal(Date.now(), {
+          faceOk: isFaceVisibleForTalk(faceStatusRef.current),
+        });
         if (coordinated) void logViolationRef.current(coordinated);
         return;
       }
@@ -1639,7 +1757,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   if (violationWarning && !banned && !hardBlocked) {
     const isFinal = violationWarning.isFinalWarning;
     const warnNum = violationWarning.warningNumber;
-    const remaining = Math.max(0, MAX_OFFICIAL_WARNINGS - warnNum);
+    const remaining = Math.max(0, maxOfficialWarnings - warnNum);
 
     const warnTitle = t.violationWarningTitle.replace('{n}', String(warnNum));
     const warnContinue = t.violationContinueExam;
@@ -1691,6 +1809,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             <div className="mb-4">
               <WarningStepRow
                 warningCount={warnNum}
+                maxWarnings={maxOfficialWarnings}
                 banReached={false}
                 isFinalPending={isFinal}
                 t={t}
@@ -1723,6 +1842,50 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     )}{warningMsgModal}</>;
   }
 
+  // --- Qoidabuzarlik qayta topshirish ekrani ---
+  if (examRetakeNotice != null) {
+    const reasonText = examRetakeNotice.reason || t.violationReasonLabel;
+    return <>{createPortal(
+      <div
+        className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 overflow-y-auto px-4 py-8"
+        role="dialog"
+        aria-modal="true"
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-lg my-auto"
+        >
+          <div className="w-full text-center p-6 sm:p-8 rounded-lg border border-amber-200 bg-amber-50/95 shadow-2xl">
+            <div className="w-20 h-20 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-6">
+              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <h2 className="text-2xl font-bold text-amber-800 mb-4">{t.technicalRetakeTitle}</h2>
+            <div className="text-left rounded-lg border border-amber-200 bg-white/80 px-4 py-3 mb-4">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700 mb-1.5">
+                {t.technicalRetakeViolationLabel}
+              </p>
+              <p className="text-[14px] font-semibold text-gray-900 leading-relaxed">{reasonText}</p>
+            </div>
+            <p className="text-gray-800 mb-2 leading-relaxed text-sm font-semibold">
+              {t.technicalRetakeUsedRemaining
+                .replace('{used}', String(examRetakeNotice.used))
+                .replace('{remaining}', String(examRetakeNotice.remaining))}
+            </p>
+            <p className="text-gray-600 mb-6 leading-relaxed text-sm">{t.technicalRetakeBody}</p>
+            <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => (onRetakeRestart ? onRetakeRestart() : onFinish(null))}>
+              {onRetakeRestart ? t.technicalRetakeRestartBtn : t.technicalRetakeBackBtn}
+            </AdminBtn>
+          </div>
+        </motion.div>
+      </div>,
+      document.body,
+    )}</>;
+  }
+
   // --- Ban ekrani (to'liq bloklash) ---
   if (banned || hardBlocked) {
     const banTitle = t.examEndedTitle;
@@ -1752,11 +1915,21 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           <h2 id="ban-ended-title" className="text-2xl font-bold text-red-600 mb-3 tracking-tight">{banTitle}</h2>
           <p className="text-gray-700 mb-4 leading-relaxed text-sm">{banMsg}</p>
 
+          {banReasonLabel(lang, banReasonCode) ? (
+            <div className="mb-4 rounded-lg border border-red-200 bg-white px-4 py-3 text-left">
+              <p className="text-[10px] uppercase tracking-wide text-red-700/80 font-semibold mb-1">
+                {t.banReasonTitle}
+              </p>
+              <p className="text-sm font-semibold text-gray-900">{banReasonLabel(lang, banReasonCode)}</p>
+            </div>
+          ) : null}
+
           <div className="mb-5 rounded-xl border border-red-200 bg-white px-4 py-4 text-left space-y-4">
             <p className="text-sm font-bold text-red-800">{t.banProgressTitle}</p>
             <p className="text-[13px] text-gray-700 leading-relaxed">{t.banStepsExplainer}</p>
             <WarningStepRow
-              warningCount={MAX_OFFICIAL_WARNINGS}
+              warningCount={maxOfficialWarnings}
+              maxWarnings={maxOfficialWarnings}
               banReached
               t={t}
             />

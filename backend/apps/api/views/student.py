@@ -3,11 +3,29 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
-from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, fill_missing_exam_translations
+from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading
 from apps.api.proctor_config import max_warnings_before_ban, warn_suppress_seconds
 from apps.api.proctor_escalation import (
     apply_official_warning_or_ban,
     notify_banned as _notify_banned,
+)
+from apps.api.proctor_exam_retake import (
+    IDENTITY_VIOLATION_TYPE,
+    try_apply_exam_retake,
+    notify_exam_retake,
+    violation_retakes_budget,
+    violation_retakes_remaining,
+    identity_retakes_remaining,
+    exam_retakes_exhausted,
+)
+from apps.api.proctor_attempt_history import build_attempt_history
+from apps.api.proctor_violation_labels import violation_reason_text
+from apps.api.proctor_ban_reason import (
+    BAN_REASON_HARDENED,
+    BAN_REASON_IDENTITY,
+    BAN_REASON_VIOLATION_LIMIT,
+    apply_exam_ban,
+    session_phase,
 )
 
 from asgiref.sync import async_to_sync
@@ -256,16 +274,40 @@ def student_exams_list(request):
         se.exam_id: se
         for se in StudentExam.objects.filter(student_id=u.id, exam_id__in=assigned_ids)
     }
+    last_violations: dict[int, str] = {}
+    if assigned_ids:
+        for row in (
+            ViolationLog.objects.filter(student_id=u.id, exam_id__in=assigned_ids)
+            .order_by("exam_id", "-timestamp")
+            .values("exam_id", "violation_type")
+        ):
+            eid = row["exam_id"]
+            if eid not in last_violations:
+                last_violations[eid] = str(row.get("violation_type") or "")
     out = []
+    now = dj_tz.now()
     for e in exams_qs:
         se = ses_by_exam.get(e.id)
         if se is not None and (se.status or "").strip() == "In Progress":
             if auto_finalize_student_exam_if_expired(se, e, str(u.id)):
                 se.refresh_from_db()
                 ses_by_exam[e.id] = se
-        if se is not None and se.status in ("Completed", "Banned"):
+        if se is not None and se.status in ("Completed", "Banned", "Failed"):
             continue
         in_progress = se is not None and (se.status or "").strip() == "In Progress" and bool(se.started_at)
+        if se is not None:
+            v_used = int(getattr(se, "technical_retakes_used", 0) or 0)
+            id_used = int(getattr(se, "identity_retakes_used", 0) or 0)
+            v_remaining = violation_retakes_remaining(se, e)
+            v_budget = violation_retakes_budget(se, e)
+            id_remaining = identity_retakes_remaining(se, e)
+        else:
+            v_used = 0
+            id_used = 0
+            v_budget = int(getattr(e, "technical_retakes_allowed", 3) or 3)
+            v_remaining = v_budget
+            id_remaining = int(getattr(e, "identity_retakes_allowed", 1) or 1)
+        last_vtype = last_violations.get(e.id, "")
         out.append(
             {
                 "id": e.id,
@@ -280,9 +322,40 @@ def student_exams_list(request):
                 "bank_question_count": e.bank_question_count,
                 "in_progress": in_progress,
                 "started_at": se.started_at.isoformat() if in_progress and se.started_at else None,
+                "student_exam_id": se.id if se else None,
+                "violation_retakes_used": v_used,
+                "violation_retakes_remaining": v_remaining,
+                "violation_retakes_budget": v_budget,
+                "identity_retakes_used": id_used,
+                "identity_retakes_remaining": id_remaining,
+                "last_violation_type": last_vtype,
+                "last_violation_reason": violation_reason_text(last_vtype) if last_vtype else "",
+                "exam_retakes_blocked": (
+                    exam_retakes_exhausted(se, e) if se is not None else False
+                ),
+                "session_phase": session_phase(se),
+                "identity_refresh_required": bool(
+                    se is not None
+                    and identity_verify_required()
+                    and not _identity_verification_fresh(se, now)
+                ),
+                "attempt_history": build_attempt_history(u.id, e.id) if se else [],
             }
         )
     return Response(out)
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def student_proctor_config(request):
+    if not _is_student_user(request.user):
+        return Response({"error": "Forbidden"}, status=403)
+    return Response(
+        {
+            "max_warnings_before_ban": max_warnings_before_ban(),
+            "warn_suppress_seconds": warn_suppress_seconds(),
+        }
+    )
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def student_exams_start(request, pk: int):
@@ -387,9 +460,17 @@ def student_exams_start(request, pk: int):
                 session_request_seq=1,
                 session_challenge=session_challenge,
             )
-        elif se.status in ("Banned", "Completed"):
+        elif se.status in ("Banned", "Completed", "Failed"):
             return Response({"error": f"Exam already {se.status}"}, status=403)
         elif se.status == "Pending":
+            if exam_retakes_exhausted(se, exam):
+                return Response(
+                    {
+                        "error": "Qayta topshirish imkoniyati tugadi. Administratorga murojaat qiling.",
+                        "code": "RETAKE_EXHAUSTED",
+                    },
+                    status=403,
+                )
             se.status = "In Progress"
             se.started_at = dj_tz.now()
             se.proctor_official_warnings = 0
@@ -486,6 +567,8 @@ def student_exams_start(request, pk: int):
     student_lang = resolve_student_exam_language(request, exam)
     ex_lang = effective_exam_language(exam, student_lang)
     is_auto_exam = (exam.language or "uz").lower() == "auto"
+    group = Group.objects.filter(pk=u.group_id).first() if u.group_id else None
+    track = (group.program_track or "bachelor").lower() if group else "bachelor"
     if exam.exam_mode == "bank_mixed":
         if se.session_questions_json:
             full_questions = safe_json_loads(se.session_questions_json, [])
@@ -497,8 +580,6 @@ def student_exams_start(request, pk: int):
                     se.save(update_fields=["session_questions_json"])
         else:
             n = max(8, exam.bank_question_count or 20)
-            group = Group.objects.filter(pk=u.group_id).first() if u.group_id else None
-            track = (group.program_track or "bachelor").lower() if group else "bachelor"
             if track in ("residency", "master"):
                 n_ai = 0
                 n_bank = n
@@ -597,7 +678,7 @@ def student_exams_start(request, pk: int):
                 picked, _meta = fetch_random_imentor_questions(
                     codes,
                     max_questions=max_q,
-                    add_translations=is_auto_exam,
+                    add_translations=False,
                 )
             except Exception as ex:
                 from apps.api.imentor_client import IMentorApiError
@@ -606,9 +687,15 @@ def student_exams_start(request, pk: int):
                 if isinstance(ex, IMentorApiError):
                     return Response({"error": msg}, status=502 if ex.status and ex.status >= 500 else 400)
                 return Response({"error": "iMentor test yuklanmadi"}, status=502)
+            para_lang = ex_lang
+            if is_auto_exam and picked:
+                from apps.api.gemini_tools import detect_question_language
+
+                sample = " ".join(str(q.get("text") or "") for q in picked[:8])
+                para_lang = detect_question_language(sample)
             if track in ("residency", "master") and picked:
                 try:
-                    picked = paraphrase_medical_mcqs(picked, ex_lang)
+                    picked = paraphrase_medical_mcqs(picked, para_lang)
                 except Exception:
                     pass
             elif track == "bachelor" and picked:
@@ -618,12 +705,14 @@ def student_exams_start(request, pk: int):
                 para_idxs = sorted(idxs[:n_para])
                 to_para = [picked[i] for i in para_idxs]
                 try:
-                    para_results = paraphrase_medical_mcqs(to_para, ex_lang)
+                    para_results = paraphrase_medical_mcqs(to_para, para_lang)
                     if para_results and len(para_results) == len(to_para):
                         for pos, i in enumerate(para_idxs):
                             picked[i] = para_results[pos]
                 except Exception:
                     pass
+            if is_auto_exam and picked:
+                picked = exam_questions_add_translations(picked, None)
             full_questions = [{**q, "id": idx + 1} for idx, q in enumerate(picked)]
             if is_auto_exam:
                 full_questions = fill_missing_exam_translations(full_questions)
@@ -729,6 +818,8 @@ def student_exams_submit(request, pk: int):
             questions = safe_json_loads(se.session_questions_json, [])
         else:
             questions = safe_json_loads(exam.questions_json, [])
+        student_lang = resolve_student_exam_language(request, exam)
+        questions = prepare_questions_for_grading(questions, exam, answers, student_lang=student_lang)
         try:
             norm = validate_exam_answers(questions, answers)
         except ValueError as ex:
@@ -741,7 +832,9 @@ def student_exams_submit(request, pk: int):
         total = len(questions)
         percentage = round((score / total) * 100) if total else 0
         from apps.api.certificate_pdf import PASS_PERCENT_THRESHOLD
-        ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
+
+        summary_lang = detect_grading_language(exam, answers, student_lang=student_lang)
+        ai_summary_json = json.dumps(build_exam_ai_summary(questions, norm, summary_lang))
         se.status = "Completed"
         se.score = score
         se.answers_json = json.dumps(norm)
@@ -907,6 +1000,8 @@ def student_exam_save_progress(request, pk: int):
         q_list = safe_json_loads(se.session_questions_json, [])
     else:
         q_list = safe_json_loads(exam.questions_json, [])
+    student_lang = resolve_student_exam_language(request, exam)
+    q_list = prepare_questions_for_grading(q_list, exam, answers, student_lang=student_lang)
     try:
         norm = validate_exam_answers(q_list, answers)
     except ValueError as ex:
@@ -1001,39 +1096,7 @@ def student_violations(request):
     def _guard(payload, status=200):
         return _exam_guarded_response(request, Response(payload, status=status))
 
-    # Violation sababini matn sifatida qaytarish
-    violation_reason_map = {
-        "SUSPICIOUS_AUDIO": "Shovqin aniqlandi! Jimlik saqlang, gapirmang.",
-        "FACE_NOT_VISIBLE": "Yuzingiz kamerada ko'rinmayapti! To'g'ri o'tiring va kameraga qarang.",
-        "MULTIPLE_FACES": "Kadrda bir nechta shaxs aniqlandi! Boshqalar kameradan uzoqlashsin.",
-        "FORBIDDEN_OBJECT_CELL_PHONE": "Telefon aniqlandi! Telefoni yashiring yoki stoldan olib qo'ying.",
-        "FORBIDDEN_OBJECT_LAPTOP": "Noutbuk aniqlandi! Ruxsatsiz qurilmani olib qo'ying.",
-        "FORBIDDEN_OBJECT_BOOK": "Kitob aniqlandi! Ruxsatsiz materiallarni olib qo'ying.",
-        "TAB_SWITCH_SOFT": "Boshqa oynaga o'tildi! Imtihon oynasini yopmang.",
-        "TAB_SWITCH_HARD": "Imtihon oynasidan chiqib ketildi! Qaytib keling.",
-        "CLIPBOARD_ATTEMPT": "Nusxa ko'chirish urinishi aniqlandi!",
-        "PRINT_SCREEN": "Ekran surati olish urinishi aniqlandi!",
-        "DEVTOOLS_OPEN": "Developer tools ochish urinishi aniqlandi!",
-        "FULLSCREEN_EXIT_HARD": "To'liq ekrandan chiqildi! Qaytib kirish uchun ekranga bosing.",
-        "REMOTE_CONTROL_SUSPECTED": "Masofaviy boshqaruv aniqlandi!",
-        "IDENTITY_SUBSTITUTION": "Boshqa shaxs aniqlandi! Imtihon xavfsizligi buzildi.",
-        "GAZE_AWAY_LEFT": "To'g'ri qarang! Chapga emas, ekranga qarang.",
-        "GAZE_AWAY_RIGHT": "To'g'ri qarang! O'ngga emas, ekranga qarang.",
-        "GAZE_AWAY_UP": "To'g'ri qarang! Tepaga emas, ekranga qarang.",
-        "GAZE_AWAY_DOWN": "To'g'ri qarang! Pastga emas, ekranga qarang.",
-        "WHISPER_OR_CONVERSATION_SUSPECTED": "Gapirish aniqlandi! O'zingiz yoki atrofingizda ovoz chiqmasin, jimlik saqlang.",
-        "CAMERA_MIC_ACCESS_FAILED": "Kamera yoki mikrofon ishlamayapti! Ruxsat bering.",
-        "VIRTUAL_WEBCAM_SUSPECTED": "Virtual kamera aniqlandi! Haqiqiy kamerani ishlating.",
-        "FACE_TURNED_AWAY": "To'g'ri qarang! Yuzingizni kameradan burmang.",
-        "EXCESSIVE_MOVEMENT": "Haddan tashqari qimirlash aniqlandi! Tinchoq o'tiring.",
-        "HAND_GESTURE_SUSPECTED": "Qo'l ko'tarish aniqlandi! Qo'llaringizni stolda ushlab turing.",
-        "MOUTH_MOVEMENT_TALKING": "Gapirish aniqlandi! Ovoz chiqarmang.",
-        "FACE_TOO_FAR": "Kameradan juda uzoqsiz! Yaqinroq o'tiring.",
-        "FACE_TOO_CLOSE": "Kameraga juda yaqinsiz! Biroz uzoqroq o'tiring.",
-        "FACE_OFF_CENTER": "Yuzingiz kadr markazida emas! O'rtaga to'g'ri o'tiring.",
-        "PROCTOR_FEED_LOST": "Kamera oqimi to'xtab qoldi! Kamera ulanishini tekshiring.",
-    }
-    reason_text = violation_reason_map.get(vtype, vtype)
+    reason_text = violation_reason_text(vtype)
 
     WARN_SUPPRESS_SECONDS = warn_suppress_seconds()
     EVENT_MIN_INTERVAL_SECONDS = max(1, int(os.environ.get("PROCTOR_EVENT_MIN_INTERVAL_SECONDS", "5")))
@@ -1056,7 +1119,11 @@ def student_violations(request):
         "true",
         "yes",
     )
-    HARDENED_COMBO_TYPES = frozenset({"MULTIPLE_FACES", "WHISPER_OR_CONVERSATION_SUSPECTED"})
+    HARDENED_COMBO_TYPES = frozenset({
+        "MULTIPLE_FACES",
+        "WHISPER_OR_CONVERSATION_SUSPECTED",
+        "MOUTH_MOVEMENT_TALKING",
+    })
 
     try:
         with transaction.atomic():
@@ -1185,10 +1252,36 @@ def student_violations(request):
                                 "hardenedCombo": combo_ban,
                             }
                         )
+                    exam_obj = Exam.objects.filter(pk=exam_id_int).first()
+                    if exam_obj:
+                        retake_payload = try_apply_exam_retake(
+                            se,
+                            exam_obj,
+                            reason_text=f"{reason_text} (hardened)",
+                            violations_count=cnt_all,
+                            violation_type=vtype,
+                        )
+                        if retake_payload:
+                            if retake_payload.get("banned"):
+                                _notify_banned(
+                                    str(u.id), getattr(u, "name", str(u.id)), se.id,
+                                    exam_id_int, f"{reason_text} (hardened)", cnt_all,
+                                )
+                            else:
+                                notify_exam_retake(
+                                    str(u.id),
+                                    se.id,
+                                    exam_id_int,
+                                    remaining=int(retake_payload.get("retakesRemaining") or 0),
+                                    reason=f"{reason_text} (hardened)",
+                                    retakes_used=int(retake_payload.get("retakesUsed") or retake_payload.get("technicalRetakesUsed") or 0),
+                                    identity_retake=bool(retake_payload.get("identityRetake")),
+                                )
+                            return _guard(retake_payload)
                     if GLOBAL_ACCOUNT_BAN:
                         AppUser.objects.filter(pk=u.id).update(status="Banned")
-                    se.status = "Banned"
-                    se.save(update_fields=["status"])
+                    ban_fields = apply_exam_ban(se, BAN_REASON_HARDENED)
+                    se.save(update_fields=ban_fields)
                     _notify_banned(
                         str(u.id), getattr(u, "name", str(u.id)), se.id,
                         exam_id_int, f"{reason_text} (hardened)", cnt_all,
@@ -1196,6 +1289,7 @@ def student_violations(request):
                     return _guard(
                         {
                             "banned": True,
+                            "banReason": BAN_REASON_HARDENED,
                             "violationsCount": cnt_all,
                             "warningNumber": MAX_WARNINGS_BEFORE_BAN,
                             "violationReason": f"{reason_text} (hardened)",
@@ -1226,9 +1320,36 @@ def student_violations(request):
                             "officialWarnings": int(se.proctor_official_warnings or 0),
                         }
                     )
+                exam_obj = Exam.objects.filter(pk=exam_id_int).first()
+                if exam_obj:
+                    retake_payload = try_apply_exam_retake(
+                        se,
+                        exam_obj,
+                        reason_text=reason_text,
+                        violations_count=cnt_all,
+                        violation_type=IDENTITY_VIOLATION_TYPE,
+                    )
+                    if retake_payload:
+                        if retake_payload.get("banned"):
+                            _notify_banned(
+                                str(u.id), getattr(u, "name", str(u.id)), se.id,
+                                exam_id_int, reason_text, cnt_all,
+                            )
+                        else:
+                            notify_exam_retake(
+                                str(u.id),
+                                se.id,
+                                exam_id_int,
+                                remaining=int(retake_payload.get("retakesRemaining") or 0),
+                                reason=reason_text,
+                                retakes_used=int(retake_payload.get("retakesUsed") or retake_payload.get("technicalRetakesUsed") or 0),
+                                identity_retake=True,
+                            )
+                        return _guard(retake_payload)
                 if GLOBAL_ACCOUNT_BAN:
                     AppUser.objects.filter(pk=u.id).update(status="Banned")
-                StudentExam.objects.filter(pk=se.pk).update(status="Banned")
+                apply_exam_ban(se, BAN_REASON_IDENTITY)
+                se.save(update_fields=["status", "ban_reason"])
                 _notify_banned(
                     str(u.id), getattr(u, "name", str(u.id)), se.id,
                     exam_id_int, reason_text, cnt_all,
@@ -1236,6 +1357,7 @@ def student_violations(request):
                 return _guard(
                     {
                         "banned": True,
+                        "banReason": BAN_REASON_IDENTITY,
                         "violationsCount": cnt_all,
                         "warningNumber": MAX_WARNINGS_BEFORE_BAN,
                         "violationReason": reason_text,
@@ -1255,6 +1377,8 @@ def student_violations(request):
                 max_warnings_before_ban=MAX_WARNINGS_BEFORE_BAN,
                 auto_ban=AUTO_BAN_NON_IDENTITY,
                 global_account_ban=GLOBAL_ACCOUNT_BAN,
+                exam=Exam.objects.filter(pk=exam_id_int).first(),
+                violation_type=vtype,
             )
             return _guard(payload)
     except Exception:

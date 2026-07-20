@@ -5,7 +5,7 @@ import { apiUrl } from '../../lib/apiUrl';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminAlert, ChevronRight, PlusIcon,
+  AdminEmpty, AdminPageMessage, ChevronRight, PlusIcon,
 } from './ui';
 import type { Level, Group } from './types';
 
@@ -149,7 +149,9 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
   const filtered = filterLevelId ? groups.filter((g) => String(g.level_id) === filterLevelId) : groups;
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 items-start">
+    <>
+      <AdminPageMessage message={msg} onDismiss={() => setMsg(null)} />
+      <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 items-start">
 
       {/* ── Guruh qo'shish ── */}
       <AdminCard
@@ -158,13 +160,6 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
         subtitle={lang === 'ru' ? 'Добавить группу к уровню' : lang === 'en' ? 'Add a group to a level' : 'Darajaga guruh qo\'shish'}
       >
         <div className="px-5 py-4 space-y-4">
-          <AnimatePresence mode="wait">
-            {msg && (
-              <motion.div key={msg.type + msg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                <AdminAlert type={msg.type}>{msg.text}</AdminAlert>
-              </motion.div>
-            )}
-          </AnimatePresence>
           <form onSubmit={addGroup} className="space-y-4">
             <AdminField label={t.levelLabel} required>
               <AdminSelect value={filterLevelId} onChange={(e) => setFilterLevelId(e.target.value)} required>
@@ -343,5 +338,6 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
         </div>
       </AdminCard>
     </div>
+    </>
   );
 }

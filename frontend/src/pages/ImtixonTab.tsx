@@ -18,18 +18,28 @@ import {
   AdminTextarea,
   AdminBtn,
   AdminCard,
-  AdminAlert,
   AdminModal,
+  AdminPageMessageStack,
   PlusIcon,
 } from './admin/ui';
 
 type StudentRow = { id: string; name: string; group_id: number | null };
 type StaffRow = { id: string; name: string; role: string };
+type ImentorDepartment = {
+  code: string;
+  name: string;
+  sort_order?: number;
+  subjects_count?: number;
+};
 type ImentorSubject = {
   subject_code: string;
   subject_name: string;
+  department_code?: string;
+  department_name?: string;
   test_count: number;
   questions_total?: number;
+  variants_count?: number;
+  topics_count?: number;
 };
 
 function toIsoOrNull(localValue: string): string | null {
@@ -51,21 +61,27 @@ export function ImtixonTab({
   const h = { Authorization: `Bearer ${token}` };
 
   const [groups, setGroups] = useState<any[]>([]);
+  const [imentorDepartments, setImentorDepartments] = useState<ImentorDepartment[]>([]);
   const [imentorSubjects, setImentorSubjects] = useState<ImentorSubject[]>([]);
   const [imentorConfigured, setImentorConfigured] = useState(true);
+  const [imentorApiError, setImentorApiError] = useState('');
   const [staffUsers, setStaffUsers] = useState<StaffRow[]>([]);
 
   const [title, setTitle] = useState('');
   const [startLocal, setStartLocal] = useState(defaultExamStartLocal);
   const [endLocal, setEndLocal] = useState(() => defaultExamEndLocal(60));
   const [duration, setDuration] = useState(60);
+  const [technicalRetakesAllowed, setTechnicalRetakesAllowed] = useState(3);
+  const [proctorProfile, setProctorProfile] = useState<'soft' | 'standard' | 'strict'>('standard');
   const [language, setLanguage] = useState('auto');
   const [pin, setPin] = useState('');
   const [customRules, setCustomRules] = useState('');
   const [responsibleStaffId, setResponsibleStaffId] = useState('');
-  const [selSubjects, setSelSubjects] = useState<string[]>([]);
+  const [selDepartment, setSelDepartment] = useState('');
+  const [selSubject, setSelSubject] = useState('');
   const [imentorMaxQ, setImentorMaxQ] = useState(0);
   const [imentorQLimits, setImentorQLimits] = useState({ min: 10, max: 30 });
+  const [subjectsLoading, setSubjectsLoading] = useState(false);
 
   const [selGroups, setSelGroups] = useState<number[]>([]);
   const [exModal, setExModal] = useState(false);
@@ -79,7 +95,7 @@ export function ImtixonTab({
     const [gr, st, im] = await Promise.all([
       fetch(apiUrl('/api/admin/groups'), { headers: h }),
       fetch(apiUrl('/api/admin/users?role=staff'), { headers: h }),
-      fetch(apiUrl('/api/admin/imentor/subjects'), { headers: h }),
+      fetch(apiUrl('/api/admin/imentor/departments'), { headers: h }),
     ]);
     if (!checkAdminAuthResponse(gr) || !checkAdminAuthResponse(st) || !checkAdminAuthResponse(im)) return;
     const gj = gr.ok ? await readJsonSafe<any[]>(gr) : null;
@@ -87,26 +103,73 @@ export function ImtixonTab({
     const ij = im.ok
       ? await readJsonSafe<{
           configured?: boolean;
-          subjects?: ImentorSubject[];
+          departments?: ImentorDepartment[];
+          published_tests_total?: number;
+          error?: string;
           question_limit_bounds?: { min?: number; max?: number };
         }>(im)
       : null;
     setGroups(Array.isArray(gj) ? gj : []);
     setStaffUsers(parseAdminUsersList<StaffRow>(sj));
     setImentorConfigured(ij?.configured !== false);
-    setImentorSubjects(Array.isArray(ij?.subjects) ? ij!.subjects! : []);
+    setImentorApiError(String(ij?.error || '').trim());
+    setImentorDepartments(Array.isArray(ij?.departments) ? ij!.departments! : []);
     const b = ij?.question_limit_bounds;
     if (b && typeof b.min === 'number' && typeof b.max === 'number') {
       setImentorQLimits({ min: b.min, max: b.max });
     }
   }, [token]);
 
+  const loadDepartmentSubjects = useCallback(
+    async (departmentCode: string) => {
+      if (!departmentCode) {
+        setImentorSubjects([]);
+        return;
+      }
+      setSubjectsLoading(true);
+      try {
+        const res = await fetch(
+          apiUrl(`/api/admin/imentor/departments/${encodeURIComponent(departmentCode)}/subjects`),
+          { headers: h },
+        );
+        if (!checkAdminAuthResponse(res)) return;
+        const data = await readJsonSafe<{
+          subjects?: ImentorSubject[];
+          question_limit_bounds?: { min?: number; max?: number };
+        }>(res);
+        setImentorSubjects(Array.isArray(data?.subjects) ? data!.subjects! : []);
+        const b = data?.question_limit_bounds;
+        if (b && typeof b.min === 'number' && typeof b.max === 'number') {
+          setImentorQLimits({ min: b.min, max: b.max });
+        }
+      } finally {
+        setSubjectsLoading(false);
+      }
+    },
+    [token],
+  );
+
   useEffect(() => {
     loadMeta();
   }, [loadMeta]);
 
-  const toggleSubject = (code: string) =>
-    setSelSubjects((p) => (p.includes(code) ? p.filter((x) => x !== code) : [...p, code]));
+  useEffect(() => {
+    setSelSubject('');
+    if (selDepartment) {
+      loadDepartmentSubjects(selDepartment);
+    } else {
+      setImentorSubjects([]);
+    }
+  }, [selDepartment, loadDepartmentSubjects]);
+
+  const onDepartmentChange = (code: string) => {
+    setSelDepartment(code);
+  };
+
+  const subjectsWithTests = useMemo(
+    () => imentorSubjects.filter((s) => (s.test_count ?? 0) > 0),
+    [imentorSubjects],
+  );
 
   const openExceptions = async () => {
     if (selGroups.length === 0) {
@@ -163,11 +226,10 @@ export function ImtixonTab({
         .replace('{dur}', String(duration))
         .replace('{window}', String(windowMin));
     if (!imentorConfigured) return t.imentorNotConfigured;
-    if (selSubjects.length === 0) return t.imentorPickSubject;
-    const pool = imentorSubjects
-      .filter((s) => selSubjects.includes(s.subject_code))
-      .reduce((acc, s) => acc + Math.max(0, Number(s.test_count) || 0), 0);
-    if (pool < 1) return t.imentorNoSubjects;
+    if (!selDepartment) return t.imentorPickDepartment;
+    if (!selSubject) return t.imentorPickSubject;
+    const picked = imentorSubjects.find((s) => s.subject_code === selSubject);
+    if (!picked || (picked.test_count ?? 0) < 1) return t.imentorNoSubjects;
     if (imentorMaxQ !== 0 && (imentorMaxQ < imentorQLimits.min || imentorMaxQ > imentorQLimits.max)) {
       return t.imentorQuestionLimitInvalid;
     }
@@ -199,8 +261,10 @@ export function ImtixonTab({
         group_ids: selGroups,
         exam_exceptions: exceptionsPayload,
         exam_mode: 'imentor_mixed',
-        imentor_subject_codes: selSubjects,
+        imentor_subject_codes: selSubject ? [selSubject] : [],
         bank_question_count: Math.max(0, imentorMaxQ),
+        technical_retakes_allowed: Math.max(0, Math.min(20, technicalRetakesAllowed)),
+        proctor_profile: proctorProfile,
       };
       if (responsibleStaffId.trim()) body.teacher_id = responsibleStaffId.trim();
 
@@ -222,7 +286,8 @@ export function ImtixonTab({
       setPin('');
       setCustomRules('');
       setResponsibleStaffId('');
-      setSelSubjects([]);
+      setSelDepartment('');
+      setSelSubject('');
       setSelGroups([]);
       setExMap({});
       setStartLocal(defaultExamStartLocal());
@@ -232,8 +297,31 @@ export function ImtixonTab({
     }
   };
 
+  const stickyAlerts = useMemo(() => {
+    const items: Array<{ type: 'ok' | 'err' | 'error' | 'success' | 'warning'; text: string; dismissible?: boolean }> = [];
+    if (msg.text) {
+      items.push({
+        type: msg.type === 'ok' ? 'ok' : 'err',
+        text: msg.text,
+        dismissible: true,
+      });
+    }
+    if (!imentorConfigured) {
+      items.push({ type: 'warning', text: t.imentorNotConfigured, dismissible: true });
+    } else if (imentorApiError) {
+      items.push({ type: 'error', text: imentorApiError, dismissible: true });
+    }
+    return items;
+  }, [msg, imentorConfigured, imentorApiError, t]);
+
   return (
     <div className="space-y-5">
+      <AdminPageMessageStack
+        messages={stickyAlerts}
+        onDismiss={(m) => {
+          if (msg.text && m.text === msg.text) setMsg({ type: '', text: '' });
+        }}
+      />
       <AdminCard
         icon={
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -245,10 +333,6 @@ export function ImtixonTab({
         subtitle={t.examMethodImentor}
       >
         <div className="px-5 py-5 space-y-5">
-          {msg.text && (
-            <AdminAlert type={msg.type === 'ok' ? 'success' : 'error'}>{msg.text}</AdminAlert>
-          )}
-
           <form onSubmit={createExam} noValidate className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-4">
               <AdminField label={t.title} required>
@@ -261,56 +345,65 @@ export function ImtixonTab({
                   <option value="ru">{t.langRussian}</option>
                   <option value="en">{t.langEnglish}</option>
                 </AdminSelect>
+                {language === 'auto' && (
+                  <p className="text-[12px] text-gray-400 mt-1.5">{t.examLanguageAutoHint}</p>
+                )}
               </AdminField>
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <AdminLabel required>{t.imentorSubjectsLabel}</AdminLabel>
-                <p className="text-[12px] text-gray-400 mt-1 mb-3">{t.imentorSubjectsHint}</p>
-                {!imentorConfigured ? (
-                  <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50 rounded-2xl border border-amber-100">
-                    {t.imentorNotConfigured}
-                  </div>
-                ) : imentorSubjects.length === 0 ? (
-                  <div className="p-4 text-center text-[13px] text-amber-700 bg-amber-50 rounded-2xl border border-amber-100">
-                    {t.imentorNoSubjects}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+            <div className="space-y-4">
+              <AdminField label={t.imentorDepartmentLabel} required>
+                <AdminSelect
+                  value={selDepartment}
+                  onChange={(e) => onDepartmentChange(e.target.value)}
+                  disabled={!imentorConfigured}
+                >
+                  <option value="">{t.imentorPickDepartment}</option>
+                  {imentorDepartments.map((d) => (
+                    <option key={d.code} value={d.code}>
+                      {d.name} ({d.subjects_count ?? 0}{' '}
+                      {lang === 'ru' ? 'предм.' : lang === 'en' ? 'subj.' : 'fan'})
+                    </option>
+                  ))}
+                </AdminSelect>
+                <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorDepartmentHint}</p>
+                {imentorConfigured && imentorDepartments.length === 0 && (
+                  <p className="text-[12px] text-amber-700 mt-1.5">{t.imentorNoDepartments}</p>
+                )}
+              </AdminField>
+
+              {selDepartment && (
+                <AdminField label={t.imentorSubjectsLabel} required>
+                  <AdminSelect
+                    value={selSubject}
+                    onChange={(e) => setSelSubject(e.target.value)}
+                    disabled={subjectsLoading || imentorSubjects.length === 0}
+                  >
+                    <option value="">
+                      {subjectsLoading
+                        ? '…'
+                        : subjectsWithTests.length === 0
+                          ? t.imentorNoSubjects
+                          : t.imentorPickSubject}
+                    </option>
                     {imentorSubjects.map((s) => {
-                      const selected = selSubjects.includes(s.subject_code);
+                      const hasTests = (s.test_count ?? 0) > 0;
+                      const testLabel =
+                        lang === 'ru' ? 'тест' : lang === 'en' ? 'tests' : 'test';
                       return (
-                        <label
-                          key={s.subject_code}
-                          className={`flex items-start gap-3 p-3.5 rounded-2xl border cursor-pointer transition-all ${
-                            selected
-                              ? 'border-indigo-400 bg-indigo-50/80 ring-1 ring-indigo-200'
-                              : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/80'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            onChange={() => toggleSubject(s.subject_code)}
-                            className="w-4 h-4 mt-0.5 rounded border-gray-300 accent-indigo-600 shrink-0"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[14px] font-semibold text-gray-900 leading-snug">
-                              {s.subject_name}
-                            </span>
-                            <span className="block text-[12px] text-gray-400 mt-0.5 truncate">{s.subject_code}</span>
-                            <span className="inline-block mt-2 text-[11px] font-semibold text-indigo-700 bg-indigo-100/80 px-2 py-0.5 rounded-md">
-                              {s.test_count ?? 0}{' '}
-                              {lang === 'ru' ? 'тест' : lang === 'en' ? 'tests' : 'test'}
-                            </span>
-                          </span>
-                        </label>
+                        <option key={s.subject_code} value={s.subject_code} disabled={!hasTests}>
+                          {s.subject_name}
+                          {hasTests
+                            ? ` (${s.test_count} ${testLabel})`
+                            : ` — ${t.imentorSubjectNoTests}`}
+                        </option>
                       );
                     })}
-                  </div>
-                )}
-              </div>
+                  </AdminSelect>
+                  <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorSubjectsHint}</p>
+                </AdminField>
+              )}
+
               <AdminField label={t.imentorMaxQuestionsLabel}>
                 <AdminInput
                   type="number"
@@ -384,6 +477,33 @@ export function ImtixonTab({
               </AdminField>
               <AdminField label={`${t.pin} (opt.)`}>
                 <AdminInput value={pin} onChange={(e) => setPin(e.target.value)} placeholder="—" />
+              </AdminField>
+              <AdminField label={t.proctorProfileLabel}>
+                <AdminSelect
+                  value={proctorProfile}
+                  onChange={(e) => {
+                    const next = e.target.value as 'soft' | 'standard' | 'strict';
+                    setProctorProfile(next);
+                    const limits = { soft: 5, standard: 3, strict: 1 } as const;
+                    setTechnicalRetakesAllowed(limits[next]);
+                  }}
+                  className="max-w-[220px]"
+                >
+                  <option value="soft">{t.proctorProfileSoft}</option>
+                  <option value="standard">{t.proctorProfileStandard}</option>
+                  <option value="strict">{t.proctorProfileStrict}</option>
+                </AdminSelect>
+              </AdminField>
+              <AdminField label={t.technicalRetakesAllowedLabel}>
+                <AdminInput
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={technicalRetakesAllowed}
+                  onChange={(e) => setTechnicalRetakesAllowed(Number(e.target.value))}
+                  className="max-w-[180px]"
+                />
+                <p className="text-[12px] text-gray-400 mt-1.5">{t.technicalRetakesAllowedHint}</p>
               </AdminField>
               <AdminField label={`${t.customRules} (opt.)`}>
                 <AdminTextarea value={customRules} onChange={(e) => setCustomRules(e.target.value)} />

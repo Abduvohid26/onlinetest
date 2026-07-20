@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { translations, Language } from '../i18n';
+import { translations, Language, banReasonLabel } from '../i18n';
 import { ExamResultSummary, type ExamResultPayload } from '../components/ExamResultSummary';
 import { readJsonSafe, checkStudentAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { examAuthHeaders } from '../lib/deviceFingerprint';
 import { formatCountdown, formatExamDateTime, msUntil } from '../lib/datetimeLocal';
 import { AdminBtn, AdminAlert, AdminInput, AdminSelect } from './admin/ui';
 
@@ -26,6 +27,8 @@ const LOCAL: Record<Language, Record<string, string>> = {
     questionsWord: 'savol',
     filterByStatus: 'Holat bo‘yicha',
     filterEmpty: 'Bu holatda natija topilmadi',
+    attemptHistory: 'Urinish tarixi',
+    failedScore: 'Ball yetarli emas',
   },
   ru: {
     greeting: 'Добро пожаловать',
@@ -40,6 +43,8 @@ const LOCAL: Record<Language, Record<string, string>> = {
     questionsWord: 'вопр.',
     filterByStatus: 'По статусу',
     filterEmpty: 'Нет результатов с этим статусом',
+    attemptHistory: 'История попыток',
+    failedScore: 'Недостаточный балл',
   },
   en: {
     greeting: 'Welcome',
@@ -54,6 +59,8 @@ const LOCAL: Record<Language, Record<string, string>> = {
     questionsWord: 'questions',
     filterByStatus: 'Filter by status',
     filterEmpty: 'No results for this status',
+    attemptHistory: 'Attempt history',
+    failedScore: 'Insufficient score',
   },
 };
 
@@ -64,7 +71,7 @@ function scoreTone(pct: number): { text: string; bar: string } {
   return { text: 'text-red-600', bar: 'bg-red-500' };
 }
 
-type ResultStatusFilter = 'all' | 'Completed' | 'Banned';
+type ResultStatusFilter = 'all' | 'Completed' | 'Banned' | 'Failed';
 
 function resultSortTime(r: { completed_at?: string | null; id?: number }): number {
   if (r.completed_at) {
@@ -139,6 +146,10 @@ export function StudentDashboard({
   const [pdfDownloadingId, setPdfDownloadingId] = useState<number | null>(null);
   const [clockSkewMs, setClockSkewMs] = useState(0);
   const [tick, setTick] = useState(0);
+  const [banAppeals, setBanAppeals] = useState<any[]>([]);
+  const [appealDrafts, setAppealDrafts] = useState<Record<number, string>>({});
+  const [appealBusyExam, setAppealBusyExam] = useState<number | null>(null);
+  const [appealMsgByExam, setAppealMsgByExam] = useState<Record<number, string>>({});
   const t = translations[lang];
   const L = LOCAL[lang];
   const cancelledRef = useRef(false);
@@ -191,6 +202,16 @@ export function StudentDashboard({
     if (resultsRes.ok) {
       const j = await readJsonSafe<any[]>(resultsRes);
       if (!cancelledRef.current) setResults(Array.isArray(j) ? j : []);
+    }
+
+    if (cancelledRef.current) return;
+    const appealsRes = await fetch(apiUrl('/api/student/ban-appeals'), {
+      headers: { Authorization: `Bearer ${token}`, ...examAuthHeaders(token) },
+    });
+    if (!checkStudentAuthResponse(appealsRes)) { setLoading(false); setRefreshing(false); return; }
+    if (appealsRes.ok) {
+      const appeals = await readJsonSafe<any[]>(appealsRes);
+      if (!cancelledRef.current) setBanAppeals(Array.isArray(appeals) ? appeals : []);
     }
 
     if (!cancelledRef.current) {
@@ -450,6 +471,7 @@ export function StudentDashboard({
             >
               <option value="all">{t.examStatusAll}</option>
               <option value="Completed">{t.resultStatusCompleted}</option>
+              <option value="Failed">{t.resultStatusFailed}</option>
               <option value="Banned">{t.resultStatusBanned}</option>
             </AdminSelect>
           </div>
@@ -518,7 +540,8 @@ export function StudentDashboard({
                   const isOngoing = now >= startMs && now <= endMs;
                   const isUpcoming = now < startMs;
                   const untilStart = msUntil(e.start_time, now);
-                  const showLive = isOngoing || e.in_progress;
+                  const retakesBlocked = Boolean(e.exam_retakes_blocked);
+                  const showLive = (isOngoing || e.in_progress) && !retakesBlocked;
 
                   return (
                     <motion.div
@@ -546,9 +569,24 @@ export function StudentDashboard({
                             {t.examStateUpcoming}
                           </span>
                         )}
-                        <span className="shrink-0 text-[10px] font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md uppercase tracking-wide">
-                          {e.language}
-                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {e.session_phase === 'after_retake' && (
+                            <span className="text-[10px] font-semibold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md">
+                              {t.sessionPhaseAfterRetake}
+                            </span>
+                          )}
+                          <span
+                            className="text-[10px] font-semibold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-md uppercase tracking-wide"
+                            title={e.language === 'auto' ? t.studentExamLangAutoHint : undefined}
+                          >
+                            {e.language === 'auto' ? t.langAuto : e.language}
+                          </span>
+                          {(e.exam_mode === 'bank_mixed' || e.exam_mode === 'imentor_mixed') && (
+                            <span className="text-[10px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">
+                              {e.exam_mode === 'imentor_mixed' ? t.imentorExamBadge : t.bankExamBadge}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="px-5 pt-2.5 pb-4 flex-1">
@@ -574,14 +612,80 @@ export function StudentDashboard({
                               {e.duration_minutes} {t.minutesShort}
                             </span>
                           </div>
-                          {(e.exam_mode === 'bank_mixed' || e.exam_mode === 'imentor_mixed') && e.bank_question_count ? (
+                          {(e.exam_mode === 'bank_mixed' || e.exam_mode === 'imentor_mixed') && (
                             <MetaRow
                               icon={<path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />}
                               label={t.examBankQuestionCount}
-                              value={String(e.bank_question_count)}
+                              value={
+                                e.bank_question_count
+                                  ? String(e.bank_question_count)
+                                  : t.examQuestionsAll
+                              }
                             />
-                          ) : null}
+                          )}
                         </dl>
+
+                        {((e.violation_retakes_used ?? 0) > 0 || (e.identity_retakes_used ?? 0) > 0) && (
+                          <div className="mt-3.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left">
+                            <p className="text-[12px] text-amber-900 leading-relaxed font-medium">
+                              {e.last_violation_reason
+                                ? t.examCardRetakeBanner
+                                    .replace('{reason}', String(e.last_violation_reason))
+                                    .replace(
+                                      '{used}',
+                                      String(
+                                        (e.violation_retakes_used ?? 0) > 0
+                                          ? e.violation_retakes_used
+                                          : e.identity_retakes_used ?? 0,
+                                      ),
+                                    )
+                                    .replace(
+                                      '{remaining}',
+                                      String(
+                                        (e.violation_retakes_used ?? 0) > 0
+                                          ? e.violation_retakes_remaining ?? 0
+                                          : e.identity_retakes_remaining ?? 0,
+                                      ),
+                                    )
+                                : t.examCardRetakeBannerShort
+                                    .replace(
+                                      '{used}',
+                                      String(
+                                        (e.violation_retakes_used ?? 0) > 0
+                                          ? e.violation_retakes_used
+                                          : e.identity_retakes_used ?? 0,
+                                      ),
+                                    )
+                                    .replace(
+                                      '{remaining}',
+                                      String(
+                                        (e.violation_retakes_used ?? 0) > 0
+                                          ? e.violation_retakes_remaining ?? 0
+                                          : e.identity_retakes_remaining ?? 0,
+                                      ),
+                                    )}
+                            </p>
+                          </div>
+                        )}
+
+                        {Array.isArray(e.attempt_history) && e.attempt_history.length > 0 && (
+                          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left">
+                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
+                              {L.attemptHistory}
+                            </p>
+                            <ul className="space-y-1">
+                              {e.attempt_history.slice(-4).map((item: any, idx: number) => (
+                                <li key={`${item.at || idx}-${item.violation_type || idx}`} className="text-[12px] text-gray-700 leading-snug">
+                                  <span className="text-gray-500 tabular-nums">
+                                    {item.at ? new Date(item.at).toLocaleString() : '—'}
+                                  </span>
+                                  {' · '}
+                                  <span className="font-medium">{item.reason || item.violation_type}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
 
                         {(isUpcoming && untilStart > 0) || e.has_pin ? (
                           <div className="mt-3.5 flex flex-wrap gap-1.5">
@@ -601,7 +705,7 @@ export function StudentDashboard({
                       </div>
 
                       <div className="px-5 pb-5">
-                        {e.in_progress ? (
+                        {e.in_progress && !retakesBlocked ? (
                           <div className="space-y-2.5">
                             <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md">
                               {t.examInProgressBadge}
@@ -625,7 +729,11 @@ export function StudentDashboard({
                               onClick={async () => {
                                 setResumeBusyId(e.id);
                                 try {
-                                  await onResumeExam(e, resumePins[e.id] || '');
+                                  if (e.identity_refresh_required || e.session_phase === 'after_retake') {
+                                    onStartExam(e, e.student_exam_id ?? 0);
+                                  } else {
+                                    await onResumeExam(e, resumePins[e.id] || '');
+                                  }
                                 } finally {
                                   setResumeBusyId(null);
                                 }
@@ -634,6 +742,10 @@ export function StudentDashboard({
                               {t.resumeExam}
                             </AdminBtn>
                           </div>
+                        ) : retakesBlocked ? (
+                          <AdminBtn variant="ghost" size="lg" className="w-full" disabled>
+                            {t.examCardRetakesBlocked}
+                          </AdminBtn>
                         ) : isOngoing ? (
                           <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => onStartExam(e, 0)} iconRight={
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 5l7 7-7 7" /></svg>
@@ -682,8 +794,11 @@ export function StudentDashboard({
                 displayedResults.map((r: any, i) => {
                   const isCompleted = r.status === 'Completed';
                   const isBannedRes = r.status === 'Banned';
+                  const isFailedRes = r.status === 'Failed';
                   const pct = typeof r.percentage === 'number' ? r.percentage : null;
                   const tone = pct != null ? scoreTone(pct) : null;
+                  const examAppeals = banAppeals.filter((a) => a.exam_id === r.exam_id);
+                  const hasPendingAppeal = examAppeals.some((a) => a.status === 'Pending');
 
                   return (
                     <motion.div
@@ -699,9 +814,10 @@ export function StudentDashboard({
                         <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md ${
                           isCompleted ? 'bg-emerald-50 text-emerald-700' :
                           isBannedRes ? 'bg-red-50 text-red-700' :
+                          isFailedRes ? 'bg-orange-50 text-orange-700' :
                           'bg-amber-50 text-amber-700'
                         }`}>
-                          {isCompleted ? t.resultStatusCompleted : isBannedRes ? t.resultStatusBanned : t.resultStatusOther}
+                          {isCompleted ? t.resultStatusCompleted : isBannedRes ? t.resultStatusBanned : isFailedRes ? t.resultStatusFailed : t.resultStatusOther}
                         </span>
                       </div>
 
@@ -721,6 +837,19 @@ export function StudentDashboard({
                               {r.completed_at && <span className="tabular-nums">{new Date(r.completed_at).toLocaleDateString()}</span>}
                             </div>
                           </>
+                        ) : isFailedRes ? (
+                          <div className="flex items-center gap-3 py-1">
+                            <div className="w-10 h-10 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </div>
+                            <div>
+                              <div className="text-[14px] font-semibold text-gray-900">{t.resultStatusFailed}</div>
+                              <div className="text-[12px] text-gray-500">{L.failedScore}</div>
+                              {pct != null && (
+                                <div className="text-[12px] text-gray-400 tabular-nums mt-0.5">{r.score}/{r.total_questions} · {pct}%</div>
+                              )}
+                            </div>
+                          </div>
                         ) : isBannedRes ? (
                           <div className="flex items-center gap-3 py-1">
                             <div className="w-10 h-10 rounded-lg bg-red-50 text-red-600 flex items-center justify-center shrink-0">
@@ -728,6 +857,9 @@ export function StudentDashboard({
                             </div>
                             <div>
                               <div className="text-[14px] font-semibold text-gray-900">{t.resultStatusBanned}</div>
+                              {banReasonLabel(lang, r.ban_reason) ? (
+                                <div className="text-[12px] text-red-700 mt-0.5">{banReasonLabel(lang, r.ban_reason)}</div>
+                              ) : null}
                               <div className="text-[12px] text-gray-400">{L.scoreLabel}: —</div>
                             </div>
                           </div>
@@ -745,6 +877,72 @@ export function StudentDashboard({
                       </div>
 
                       {/* Footer: actions (only completed with public id) */}
+                      {isBannedRes && (
+                        <div className="px-5 pb-4 pt-0 space-y-2 border-t border-gray-100 mt-2">
+                          {examAppeals.length > 0 && (
+                            <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-600">
+                              <p className="font-semibold text-gray-700 mb-1">{t.banAppealHistoryTitle}</p>
+                              {examAppeals.slice(0, 2).map((a) => (
+                                <p key={a.id} className="line-clamp-2">
+                                  <span className="font-medium">{a.status}</span> — {a.reason}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {!hasPendingAppeal && (
+                            <>
+                              <textarea
+                                value={appealDrafts[r.exam_id] || ''}
+                                onChange={(ev) => setAppealDrafts((prev) => ({ ...prev, [r.exam_id]: ev.target.value }))}
+                                placeholder={t.banAppealPlaceholder}
+                                className="w-full min-h-[72px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-[13px] resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-500"
+                              />
+                              {appealMsgByExam[r.exam_id] && (
+                                <AdminAlert type={appealMsgByExam[r.exam_id].startsWith('ok:') ? 'success' : 'error'}>
+                                  {appealMsgByExam[r.exam_id].startsWith('ok:') ? appealMsgByExam[r.exam_id].slice(3) : appealMsgByExam[r.exam_id]}
+                                </AdminAlert>
+                              )}
+                              <AdminBtn
+                                variant="ghost"
+                                size="md"
+                                className="w-full"
+                                loading={appealBusyExam === r.exam_id}
+                                disabled={(appealDrafts[r.exam_id] || '').trim().length < 12}
+                                onClick={async () => {
+                                  setAppealBusyExam(r.exam_id);
+                                  try {
+                                    const res = await fetch(apiUrl('/api/student/ban-appeals'), {
+                                      method: 'POST',
+                                      headers: {
+                                        'Content-Type': 'application/json',
+                                        Authorization: `Bearer ${token}`,
+                                        ...examAuthHeaders(token),
+                                      },
+                                      body: JSON.stringify({
+                                        exam_id: r.exam_id,
+                                        reason: (appealDrafts[r.exam_id] || '').trim(),
+                                      }),
+                                    });
+                                    const data = await readJsonSafe<{ error?: string }>(res);
+                                    if (!res.ok) {
+                                      setAppealMsgByExam((prev) => ({ ...prev, [r.exam_id]: data?.error || t.banAppealSubmitError }));
+                                      return;
+                                    }
+                                    setAppealMsgByExam((prev) => ({ ...prev, [r.exam_id]: `ok:${t.banAppealSubmitOk}` }));
+                                    setAppealDrafts((prev) => ({ ...prev, [r.exam_id]: '' }));
+                                    void fetchData();
+                                  } finally {
+                                    setAppealBusyExam(null);
+                                  }
+                                }}
+                              >
+                                {appealBusyExam === r.exam_id ? t.banAppealSending : t.banAppealSubmitBtn}
+                              </AdminBtn>
+                            </>
+                          )}
+                        </div>
+                      )}
+
                       {isCompleted && r.result_public_id && (
                         <div className="px-5 pb-4 pt-0 flex gap-2">
                           <AdminBtn

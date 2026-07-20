@@ -19,6 +19,9 @@ class Exam(models.Model):
     bank_category_ids = models.TextField(default="[]")
     bank_question_count = models.IntegerField(default=0)
     imentor_subject_codes = models.TextField(default="[]", blank=True)
+    technical_retakes_allowed = models.PositiveSmallIntegerField(default=3)
+    identity_retakes_allowed = models.PositiveSmallIntegerField(default=1)
+    proctor_profile = models.CharField(max_length=16, blank=True, default="standard")
 
     class Meta:
         app_label = "core"

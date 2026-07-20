@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeYaw } from '../src/lib/facePositionCheck.ts';
+import { computeYaw, challengeYawCentered, challengeYawMatches } from '../src/lib/facePositionCheck.ts';
 
 function landmarks(noseX: number, leftX = 0.3, rightX = 0.7): any[] {
   const lm: any[] = [];
@@ -34,5 +34,24 @@ describe('computeYaw', () => {
     lm[1] = { x: 0.5, y: 0.5 };
     // 234/454 missing
     assert.equal(computeYaw(lm), null);
+  });
+});
+
+describe('challengeYawMatches', () => {
+  it('accepts positive yaw for left turn (mirror preview)', () => {
+    assert.equal(challengeYawMatches('left', 0.25), true);
+    assert.equal(challengeYawMatches('left', 0.1), false);
+  });
+
+  it('accepts negative yaw for right turn (mirror preview)', () => {
+    assert.equal(challengeYawMatches('right', -0.25), true);
+    assert.equal(challengeYawMatches('right', -0.1), false);
+  });
+});
+
+describe('challengeYawCentered', () => {
+  it('accepts near-zero yaw', () => {
+    assert.equal(challengeYawCentered(0.05), true);
+    assert.equal(challengeYawCentered(0.2), false);
   });
 });

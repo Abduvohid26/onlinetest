@@ -527,8 +527,8 @@ class ExamFlowApiTests(TestCase):
         self.assertTrue(TestBankCategory.objects.filter(name__iexact="Matematika").exists())
         self.assertEqual(TestBankQuestion.objects.count(), 1)
 
-    def test_violation_three_distinct_warnings_then_ban_on_fourth(self):
-        """3 ta rasmiy ogohlantirish, 4-chi epizodda avto-ban (PROCTOR_AUTO_BAN_NON_IDENTITY default=1)."""
+    def test_violation_three_distinct_warnings_then_ban_on_third(self):
+        """3 ta rasmiy ogohlantirish — 3-chi epizodda retake yoki ban."""
         hp = bcrypt.hashpw(b"vstudent2", bcrypt.gensalt(rounds=10)).decode("ascii")
         st2 = AppUser.objects.create(
             id="itest_student_viol",
@@ -548,7 +548,8 @@ class ExamFlowApiTests(TestCase):
         tok = r0.json()["token"]
         self._start_exam_session(tok, self.exam_a.id, st2.id)
         eid = self.exam_a.id
-        types = ["TAB_SWITCH_SOFT", "FACE_NOT_VISIBLE", "SUSPICIOUS_AUDIO"]
+        Exam.objects.filter(pk=eid).update(technical_retakes_allowed=0)
+        types = ["TAB_SWITCH_SOFT", "FACE_NOT_VISIBLE"]
         for i, vtype in enumerate(types):
             r = self.client.post(
                 "/api/student/violations",
@@ -560,20 +561,20 @@ class ExamFlowApiTests(TestCase):
             self.assertFalse(body.get("banned"), msg=f"step {i} should not ban yet")
             self.assertFalse(body.get("warningSuppressed"), msg=f"step {i} must count")
             self.assertEqual(body.get("warningNumber"), i + 1)
-            self.assertEqual(body.get("isFinalWarning"), i == 2)
+            self.assertEqual(body.get("isFinalWarning"), i == 1)
             StudentExam.objects.filter(student_id=st2.id, exam_id=eid).update(
                 proctor_last_warning_at=dj_tz.now() - timedelta(seconds=61)
             )
         ViolationLog.objects.filter(student_id=st2.id, exam_id=eid).update(
             timestamp=dj_tz.now() - timedelta(seconds=120)
         )
-        r4 = self.client.post(
+        r3 = self.client.post(
             "/api/student/violations",
             {"exam_id": eid, "violation_type": "TAB_SWITCH_SOFT", "screenshot_url": ""},
             format="json",
         )
-        self.assertEqual(r4.status_code, 200)
-        self.assertTrue(r4.json().get("banned"))
+        self.assertEqual(r3.status_code, 200)
+        self.assertTrue(r3.json().get("banned"))
         se = StudentExam.objects.get(student_id=st2.id, exam_id=eid)
         self.assertEqual(se.status, "Banned")
         st2.refresh_from_db()

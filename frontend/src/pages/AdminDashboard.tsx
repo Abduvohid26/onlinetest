@@ -4,7 +4,6 @@ import { useNavigate as useRRNavigate, useLocation } from 'react-router-dom';
 import { translations, Language } from '../i18n';
 import { apiUrl } from '../lib/apiUrl';
 import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
-import { TestBankTab } from './TestBankTab';
 import { ImtixonTab } from './ImtixonTab';
 import { AdminExamsTab } from './AdminExamsTab';
 import { OverviewPage } from './admin/OverviewPage';
@@ -14,6 +13,7 @@ import { StudentsPage } from './admin/StudentsPage';
 import { BannedPage } from './admin/BannedPage';
 import { StaffPage } from './admin/StaffPage';
 import { AuditPage } from './admin/AuditPage';
+import { AdminToastLayer } from './admin/ui';
 import type { Level, Group } from './admin/types';
 
 type AdminPage =
@@ -24,7 +24,6 @@ type AdminPage =
   | 'banned'
   | 'staff'
   | 'audit'
-  | 'testbank'
   | 'exam_create'
   | 'exam_list';
 
@@ -65,11 +64,6 @@ const IC = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6a4 4 0 11-8 0 4 4 0 018 0zM12 14v7" />
     </svg>
   ),
-  testbank: (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-    </svg>
-  ),
   exam_create: (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -95,12 +89,12 @@ const PAGE_PATHS: Record<AdminPage, string> = {
   banned:       '/admin/banned',
   staff:        '/admin/staff',
   audit:        '/admin/audit',
-  testbank:     '/admin/testbank',
   exam_create:  '/admin/exam/create',
   exam_list:    '/admin/exam/list',
 };
 
 function pathToPage(pathname: string): AdminPage {
+  if (pathname === '/admin/testbank') return 'exam_create';
   // Longest path first so /admin/exam/create doesn't accidentally match /admin
   const sorted = (Object.entries(PAGE_PATHS) as [AdminPage, string][])
     .sort((a, b) => b[1].length - a[1].length);
@@ -133,6 +127,12 @@ export function AdminDashboard({
   // Cross-page navigation state
   const [filterLevelId, setFilterLevelId] = useState<number | null>(null);
   const [filterGroupId, setFilterGroupId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (location.pathname === '/admin/testbank') {
+      rrNavigate(PAGE_PATHS.exam_create, { replace: true });
+    }
+  }, [location.pathname, rrNavigate]);
 
   useEffect(() => {
     fetch(apiUrl('/api/admin/stats'), { headers: { Authorization: `Bearer ${token}` } })
@@ -175,10 +175,6 @@ export function AdminDashboard({
         { id: 'staff', label: t.sidebarStaffSub },
         { id: 'audit', label: t.sidebarAuditSub },
       ],
-    },
-    {
-      label: t.navTestBaza,
-      items: [{ id: 'testbank', label: t.sidebarTestBankSub }],
     },
     {
       label: t.sidebarExamSection,
@@ -244,6 +240,7 @@ export function AdminDashboard({
 
   return (
     <div className="flex min-h-[calc(100vh-var(--admin-header-h,62px))] relative">
+      <AdminToastLayer />
       {/* ── Desktop sidebar (fixed, header ostidan boshlanadi) ─────────────── */}
       <aside className="hidden lg:flex flex-col w-60 fixed left-0 top-[62px] sm:top-[66px] z-30 h-[calc(100vh-62px)] sm:h-[calc(100vh-66px)] border-r border-gray-200 bg-white overflow-y-auto overscroll-contain">
         <SidebarContent />
@@ -282,7 +279,7 @@ export function AdminDashboard({
       {/* ── Main content ───────────────────────────────────────────────────── */}
       <main className="flex-1 min-w-0 pl-0 lg:pl-6 pr-4 lg:pr-6 py-6 overflow-x-hidden text-[15px]">
         {/* Page header */}
-        <div className="flex items-center gap-3 mb-7">
+        <div className="flex items-center gap-3 mb-5">
           <button
             type="button"
             className="lg:hidden w-9 h-9 rounded-xl border border-gray-200 bg-white flex items-center justify-center shrink-0 hover:bg-gray-50 transition"
@@ -353,9 +350,6 @@ export function AdminDashboard({
           )}
           {page === 'audit' && (
             <AuditPage token={token} lang={lang} />
-          )}
-          {page === 'testbank' && (
-            <TestBankTab token={token} lang={lang} />
           )}
           {page === 'exam_create' && (
             <ImtixonTab token={token} lang={lang} adminUserId={adminUserId} />

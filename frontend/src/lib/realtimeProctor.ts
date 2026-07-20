@@ -63,7 +63,7 @@ const STREAK = {
   gaze: 6, // ~0.8s uzoq qaragan
   movement: 5,
   hand: 3, // ~0.4s qo'l ko'rinib turibdi (tezroq aniqlash)
-  mouth: 5, // ~0.65s barqaror og'iz harakati (stul/qimirlash emas)
+  mouth: 3, // ~0.4s barqaror og'iz harakati
   tooFar: 10, // ~1.3s juda uzoq
   tooClose: 8, // ~1s juda yaqin
   offCenter: 10, // ~1.3s markazdan chetda
@@ -201,7 +201,9 @@ export class RealtimeProctor {
 
   private emit(type: RealtimeViolation): void {
     const now = Date.now();
-    if (now - (this.lastEmit[type] || 0) < PER_TYPE_COOLDOWN_MS) return;
+    const cooldown =
+      type === 'MOUTH_MOVEMENT_TALKING' ? 2200 : PER_TYPE_COOLDOWN_MS;
+    if (now - (this.lastEmit[type] || 0) < cooldown) return;
     this.lastEmit[type] = now;
     this.cb.onViolation(type);
   }

@@ -5,7 +5,7 @@ import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import { AdminSectionLabel } from './ui';
 import type { AdminStats } from './types';
 
-type AdminPage = 'levels' | 'groups' | 'students' | 'banned' | 'staff' | 'testbank' | 'exam_create' | 'exam_list';
+type AdminPage = 'levels' | 'groups' | 'students' | 'banned' | 'staff' | 'exam_create' | 'exam_list';
 
 const STAT_CARDS = (t: TranslationBundle, s: AdminStats) => [
   {
@@ -58,7 +58,7 @@ const QUICK_ACTIONS = (t: TranslationBundle) => [
   {
     label: t.sidebarLevelsSub,
     page: 'levels' as AdminPage,
-    desc: t.adminGuideStep1Body.slice(0, 56) + '…',
+    desc: t.quickActionLevelsDesc,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
@@ -66,19 +66,19 @@ const QUICK_ACTIONS = (t: TranslationBundle) => [
     ),
   },
   {
-    label: t.sidebarTestBankSub,
-    page: 'testbank' as AdminPage,
-    desc: t.adminGuideStep2Body.slice(0, 56) + '…',
+    label: t.sidebarGroupsSub,
+    page: 'groups' as AdminPage,
+    desc: t.quickActionGroupsDesc,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
       </svg>
     ),
   },
   {
     label: t.sidebarExamCreateSub,
     page: 'exam_create' as AdminPage,
-    desc: t.adminGuideStep3Body.slice(0, 56) + '…',
+    desc: t.quickActionExamCreateDesc,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M12 4v16m8-8H4" />
@@ -88,13 +88,20 @@ const QUICK_ACTIONS = (t: TranslationBundle) => [
   {
     label: t.sidebarExamListSub,
     page: 'exam_list' as AdminPage,
-    desc: '',
+    desc: t.quickActionExamListDesc,
     icon: (
       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M4 6h16M4 10h16M4 14h16M4 18h16" />
       </svg>
     ),
   },
+];
+
+const GUIDE_STEPS = (t: TranslationBundle) => [
+  { title: t.adminGuideStep1Title, body: t.adminGuideStep1Body, page: 'levels' as AdminPage },
+  { title: t.adminGuideStep2Title, body: t.adminGuideStep2Body, page: 'exam_create' as AdminPage },
+  { title: t.adminGuideStep3Title, body: t.adminGuideStep3Body, page: 'exam_create' as AdminPage },
+  { title: t.adminGuideStep4Title, body: t.adminGuideStep4Body, page: 'exam_list' as AdminPage },
 ];
 
 interface Props {
@@ -121,10 +128,10 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
 
   const cards = STAT_CARDS(t, stats);
   const quickActions = QUICK_ACTIONS(t);
+  const guideSteps = GUIDE_STEPS(t);
 
   return (
     <div className="space-y-7">
-      {/* ── Statistika ── */}
       <section>
         <AdminSectionLabel>{t.overviewStatsSection}</AdminSectionLabel>
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
@@ -163,7 +170,6 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
         </div>
       </section>
 
-      {/* ── Tezkor amallar ── */}
       <section>
         <AdminSectionLabel>{t.quickActions}</AdminSectionLabel>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -179,40 +185,43 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
               </div>
               <div className="min-w-0">
                 <p className="text-[13.5px] font-semibold text-gray-800 leading-tight">{label}</p>
-                {desc && <p className="text-[12px] text-gray-400 mt-1 leading-snug line-clamp-2">{desc}</p>}
+                {desc && <p className="text-[12px] text-gray-400 mt-1 leading-snug">{desc}</p>}
               </div>
             </button>
           ))}
         </div>
       </section>
 
-      {/* ── Qo'llanma ── */}
-      <section className="rounded-lg border border-gray-200 bg-gray-50/60 p-4">
+      <section className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-white p-5">
         <div className="flex items-start gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 mt-0.5">
+          <div className="w-9 h-9 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[13.5px] font-semibold text-gray-800 mb-2.5">{t.adminGuideTitle}</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {[
-                { title: t.adminGuideStep1Title, body: t.adminGuideStep1Body, page: 'levels' as AdminPage },
-                { title: t.adminGuideStep2Title, body: t.adminGuideStep2Body, page: 'testbank' as AdminPage },
-                { title: t.adminGuideStep3Title, body: t.adminGuideStep3Body, page: 'exam_create' as AdminPage },
-              ].map(({ title, body, page }) => (
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <p className="text-[15px] font-bold text-gray-900">{t.adminGuideTitle}</p>
+              <span className="text-[11px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">
+                iMentor
+              </span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {guideSteps.map(({ title, body, page }) => (
                 <button
-                  key={page}
+                  key={title}
                   type="button"
                   onClick={() => onNavigate(page)}
-                  className="text-left p-3 rounded-lg bg-white border border-gray-200 hover:border-gray-300 transition-colors"
+                  className="text-left p-4 rounded-lg bg-white border border-gray-200 hover:border-indigo-200 hover:shadow-sm transition-all"
                 >
-                  <p className="text-[13px] font-semibold text-gray-800 mb-1">{title}</p>
-                  <p className="text-[12px] text-gray-500 leading-relaxed line-clamp-3">{body}</p>
+                  <p className="text-[13.5px] font-semibold text-gray-900 mb-2">{title}</p>
+                  <p className="text-[12.5px] text-gray-600 leading-relaxed">{body}</p>
                 </button>
               ))}
             </div>
+            <p className="text-[12px] text-indigo-800/90 mt-4 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-100">
+              {t.adminGuideTip}
+            </p>
           </div>
         </div>
       </section>

@@ -5,8 +5,8 @@ import os
 
 
 def max_warnings_before_ban() -> int:
-    """3 ta rasmiy ogohlantirish, keyingi (4-chi) epizodda ban."""
-    return max(1, int(os.environ.get("PROCTOR_MAX_WARNINGS_BEFORE_BAN", "4")))
+    """3 ta rasmiy ogohlantirish — 3-chi qoidabuzarlikda retake yoki ban."""
+    return max(1, int(os.environ.get("PROCTOR_MAX_WARNINGS_BEFORE_BAN", "3")))
 
 
 def warn_suppress_seconds() -> int:

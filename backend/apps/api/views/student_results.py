@@ -97,7 +97,7 @@ def student_results(request):
     if not u.group_id:
         return Response([])
     rows = (
-        StudentExam.objects.filter(student_id=u.id, status__in=["Completed", "Banned"])
+        StudentExam.objects.filter(student_id=u.id, status__in=["Completed", "Banned", "Failed"])
         .select_related("exam")
         .order_by(F("completed_at").desc(nulls_last=True), "-id")
     )
@@ -120,6 +120,7 @@ def student_results(request):
                 "percentage": pct,
                 "completed_at": se.completed_at.isoformat() if se.completed_at else None,
                 "result_public_id": se.result_public_id,
+                "ban_reason": (getattr(se, "ban_reason", "") or "").strip(),
             }
         )
     return Response(out)
@@ -137,27 +138,41 @@ def student_result_details(request, exam_id: int):
         return Response({"error": "Result not found"}, status=404)
     b = _result_details_bundle(se, request)
     if b == "corrupt":
-        # Eski natija — AI summary yo'q, fallback bilan qayta hisoblash
+        # Eski natija — AI summary yo'q, qayta hisoblash
         if se.session_questions_json:
-            questions = safe_json_loads(se.session_questions_json, [])
+            raw_questions = safe_json_loads(se.session_questions_json, [])
         else:
-            questions = safe_json_loads(se.exam.questions_json, [])
+            raw_questions = safe_json_loads(se.exam.questions_json, [])
         answers = norm_answers(safe_json_loads(se.answers_json, {}))
-        fallback_ai = build_fallback_ai_summary(questions, answers)
-        se.ai_summary_json = json.dumps(fallback_ai)
+        student_lang = resolve_student_exam_language(request, se.exam)
+        questions = prepare_questions_for_grading(
+            raw_questions, se.exam, answers, student_lang=student_lang
+        )
+        summary_lang = detect_grading_language(
+            se.exam, answers, student_lang=student_lang, raw_questions=raw_questions
+        )
+        rebuilt_ai = build_exam_ai_summary(questions, answers, summary_lang)
+        se.ai_summary_json = json.dumps(rebuilt_ai)
         se.save(update_fields=["ai_summary_json"])
         b = _result_details_bundle(se, request)
     if not b:
         return Response({"error": "Certificate not available for this attempt"}, status=404)
     ai_stored = safe_json_loads(se.ai_summary_json, {})
-    if ai_stored.get("source") == "fallback" and settings.OPENAI_API_KEY:
+    if needs_ai_summary_upgrade(ai_stored):
         try:
             if se.session_questions_json:
-                questions = safe_json_loads(se.session_questions_json, [])
+                raw_questions = safe_json_loads(se.session_questions_json, [])
             else:
-                questions = safe_json_loads(se.exam.questions_json, [])
+                raw_questions = safe_json_loads(se.exam.questions_json, [])
             answers = norm_answers(safe_json_loads(se.answers_json, {}))
-            upgraded = generate_exam_ai_summary(questions, answers, se.exam.language or "uz")
+            student_lang = resolve_student_exam_language(request, se.exam)
+            questions = prepare_questions_for_grading(
+                raw_questions, se.exam, answers, student_lang=student_lang
+            )
+            summary_lang = detect_grading_language(
+                se.exam, answers, student_lang=student_lang, raw_questions=raw_questions
+            )
+            upgraded = build_exam_ai_summary(questions, answers, summary_lang)
             if upgraded.get("items"):
                 se.ai_summary_json = json.dumps(upgraded)
                 se.save(update_fields=["ai_summary_json"])

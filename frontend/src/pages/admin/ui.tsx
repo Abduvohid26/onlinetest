@@ -1,5 +1,9 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
+import { ADMIN_TOAST_AUTO_MS, pushAdminToast, type AdminPageMsg } from './adminToast';
+
+export type { AdminPageMsg } from './adminToast';
+export { AdminToastLayer } from './adminToast';
 
 /*
  * Admin dizayn tizimi — "Quiet Enterprise".
@@ -305,20 +309,103 @@ export const AdminEmpty = ({ icon, title, subtitle }: EmptyStateProps) => (
 );
 
 /* ── Alert (error / success) ─────────────────────────────────────────────── */
+export type AdminAlertType = 'error' | 'success' | 'warning';
+
 interface AlertProps {
-  type: 'error' | 'success' | 'warning';
+  type: AdminAlertType;
   children: React.ReactNode;
+  compact?: boolean;
 }
-const ALERT_CLS = {
-  error:   'text-red-700 bg-red-50 border-red-100',
-  success: 'text-emerald-700 bg-emerald-50 border-emerald-100',
-  warning: 'text-amber-700 bg-amber-50 border-amber-100',
+const ALERT_CLS: Record<AdminAlertType, string> = {
+  error:   'text-red-700 bg-red-50 border-red-200',
+  success: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+  warning: 'text-amber-800 bg-amber-50 border-amber-200',
 };
-export const AdminAlert = ({ type, children }: AlertProps) => (
-  <div className={`text-[13.5px] font-medium rounded-lg px-3.5 py-2.5 border mb-4 ${ALERT_CLS[type]}`}>
-    {children}
+const ALERT_ICON: Record<AdminAlertType, React.ReactNode> = {
+  error: (
+    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  success: (
+    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+    </svg>
+  ),
+  warning: (
+    <svg className="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+    </svg>
+  ),
+};
+
+export const AdminAlert = ({ type, children, compact }: AlertProps) => (
+  <div
+    className={`flex items-start gap-2.5 text-[13.5px] font-medium rounded-lg px-3.5 py-2.5 border ${compact ? 'mb-0' : 'mb-4'} ${ALERT_CLS[type]}`}
+    role="alert"
+  >
+    {ALERT_ICON[type]}
+    <div className="flex-1 min-w-0 leading-snug pt-0.5">{children}</div>
   </div>
 );
+
+export function normalizeAdminAlertType(type: AdminPageMsg['type']): AdminAlertType {
+  if (type === 'ok' || type === 'success') return 'success';
+  if (type === 'warning') return 'warning';
+  return 'error';
+}
+
+interface AdminPageMessageProps {
+  message: AdminPageMsg | null | undefined;
+  onDismiss?: () => void;
+  autoHideMs?: number;
+}
+
+/** Bitta sahifa xabari — global toast (sahifa almashtirilsa ham qoladi). */
+export const AdminPageMessage = ({
+  message,
+  onDismiss,
+  autoHideMs = ADMIN_TOAST_AUTO_MS,
+}: AdminPageMessageProps) => {
+  const pushedRef = useRef<string | null>(null);
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  useEffect(() => {
+    if (!message?.text) return;
+    const sig = `${message.type}::${message.text}`;
+    if (pushedRef.current === sig) return;
+    pushedRef.current = sig;
+    pushAdminToast(message, () => onDismissRef.current?.(), autoHideMs);
+  }, [message?.type, message?.text, autoHideMs]);
+
+  return null;
+};
+
+interface AdminPageMessageStackProps {
+  messages: Array<AdminPageMsg | null | undefined>;
+  onDismiss?: (message: AdminPageMsg) => void;
+}
+
+/** Bir nechta xabar — global toast stack. */
+export const AdminPageMessageStack = ({ messages, onDismiss }: AdminPageMessageStackProps) => {
+  const pushedRef = useRef<Set<string>>(new Set());
+  const onDismissRef = useRef(onDismiss);
+  onDismissRef.current = onDismiss;
+
+  useEffect(() => {
+    const items = messages.filter((m): m is AdminPageMsg => Boolean(m?.text));
+    items.forEach((m) => {
+      const sig = `${m.type}::${m.text}`;
+      if (pushedRef.current.has(sig)) return;
+      pushedRef.current.add(sig);
+      const canDismiss = m.dismissible !== false && Boolean(onDismissRef.current);
+      pushAdminToast(m, canDismiss ? () => onDismissRef.current!(m) : undefined);
+    });
+  }, [messages]);
+
+  return null;
+};
 
 /* ── Modal (bir xil backdrop + panel + header) ───────────────────────────── */
 interface ModalProps {

@@ -91,6 +91,10 @@ deactivate
 
 `bootstrap_exam` admin yaratadi: ID odatda `fjstiadmin` (`ADMIN_BOOTSTRAP_ID`). **Production (`DJANGO_DEBUG=0`):** `ADMIN_BOOTSTRAP_PASSWORD` muhitda majburiy va kamida **12** belgi; standart parol ishlatilmaydi. Mahalliy ishlab chiqish (`DEBUG=1`) da parol ixtiyoriy — berilmasa `fjsti123`. `deploy/bootstrap-ubuntu-once.sh` birinchi marta `api.env` da kuchli parol generatsiya qiladi (`/root/onlinetest-admin-once.txt`).
 
+**iMentor integratsiyasi:** `api.env` da `IMENTOR_API_KEY` va ixtiyoriy `IMENTOR_API_BASE_URL` (standart `https://imentor.devflix.uz/api`) ni to‘ldiring. Kalit bo‘lmasa iMentor imtihonlari yaratilmaydi. Yangi testlar iMentor da 1 soatdan keyin e’lon qilinadi.
+
+**Docker (lokal):** `backend/.env` da `IMENTOR_API_KEY` bo‘lishi kerak. `docker-compose.yml` ichida `environment: IMENTOR_API_KEY: ${IMENTOR_API_KEY:-}` qo‘ymang — bo‘sh qiymat `.env` dagi kalitni container ichida o‘chirib yuboradi.
+
 **Demo kirishlar (ixtiyoriy):** `python manage.py seed_demo_users` — `demo_admin`, `demo_student`, `demo_teacher` uchun **bir xil** parol. Prod: `api.env` da `DEMO_SEED_PASSWORD` (kamida 12 belgi) majburiy. Dev (`DEBUG=1`): o‘rnatilmasa parol `DemoFJSTI2026!`. **Eslatma:** `teacher` roli SPA login da qo‘llab-quvvatlanmaydi (403); faqat admin va student tizimga kiradi.
 
 **Toza boshlash:** `python manage.py reset_single_admin --yes` — barcha `AppUser` va imtihon/natija yozuvlarini o‘chiradi, faqat **ID `admin`**, parol **`fjsti123`** qoldiradi (`--id` / `--password` bilan boshqacha ham bo‘ladi).

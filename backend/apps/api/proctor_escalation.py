@@ -8,8 +8,11 @@ ular chaqiruvchi tomonda (agar kerak bo'lsa) hal qilinadi.
 """
 from __future__ import annotations
 
-from apps.core.models import AppUser, StudentExam
+from apps.core.models import AppUser, Exam, StudentExam
 from django.utils import timezone as dj_tz
+
+from apps.api.proctor_exam_retake import try_apply_exam_retake, notify_exam_retake
+from apps.api.proctor_ban_reason import BAN_REASON_VIOLATION_LIMIT, apply_exam_ban
 
 
 def notify_banned(
@@ -54,6 +57,8 @@ def apply_official_warning_or_ban(
     max_warnings_before_ban: int = 3,
     auto_ban: bool = True,
     global_account_ban: bool = False,
+    exam: Exam | None = None,
+    violation_type: str | None = None,
 ) -> dict:
     """`se.proctor_official_warnings`ni oshiradi; `max_warnings_before_ban`ga
     yetganda ban qiladi (yoki `auto_ban=False` bo'lsa inson tekshiruviga yuboradi).
@@ -77,13 +82,42 @@ def apply_official_warning_or_ban(
                 "warningSuppressed": False,
                 "officialWarnings": max_warnings_before_ban,
             }
+        if exam is None:
+            exam = Exam.objects.filter(pk=exam_id).first()
+        if exam and violation_type:
+            retake_payload = try_apply_exam_retake(
+                se,
+                exam,
+                reason_text=reason_text,
+                violations_count=violations_count,
+                violation_type=violation_type,
+            )
+            if retake_payload:
+                if retake_payload.get("banned"):
+                    notify_banned(str(student_id), student_name, se.id, exam_id, reason_text, violations_count)
+                else:
+                    notify_exam_retake(
+                        student_id,
+                        se.id,
+                        exam_id,
+                        remaining=int(retake_payload.get("retakesRemaining") or 0),
+                        reason=reason_text,
+                        retakes_used=int(retake_payload.get("retakesUsed") or retake_payload.get("technicalRetakesUsed") or 0),
+                        identity_retake=bool(retake_payload.get("identityRetake")),
+                    )
+                return retake_payload
         if global_account_ban:
             AppUser.objects.filter(pk=student_id).update(status="Banned")
-        se.status = "Banned"
-        se.save(update_fields=["proctor_official_warnings", "proctor_last_warning_at", "status"])
+        ban_fields = apply_exam_ban(
+            se,
+            BAN_REASON_VIOLATION_LIMIT,
+            extra_fields=["proctor_official_warnings", "proctor_last_warning_at"],
+        )
+        se.save(update_fields=ban_fields)
         notify_banned(str(student_id), student_name, se.id, exam_id, reason_text, violations_count)
         return {
             "banned": True,
+            "banReason": BAN_REASON_VIOLATION_LIMIT,
             "violationsCount": violations_count,
             "warningNumber": max_warnings_before_ban,
             "violationReason": reason_text,

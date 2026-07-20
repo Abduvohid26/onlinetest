@@ -194,6 +194,7 @@ def admin_users_unban(request, user_id: str):
         AppUser.objects.filter(pk=user_id).update(status="Active")
         StudentExam.objects.filter(student_id=user_id, status="Banned").update(
             status="Pending",
+            ban_reason="",
             proctor_official_warnings=0,
             proctor_last_warning_at=None,
             device_fingerprint="",
@@ -214,31 +215,34 @@ def admin_users_unban(request, user_id: str):
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def admin_student_exams_retake(request, pk: int):
-    if request.user.role != "admin":
+    u = request.user
+    if u.role not in ("admin", "staff"):
         return Response({"error": "Forbidden"}, status=403)
-    # Express: qayta topshirishda javoblar + proktor ogohlantirish holatini tozalash.
-    updated = StudentExam.objects.filter(pk=pk).update(
-        status="Pending",
-        answers_json="",
-        score=None,
-        draft_answers_json="{}",
-        draft_flagged_json="[]",
-        draft_updated_at=None,
-        proctor_official_warnings=0,
-        proctor_last_warning_at=None,
-        device_fingerprint="",
-        device_bound_at=None,
-        session_signing_key="",
-        session_request_seq=1,
-    )
-    if not updated:
-        return Response({"error": "Not found"}, status=404)
     se_obj = StudentExam.objects.select_related("student", "exam").filter(pk=pk).first()
-    if se_obj:
-        audit(request, "retake_exam", "student_exam", pk,
-              getattr(se_obj.student, "name", str(pk)),
-              f"exam={getattr(se_obj.exam, 'title', '')}")
-    return Response({"success": True})
+    if not se_obj:
+        return Response({"error": "Not found"}, status=404)
+    if not _staff_can_manage_student_exam(u, se_obj):
+        return Response({"error": "Forbidden"}, status=403)
+
+    from apps.api.proctor_admin_retake import apply_admin_granted_retake
+
+    payload = apply_admin_granted_retake(
+        se_obj,
+        se_obj.exam,
+        bonus_retakes=0,
+        reset_usage=True,
+        reset_session=True,
+        notify_reason="Administrator qayta topshirishga ruxsat berdi",
+    )
+    audit(
+        request,
+        "retake_exam",
+        "student_exam",
+        pk,
+        getattr(se_obj.student, "name", str(pk)),
+        f"exam={getattr(se_obj.exam, 'title', '')}",
+    )
+    return Response(payload)
 
 
 @api_view(["POST"])
@@ -281,6 +285,90 @@ def admin_student_exams_unblock(request, pk: int):
     audit(request, "unblock_student", "student_exam", pk, student_name,
           f"exam_id={exam_id}, can_retake={can_retake}")
     return Response({"success": True, "can_retake": can_retake, "student_name": student_name})
+
+
+def _staff_can_manage_student_exam(user, se: StudentExam) -> bool:
+    if user.role == "admin":
+        return True
+    if user.role == "staff":
+        return Exam.objects.filter(pk=se.exam_id, teacher_id=user.id).exists()
+    return False
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def admin_student_exams_grant_technical_retakes(request, pk: int):
+    """Admin/o'qituvchi talabaga +3 texnik qayta urinish beradi."""
+    u = request.user
+    if u.role not in ("admin", "staff"):
+        return Response({"error": "Forbidden"}, status=403)
+
+    se = StudentExam.objects.select_related("student", "exam").filter(pk=pk).first()
+    if not se:
+        return Response({"error": "Not found"}, status=404)
+    if not _staff_can_manage_student_exam(u, se):
+        return Response({"error": "Forbidden"}, status=403)
+
+    from apps.api.proctor_admin_retake import apply_admin_granted_retake
+
+    reset_session = (se.status or "").strip() in ("Banned", "In Progress")
+    payload = apply_admin_granted_retake(
+        se,
+        se.exam,
+        bonus_retakes=3,
+        reset_usage=False,
+        reset_session=reset_session,
+        notify_reason="O'qituvchi qo'shimcha qayta topshirish berdi",
+    )
+    student_name = getattr(se.student, "name", str(se.student_id))
+    audit(
+        request,
+        "grant_exam_retakes",
+        "student_exam",
+        pk,
+        student_name,
+        f"exam_id={se.exam_id}, remaining={payload.get('retakes_remaining')}",
+    )
+    return Response(
+        {
+            **payload,
+            "student_name": student_name,
+        }
+    )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def admin_student_exams_fail(request, pk: int):
+    """Admin/o'qituvchi talabani imtihondan yiqib yuboradi (qayta topshirish yo'q)."""
+    u = request.user
+    if u.role not in ("admin", "staff"):
+        return Response({"error": "Forbidden"}, status=403)
+
+    se = StudentExam.objects.select_related("student").filter(pk=pk).first()
+    if not se:
+        return Response({"error": "Not found"}, status=404)
+    if not _staff_can_manage_student_exam(u, se):
+        return Response({"error": "Forbidden"}, status=403)
+
+    if (se.status or "").strip() == "Completed":
+        return Response({"error": "Exam already completed"}, status=409)
+
+    reason = str((request.data or {}).get("reason") or "").strip()[:500]
+    se.status = "Failed"
+    se.completed_at = dj_tz.now()
+    se.save(update_fields=["status", "completed_at"])
+
+    student_name = getattr(se.student, "name", str(se.student_id))
+    audit(
+        request,
+        "fail_student_exam",
+        "student_exam",
+        pk,
+        student_name,
+        f"exam_id={se.exam_id}, reason={reason[:80]}",
+    )
+    return Response({"success": True, "student_name": student_name, "status": "Failed"})
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def admin_ban_appeals(request):
@@ -961,6 +1049,86 @@ def admin_test_bank_categories_delete(request, pk: int):
 
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
+def admin_imentor_departments(request):
+    """iMentor katalog: kafedralar (1-qadam)."""
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    from apps.api.imentor_client import imentor_configured, imentor_published_test_count
+    from apps.api.imentor_service import departments_from_catalog, question_limit_bounds
+
+    if not imentor_configured():
+        return Response(
+            {
+                "configured": False,
+                "departments": [],
+                "published_tests_total": 0,
+                "error": "IMENTOR_API_KEY sozlanmagan (backend/.env yoki api.env)",
+            }
+        )
+    try:
+        departments = departments_from_catalog()
+        bounds = question_limit_bounds()
+        published_tests_total = imentor_published_test_count()
+    except Exception as ex:
+        return Response(
+            {
+                "configured": True,
+                "departments": [],
+                "published_tests_total": 0,
+                "error": str(ex),
+            },
+            status=502,
+        )
+    return Response(
+        {
+            "configured": True,
+            "departments": departments,
+            "published_tests_total": published_tests_total,
+            "question_limit_bounds": bounds,
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def admin_imentor_department_subjects(request, department_code: str):
+    """iMentor katalog: tanlangan kafedra fanlari (2-qadam)."""
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    from apps.api.imentor_client import imentor_configured
+    from apps.api.imentor_service import question_limit_bounds, subjects_for_department
+
+    if not imentor_configured():
+        return Response(
+            {
+                "configured": False,
+                "department": None,
+                "subjects": [],
+                "error": "IMENTOR_API_KEY sozlanmagan",
+            }
+        )
+    try:
+        department, subjects = subjects_for_department(department_code)
+        bounds = question_limit_bounds()
+    except Exception as ex:
+        return Response(
+            {"configured": True, "department": None, "subjects": [], "error": str(ex)},
+            status=502,
+        )
+    if department is None:
+        return Response({"error": "Kafedra topilmadi"}, status=404)
+    return Response(
+        {
+            "configured": True,
+            "department": department,
+            "subjects": subjects,
+            "question_limit_bounds": bounds,
+        }
+    )
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
 def admin_imentor_subjects(request):
     """iMentor tashqi API: fanlar ro'yxati (admin imtihon yaratish uchun)."""
     if request.user.role != "admin":
@@ -1132,6 +1300,7 @@ def admin_exam_detail(request, pk: int):
     questions_json = e.questions_json
     bank_cats_json = e.bank_category_ids or "[]"
     bank_count = e.bank_question_count or 0
+    imentor_codes_json = e.imentor_subject_codes or "[]"
     lang = d.get("language", e.language)
 
     if e.exam_mode == "static" and d.get("questions") is not None:
@@ -1170,6 +1339,40 @@ def admin_exam_detail(request, pk: int):
         bank_cats_json = json.dumps(cat_ids)
         bank_count = n
 
+    if e.exam_mode == "imentor_mixed" and (
+        d.get("imentor_subject_codes") is not None or d.get("bank_question_count") is not None
+    ):
+        from apps.api.imentor_client import IMentorApiError
+        from apps.api.imentor_service import (
+            normalize_exam_question_count,
+            resolve_imentor_subject_codes,
+            validate_imentor_subjects,
+        )
+
+        if d.get("imentor_subject_codes") is not None:
+            raw_codes = d.get("imentor_subject_codes")
+            if isinstance(raw_codes, list):
+                raw_list = [str(c).strip() for c in raw_codes if str(c).strip()]
+            else:
+                raw_list = [
+                    str(c).strip()
+                    for c in safe_json_loads(raw_codes or "[]", [])
+                    if str(c).strip()
+                ]
+            ok, err, _total = validate_imentor_subjects(raw_list)
+            if not ok:
+                return Response({"error": err}, status=400)
+            try:
+                codes = resolve_imentor_subject_codes(raw_list)
+            except IMentorApiError as ex:
+                return Response({"error": str(ex)}, status=400)
+            imentor_codes_json = json.dumps(codes)
+        if d.get("bank_question_count") is not None:
+            try:
+                bank_count = normalize_exam_question_count(d.get("bank_question_count"))
+            except IMentorApiError as ex:
+                return Response({"error": str(ex)}, status=400)
+
     title = d.get("title", e.title)
     st = parse_iso_datetime(d.get("start_time", e.start_time))
     et = parse_iso_datetime(d.get("end_time", e.end_time))
@@ -1191,6 +1394,23 @@ def admin_exam_detail(request, pk: int):
             e.custom_rules = rules or ""
             e.bank_category_ids = bank_cats_json
             e.bank_question_count = bank_count
+            e.imentor_subject_codes = imentor_codes_json
+            if d.get("technical_retakes_allowed") is not None:
+                e.technical_retakes_allowed = max(
+                    0, min(20, int(d.get("technical_retakes_allowed") or 0))
+                )
+            if d.get("proctor_profile") is not None:
+                from apps.api.proctor_profiles import normalize_proctor_profile, retake_limits_for_profile
+
+                profile = normalize_proctor_profile(d.get("proctor_profile"))
+                limits = retake_limits_for_profile(profile)
+                e.proctor_profile = profile
+                if d.get("technical_retakes_allowed") is None:
+                    e.technical_retakes_allowed = limits["technical_retakes_allowed"]
+                if d.get("identity_retakes_allowed") is None:
+                    e.identity_retakes_allowed = limits["identity_retakes_allowed"]
+            if d.get("identity_retakes_allowed") is not None:
+                e.identity_retakes_allowed = max(0, min(5, int(d.get("identity_retakes_allowed") or 0)))
             if "teacher_id" in d:
                 tu = AppUser.objects.filter(pk=str(d["teacher_id"]).strip()).first()
                 if tu and _request_user_role_norm(tu) in ("admin", "staff"):
@@ -1254,6 +1474,26 @@ def admin_exams_results(request, pk: int):
                 "identity_last_score": se.identity_last_score,
                 "identity_last_method": se.identity_last_method,
                 "identity_last_code": se.identity_last_code,
+                "technical_retakes_used": int(getattr(se, "technical_retakes_used", 0) or 0),
+                "bonus_technical_retakes": int(getattr(se, "bonus_technical_retakes", 0) or 0),
+                "identity_retakes_used": int(getattr(se, "identity_retakes_used", 0) or 0),
+                "violation_retakes_remaining": max(
+                    0,
+                    int(getattr(e, "technical_retakes_allowed", 3) or 3)
+                    + int(getattr(se, "bonus_technical_retakes", 0) or 0)
+                    - int(getattr(se, "technical_retakes_used", 0) or 0),
+                ),
+                "technical_retakes_remaining": max(
+                    0,
+                    int(getattr(e, "technical_retakes_allowed", 3) or 3)
+                    + int(getattr(se, "bonus_technical_retakes", 0) or 0)
+                    - int(getattr(se, "technical_retakes_used", 0) or 0),
+                ),
+                "identity_retakes_remaining": max(
+                    0,
+                    int(getattr(e, "identity_retakes_allowed", 1) or 1)
+                    - int(getattr(se, "identity_retakes_used", 0) or 0),
+                ),
             }
         )
     review_priority_counts = {

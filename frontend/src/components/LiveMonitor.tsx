@@ -66,6 +66,60 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
     }
   };
 
+  const handleGrantTechnicalRetakes = async (seId: number) => {
+    setUnblockBusy((prev) => ({ ...prev, [seId]: true }));
+    setUnblockError('');
+    try {
+      const res = await fetch(apiUrl(`/api/admin/student_exams/${seId}/grant-technical-retakes`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      if (!checkAdminAuthResponse(res) || !res.ok) {
+        const errText = await res.text().catch(() => '');
+        setUnblockError(errText || t.liveMonitorUnblockFailed);
+        return;
+      }
+      setBanAlerts((prev) =>
+        prev.map((a) => (a.student_exam_id === seId ? { ...a, resolved: true } : a)),
+      );
+    } catch {
+      setUnblockError(t.liveMonitorUnblockFailed);
+    } finally {
+      setUnblockBusy((prev) => ({ ...prev, [seId]: false }));
+    }
+  };
+
+  const handleFailStudent = async (seId: number) => {
+    setUnblockBusy((prev) => ({ ...prev, [seId]: true }));
+    setUnblockError('');
+    try {
+      const res = await fetch(apiUrl(`/api/admin/student_exams/${seId}/fail`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      if (!checkAdminAuthResponse(res) || !res.ok) {
+        const errText = await res.text().catch(() => '');
+        setUnblockError(errText || t.liveMonitorUnblockFailed);
+        return;
+      }
+      setBanAlerts((prev) =>
+        prev.map((a) => (a.student_exam_id === seId ? { ...a, resolved: true } : a)),
+      );
+    } catch {
+      setUnblockError(t.liveMonitorUnblockFailed);
+    } finally {
+      setUnblockBusy((prev) => ({ ...prev, [seId]: false }));
+    }
+  };
+
   useEffect(() => {
     const wsUrl = buildRealtimeUrl(token);
     const wsInstance = createRealtimeSocket(wsUrl, async (msg) => {
@@ -234,7 +288,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
                     <span className="ml-2 text-gray-400">· {alert.violations_count} qoidabuzarlik</span>
                   </p>
                 </div>
-                <div className="flex gap-2 shrink-0">
+                <div className="flex flex-wrap gap-2 shrink-0">
                   <AdminBtn
                     variant="emerald"
                     size="sm"
@@ -242,6 +296,22 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
                     onClick={() => handleUnblock(alert.student_exam_id, true)}
                   >
                     {t.liveMonitorAllowRetake ?? 'Davom etishga ruxsat'}
+                  </AdminBtn>
+                  <AdminBtn
+                    variant="blue"
+                    size="sm"
+                    loading={unblockBusy[alert.student_exam_id]}
+                    onClick={() => handleGrantTechnicalRetakes(alert.student_exam_id)}
+                  >
+                    {t.liveMonitorGrantTechnicalRetakes ?? '+3 texnik imkon'}
+                  </AdminBtn>
+                  <AdminBtn
+                    variant="red"
+                    size="sm"
+                    loading={unblockBusy[alert.student_exam_id]}
+                    onClick={() => handleFailStudent(alert.student_exam_id)}
+                  >
+                    {t.liveMonitorFailStudent ?? 'Yiqib yuborish'}
                   </AdminBtn>
                   <AdminBtn
                     variant="ghost"
@@ -334,7 +404,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
                         <span className="text-white/80 text-[11px] font-semibold tracking-widest uppercase">
                           {t.liveMonitorBanned ?? 'BLOKLANDI'}
                         </span>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2 justify-center">
                           <button
                             type="button"
                             disabled={unblockBusy[banAlert.student_exam_id]}
@@ -342,6 +412,22 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
                             className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
                           >
                             {t.liveMonitorAllowRetake ?? 'Ruxsat'}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={unblockBusy[banAlert.student_exam_id]}
+                            onClick={() => handleGrantTechnicalRetakes(banAlert.student_exam_id)}
+                            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
+                          >
+                            +3
+                          </button>
+                          <button
+                            type="button"
+                            disabled={unblockBusy[banAlert.student_exam_id]}
+                            onClick={() => handleFailStudent(banAlert.student_exam_id)}
+                            className="px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-[11px] font-semibold transition-colors"
+                          >
+                            {t.liveMonitorFailStudent ?? 'Yiqish'}
                           </button>
                           <button
                             type="button"

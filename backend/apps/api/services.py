@@ -62,6 +62,41 @@ def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) ->
     }
 
 
+def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], language: str) -> dict:
+    """AI orqali aniq tushuntirish; kalit yo'q yoki xato bo'lsa fallback."""
+    from apps.api.gemini_tools import generate_exam_ai_summary
+
+    lang = (language or "uz").lower()
+    if lang == "auto":
+        lang = "uz"
+    try:
+        return generate_exam_ai_summary(questions, answers, lang)
+    except Exception:
+        return build_fallback_ai_summary(questions, answers)
+
+
+def needs_ai_summary_upgrade(ai: dict) -> bool:
+    """Eski shablon yoki fallback summary — AI bilan yangilash kerakmi."""
+    from django.conf import settings
+
+    if not getattr(settings, "OPENAI_API_KEY", None):
+        return False
+    if not ai.get("items"):
+        return True
+    if ai.get("source") != "ai":
+        return True
+    for item in ai.get("items") or []:
+        if item.get("isCorrect"):
+            continue
+        ww = str(item.get("whyStudentWrong") or "")
+        wr = str(item.get("whyCorrectIsRight") or "")
+        if "savolning to'g'ri yechimi bilan mos kelmaydi" in ww:
+            return True
+        if "savol mazmuniga mos yagona aniq variant" in wr:
+            return True
+    return False
+
+
 def finalize_student_exam_session(
     se,
     exam,
@@ -77,7 +112,9 @@ def finalize_student_exam_session(
         questions = safe_json_loads(se.session_questions_json, [])
     else:
         questions = safe_json_loads(exam.questions_json, [])
+    raw_questions = list(questions)
     raw_answers = answers if isinstance(answers, dict) else {}
+    questions = prepare_questions_for_grading(questions, exam, raw_answers)
     try:
         norm = validate_exam_answers(questions, raw_answers)
     except ValueError:
@@ -87,7 +124,8 @@ def finalize_student_exam_session(
     done_at = completed_at or dj_tz.now()
     result_public_id = next_result_public_id()
     verify_secret = secrets.token_hex(32)
-    ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
+    summary_lang = detect_grading_language(exam, raw_answers, raw_questions=raw_questions)
+    ai_summary_json = json.dumps(build_exam_ai_summary(questions, norm, summary_lang))
     se.status = "Completed"
     se.score = score
     se.answers_json = json.dumps(norm)
@@ -447,6 +485,75 @@ def apply_exam_language_to_questions(full: list[dict], exam_lang: str, student_l
     if (exam_lang or "uz").lower() != "auto":
         return full
     return [localize_exam_question(q, student_lang) for q in full]
+
+
+def prepare_questions_for_grading(
+    questions: list[dict],
+    exam,
+    answers: dict | None = None,
+    *,
+    student_lang: str | None = None,
+) -> list[dict]:
+    """
+    Auto imtihon: sessiyadagi ko'p tilli savollarni talaba tiliga moslashtiradi.
+    submit/draft uchun — javoblar shu tildagi variantlar bilan solishtiriladi.
+    """
+    from apps.api.view_utils import validate_exam_answers
+
+    exam_lang = (getattr(exam, "language", None) or "uz").lower()
+    if exam_lang != "auto":
+        return questions
+    hint = (student_lang or "").lower().strip()[:2]
+    if hint in ("uz", "ru", "en"):
+        return [localize_exam_question(q, hint) for q in questions]
+    if not isinstance(answers, dict) or not answers:
+        return [localize_exam_question(q, "uz") for q in questions]
+    best_lang = "uz"
+    best_score = -1
+    for lang in ("uz", "ru", "en"):
+        loc = [localize_exam_question(q, lang) for q in questions]
+        try:
+            norm = validate_exam_answers(loc, answers)
+        except ValueError:
+            continue
+        filled = sum(1 for v in norm.values() if v)
+        if filled > best_score:
+            best_score = filled
+            best_lang = lang
+    return [localize_exam_question(q, best_lang) for q in questions]
+
+
+def detect_grading_language(
+    exam,
+    answers: dict | None,
+    *,
+    student_lang: str | None = None,
+    raw_questions: list[dict] | None = None,
+) -> str:
+    """Baholash/tahlil uchun til (auto imtihonda talaba yoki javoblardan)."""
+    from apps.api.view_utils import validate_exam_answers
+
+    exam_lang = (getattr(exam, "language", None) or "uz").lower()
+    if exam_lang != "auto":
+        return effective_exam_language(exam, exam_lang)
+    hint = (student_lang or "").lower().strip()[:2]
+    if hint in ("uz", "ru", "en"):
+        return hint
+    if not isinstance(answers, dict) or not answers or not raw_questions:
+        return "uz"
+    best_lang = "uz"
+    best_score = -1
+    for lang in ("uz", "ru", "en"):
+        loc = [localize_exam_question(q, lang) for q in raw_questions]
+        try:
+            norm = validate_exam_answers(loc, answers)
+        except ValueError:
+            continue
+        filled = sum(1 for v in norm.values() if v)
+        if filled > best_score:
+            best_score = filled
+            best_lang = lang
+    return best_lang
 
 
 def _question_has_lang_field(q: dict, lang: str) -> bool:

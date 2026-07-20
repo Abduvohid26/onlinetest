@@ -105,7 +105,7 @@ describe('VoiceActivityTracker', () => {
     const tracker = new VoiceActivityTracker();
     for (let i = 0; i < 50; i++) tracker.push(quiet);
     let sawHit = false;
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 10; i++) {
       const hit = tracker.push(speech);
       if (hit === 'WHISPER_OR_CONVERSATION_SUSPECTED') sawHit = true;
     }
@@ -118,13 +118,16 @@ describe('TalkingViolationCoordinator', () => {
     const coord = new TalkingViolationCoordinator();
     const t0 = Date.now();
     assert.equal(coord.onSpeechSignal(t0, { faceOk: true }), null);
-    assert.equal(coord.onMouthSignal(t0 + 500), 'WHISPER_OR_CONVERSATION_SUSPECTED');
+    assert.equal(
+      coord.onMouthSignal(t0 + 500, { faceOk: true }),
+      'WHISPER_OR_CONVERSATION_SUSPECTED',
+    );
   });
 
   it('detects background speech when mouth was quiet before speech', () => {
     const coord = new TalkingViolationCoordinator();
     const t0 = Date.now();
-    coord.onMouthSignal(t0 - 5000);
+    coord.onMouthSignal(t0 - 5000, { faceOk: true });
     assert.equal(
       coord.onSpeechSignal(t0, { faceOk: true }),
       'WHISPER_OR_CONVERSATION_SUSPECTED',
@@ -136,7 +139,7 @@ describe('TalkingViolationCoordinator', () => {
     const t0 = Date.now();
     assert.equal(coord.onSpeechSignal(t0, { faceOk: true }), null);
     assert.equal(
-      coord.tick(t0 + 1400, { faceOk: true }),
+      coord.tick(t0 + 900, { faceOk: true }),
       'WHISPER_OR_CONVERSATION_SUSPECTED',
     );
   });
@@ -146,8 +149,19 @@ describe('TalkingViolationCoordinator', () => {
     assert.equal(coord.onSpeechSignal(Date.now(), { faceOk: false }), null);
   });
 
-  it('does not emit for mouth alone', () => {
+  it('emits mouth violation after sustained mouth movement', () => {
     const coord = new TalkingViolationCoordinator();
-    assert.equal(coord.onMouthSignal(), null);
+    const t0 = Date.now();
+    assert.equal(coord.onMouthSignal(t0, { faceOk: true }), null);
+    assert.equal(
+      coord.onMouthSignal(t0 + 2500, { faceOk: true }),
+      'MOUTH_MOVEMENT_TALKING',
+    );
+  });
+
+  it('does not emit mouth violation without visible face', () => {
+    const coord = new TalkingViolationCoordinator();
+    assert.equal(coord.onMouthSignal(Date.now(), { faceOk: false }), null);
+    assert.equal(coord.onMouthSignal(Date.now() + 3000, { faceOk: false }), null);
   });
 });

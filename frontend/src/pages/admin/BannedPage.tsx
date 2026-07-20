@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
-import { AdminInput, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminLabel, AdminTextarea, AdminModal, AdminFileInput } from './ui';
+import { AdminInput, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminLabel, AdminTextarea, AdminModal, AdminFileInput, AdminPageMessage } from './ui';
 import type { BanAppeal, Group, StudentRow } from './types';
 
 interface Props { token: string; lang: Language; }
@@ -122,9 +122,7 @@ export function BannedPage({ token, lang }: Props) {
 
   return (
     <div className="space-y-5">
-      {pageMsg && (
-        <AdminAlert type={pageMsg.type === 'ok' ? 'success' : 'error'}>{pageMsg.text}</AdminAlert>
-      )}
+      <AdminPageMessage message={pageMsg} onDismiss={() => setPageMsg(null)} />
       {/* Bloklangan talabalar */}
       <AdminCard
         title={t.bannedUsers}

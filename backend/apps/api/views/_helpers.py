@@ -71,8 +71,10 @@ from apps.api.gemini_tools import (
 from apps.api.services import (
     assert_safe_result_public_id,
     bank_row_to_exam_dict,
+    build_exam_ai_summary,
     build_fallback_ai_summary,
     build_student_question_list,
+    detect_grading_language,
     exam_questions_add_translations,
     apply_exam_language_to_questions,
     effective_exam_language,
@@ -80,8 +82,10 @@ from apps.api.services import (
     filter_bank_questions_for_group,
     integrity_code,
     localize_exam_question,
+    needs_ai_summary_upgrade,
     next_result_public_id,
     parse_pdf_questions,
+    prepare_questions_for_grading,
     public_base_url,
     resolve_student_exam_language,
     shuffle_in_place,
@@ -451,6 +455,7 @@ def _violation_priority(vtype: str) -> str:
         "FULLSCREEN_EXIT_HARD",
         "MULTIPLE_FACES",
         "WHISPER_OR_CONVERSATION_SUSPECTED",
+        "MOUTH_MOVEMENT_TALKING",
         "VIRTUAL_WEBCAM_SUSPECTED",
         "CLIPBOARD_ATTEMPT",
         "PRINT_SCREEN",
@@ -676,6 +681,9 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "bank_category_ids": e.bank_category_ids,
         "bank_question_count": e.bank_question_count,
         "imentor_subject_codes": safe_json_loads(getattr(e, "imentor_subject_codes", None) or "[]", []),
+        "technical_retakes_allowed": int(getattr(e, "technical_retakes_allowed", 3) or 3),
+        "identity_retakes_allowed": int(getattr(e, "identity_retakes_allowed", 1) or 1),
+        "proctor_profile": str(getattr(e, "proctor_profile", "") or "standard"),
     }
 
 def _bank_pool_check(cat_ids: list, need_bank: int) -> tuple[bool, int]:
@@ -791,6 +799,12 @@ def _admin_exams_create_impl(request):
     if st >= et:
         return Response({"error": "Boshlanish vaqti tugash vaqtidan oldin bo'lishi kerak"}, status=400)
     dur = int(duration_minutes)
+    from apps.api.proctor_profiles import normalize_proctor_profile, retake_limits_for_profile
+
+    profile = normalize_proctor_profile(d.get("proctor_profile"))
+    profile_limits = retake_limits_for_profile(profile)
+    violation_retakes = max(0, min(20, int(d.get("technical_retakes_allowed") or profile_limits["technical_retakes_allowed"])))
+    identity_retakes = max(0, min(5, int(d.get("identity_retakes_allowed") or profile_limits["identity_retakes_allowed"])))
     window_minutes = int((et - st).total_seconds() // 60)
     if dur > window_minutes:
         return Response(
@@ -826,6 +840,9 @@ def _admin_exams_create_impl(request):
             bank_category_ids=bank_cats_json,
             bank_question_count=bank_count,
             imentor_subject_codes=imentor_codes_json,
+            technical_retakes_allowed=violation_retakes,
+            identity_retakes_allowed=identity_retakes,
+            proctor_profile=profile,
         )
         ExamGroup.objects.bulk_create([ExamGroup(exam_id=ex.id, group_id=gid) for gid in gids])
         eid = ex.id

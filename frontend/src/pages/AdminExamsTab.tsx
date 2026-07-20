@@ -69,7 +69,6 @@ export function AdminExamsTab({
   };
 
   const allowRetake = async (studentExamId: number) => {
-    if (isStaffPortal) return;
     const retakeRes = await fetch(apiUrl(`/api/admin/student_exams/${studentExamId}/retake`), {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
     });
@@ -448,7 +447,7 @@ export function AdminExamsTab({
                         </div>
                       )}
 
-                      {!isStaffPortal && (r.status === 'Banned' || r.status === 'Completed') && (
+                      {(r.status === 'Banned' || r.status === 'Completed' || r.status === 'Failed') && (
                         <AdminBtn variant="ghost" size="sm" onClick={() => allowRetake(r.id)}>{t.allowRetake}</AdminBtn>
                       )}
                     </div>

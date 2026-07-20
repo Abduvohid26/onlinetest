@@ -158,7 +158,7 @@ export class VoiceActivityTracker {
 
     if (isSpeech) {
       this.voiceStreak += 1;
-      if (this.voiceStreak >= 9) {
+      if (this.voiceStreak >= 6) {
         this.voiceStreak = 0;
         return 'WHISPER_OR_CONVERSATION_SUSPECTED';
       }
@@ -218,10 +218,21 @@ export type SpeechViolationContext = {
   faceOk: boolean;
 };
 
-const TALK_CROSS_WINDOW_MS = 3000;
-const MOUTH_QUIET_MS = 1400;
-const SPEECH_MOUTH_WAIT_MS = 1300;
-const TALK_EMIT_COOLDOWN_MS = 12_000;
+/** Og'iz/gapirish uchun yuz ko'rinadimi (WAITING va NO_FACE dan tashqari). */
+export function isFaceVisibleForTalk(status: string): boolean {
+  return status !== 'NO_FACE' && status !== 'MULTIPLE_FACES' && status !== 'WAITING';
+}
+
+export type TalkingViolationSignal =
+  | 'WHISPER_OR_CONVERSATION_SUSPECTED'
+  | 'MOUTH_MOVEMENT_TALKING';
+
+const TALK_CROSS_WINDOW_MS = 3500;
+const MOUTH_QUIET_MS = 1000;
+const SPEECH_MOUTH_WAIT_MS = 800;
+const TALK_EMIT_COOLDOWN_MS = 8000;
+const MOUTH_BURST_WINDOW_MS = 9000;
+const MOUTH_STANDALONE_MIN = 2;
 
 /**
  * Nutq qoidabuzarligini ikki yo'l bilan aniqlaydi:
@@ -233,41 +244,69 @@ export class TalkingViolationCoordinator {
   private lastMouthAt = 0;
   private lastEmitAt = 0;
   private pendingSpeechAt = 0;
+  private mouthBurst = 0;
+  private mouthBurstStart = 0;
 
   onSpeechSignal(
     now = Date.now(),
     ctx: SpeechViolationContext = { faceOk: false },
-  ): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+  ): TalkingViolationSignal | null {
     this.lastSpeechAt = now;
 
     const mouthRecent =
       this.lastMouthAt > 0 && now - this.lastMouthAt <= TALK_CROSS_WINDOW_MS;
     if (mouthRecent) {
       this.pendingSpeechAt = 0;
-      return this.emitIfCooldown(now);
+      return this.emitWhisperIfCooldown(now);
     }
 
     // Og'iz uzoq vaqt jim bo'lsa — orqada gapirish (darhol).
     if (ctx.faceOk && this.lastMouthAt > 0 && now - this.lastMouthAt >= MOUTH_QUIET_MS) {
       this.pendingSpeechAt = 0;
-      return this.emitIfCooldown(now);
+      return this.emitWhisperIfCooldown(now);
     }
 
-    // Talaba ham gapirishi mumkin — qisqa kutish, keyin tick() orqa fonni aniqlaydi.
+    // Mikrofon nutq bor — og'iz kelishi mumkin, tick() fon suhbatini tekshiradi.
     if (ctx.faceOk) {
       this.pendingSpeechAt = now;
+      if (this.lastMouthAt > 0 && now - this.lastMouthAt >= MOUTH_QUIET_MS) {
+        return this.emitWhisperIfCooldown(now);
+      }
     }
     return null;
   }
 
-  onMouthSignal(now = Date.now()): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+  onMouthSignal(
+    now = Date.now(),
+    ctx: SpeechViolationContext = { faceOk: false },
+  ): TalkingViolationSignal | null {
     this.lastMouthAt = now;
     this.pendingSpeechAt = 0;
+
     if (
       this.lastSpeechAt > 0 &&
       now - this.lastSpeechAt <= TALK_CROSS_WINDOW_MS
     ) {
-      return this.emitIfCooldown(now);
+      this.resetMouthBurst();
+      return this.emitWhisperIfCooldown(now);
+    }
+
+    if (!ctx.faceOk) {
+      this.resetMouthBurst();
+      return null;
+    }
+
+    if (!this.mouthBurstStart || now - this.mouthBurstStart > MOUTH_BURST_WINDOW_MS) {
+      this.mouthBurstStart = now;
+      this.mouthBurst = 1;
+    } else {
+      this.mouthBurst += 1;
+    }
+
+    // Mikrofon o'chirilgan yoki past bo'lsa ham og'iz harakati ogohlantirish beradi.
+    if (this.mouthBurst >= MOUTH_STANDALONE_MIN) {
+      this.resetMouthBurst();
+      return this.emitMouthIfCooldown(now);
     }
     return null;
   }
@@ -276,7 +315,7 @@ export class TalkingViolationCoordinator {
   tick(
     now = Date.now(),
     ctx: SpeechViolationContext = { faceOk: false },
-  ): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+  ): TalkingViolationSignal | null {
     if (!this.pendingSpeechAt) return null;
     if (now - this.pendingSpeechAt < SPEECH_MOUTH_WAIT_MS) return null;
 
@@ -284,15 +323,31 @@ export class TalkingViolationCoordinator {
       !this.lastMouthAt || now - this.lastMouthAt >= MOUTH_QUIET_MS;
     this.pendingSpeechAt = 0;
     if (!ctx.faceOk || !mouthQuiet) return null;
-    return this.emitIfCooldown(now);
+    return this.emitWhisperIfCooldown(now);
   }
 
-  private emitIfCooldown(now: number): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
+  private resetMouthBurst(): void {
+    this.mouthBurst = 0;
+    this.mouthBurstStart = 0;
+  }
+
+  private emitWhisperIfCooldown(now: number): 'WHISPER_OR_CONVERSATION_SUSPECTED' | null {
     if (now - this.lastEmitAt < TALK_EMIT_COOLDOWN_MS) return null;
     this.lastEmitAt = now;
     this.lastSpeechAt = 0;
     this.lastMouthAt = 0;
     this.pendingSpeechAt = 0;
+    this.resetMouthBurst();
     return 'WHISPER_OR_CONVERSATION_SUSPECTED';
+  }
+
+  private emitMouthIfCooldown(now: number): 'MOUTH_MOVEMENT_TALKING' | null {
+    if (now - this.lastEmitAt < TALK_EMIT_COOLDOWN_MS) return null;
+    this.lastEmitAt = now;
+    this.lastSpeechAt = 0;
+    this.lastMouthAt = 0;
+    this.pendingSpeechAt = 0;
+    this.resetMouthBurst();
+    return 'MOUTH_MOVEMENT_TALKING';
   }
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Language, translations } from '../i18n';
 
 type Group = { id: number; name: string; level_name?: string };
@@ -20,14 +20,22 @@ export function GroupMultiSelect({
 }) {
   const t = translations[lang];
   const selected = new Set(value);
+  const [picker, setPicker] = useState('');
 
-  const toggle = (id: number) => {
-    if (selected.has(id)) {
-      onChange(value.filter((x) => x !== id));
-    } else {
-      onChange([...value, id]);
-    }
+  const available = groups.filter((g) => !selected.has(g.id));
+
+  const addGroup = (raw: string) => {
+    const id = Number(raw);
+    if (!raw || Number.isNaN(id) || selected.has(id)) return;
+    onChange([...value, id]);
+    setPicker('');
   };
+
+  const removeGroup = (id: number) => {
+    onChange(value.filter((x) => x !== id));
+  };
+
+  const labelFor = (g: Group) => `${g.name}${g.level_name ? ` — ${g.level_name}` : ''}`;
 
   return (
     <div className="space-y-2">
@@ -56,48 +64,41 @@ export function GroupMultiSelect({
           {emptyLabel || t.adminNoExamsYet}
         </p>
       ) : (
-        <div className="relative">
-          <select
-            multiple
-            size={Math.min(8, Math.max(4, groups.length))}
-            value={value.map(String)}
-            onChange={(e) => {
-              const ids = Array.from(e.target.selectedOptions).map((o) => Number(o.value));
-              onChange(ids);
-            }}
-            className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-[14px] text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400"
-            aria-label={t.selectGroups}
-          >
-            {groups.map((g) => (
-              <option key={g.id} value={String(g.id)} className="py-1.5 rounded-lg">
-                {g.name}
-                {g.level_name ? ` — ${g.level_name}` : ''}
-              </option>
-            ))}
-          </select>
-          <p className="text-[11px] text-gray-400 mt-1.5">{t.selectGroupsCtrlHint}</p>
-        </div>
+        <select
+          value={picker}
+          onChange={(e) => addGroup(e.target.value)}
+          className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 pr-8 text-[14px] text-gray-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-400/40 focus:border-violet-400 transition-colors cursor-pointer"
+          aria-label={t.selectGroups}
+        >
+          <option value="">{available.length === 0 ? t.selectGroupsAllAdded : t.selectGroupsAdd}</option>
+          {available.map((g) => (
+            <option key={g.id} value={String(g.id)}>
+              {labelFor(g)}
+            </option>
+          ))}
+        </select>
       )}
 
-      {groups.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {groups.map((g) => {
-            const on = selected.has(g.id);
-            return (
-              <button
+      {value.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {groups
+            .filter((g) => selected.has(g.id))
+            .map((g) => (
+              <span
                 key={g.id}
-                type="button"
-                onClick={() => toggle(g.id)}
-                className={`text-[12px] px-2.5 py-1 rounded-full border transition-colors ${
-                  on
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300'
-                }`}
+                className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-full border bg-blue-600 text-white border-blue-600"
               >
                 {g.name}
-              </button>
-            );
-          })}
+                <button
+                  type="button"
+                  onClick={() => removeGroup(g.id)}
+                  className="leading-none opacity-80 hover:opacity-100"
+                  aria-label={g.name}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
         </div>
       )}
     </div>

@@ -48,8 +48,8 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
-      IMENTOR_API_BASE_URL: ${IMENTOR_API_BASE_URL:-https://imentor.devflix.uz/api}
-      IMENTOR_API_KEY: ${IMENTOR_API_KEY:-}
+      # IMENTOR_* faqat backend/.env (env_file) dan — environment da qayta yozmang:
+      # ${IMENTOR_API_KEY:-} bo'sh bo'lib .env dagi kalitni container ichida o'chiradi.
 
   # Celery worker
   worker:

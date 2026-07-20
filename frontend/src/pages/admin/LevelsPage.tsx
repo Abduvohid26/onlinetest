@@ -5,7 +5,7 @@ import { apiUrl } from '../../lib/apiUrl';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminAlert, ChevronRight, PlusIcon,
+  AdminEmpty, AdminPageMessage, ChevronRight, PlusIcon,
 } from './ui';
 import type { Level, Group } from './types';
 
@@ -128,6 +128,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
 
   return (
     <div className="space-y-5">
+      <AdminPageMessage message={msg} onDismiss={() => setMsg(null)} />
       <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 items-start">
 
         {/* ── Daraja qo'shish ── */}
@@ -137,13 +138,6 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
           subtitle={t.levelSubtitle}
         >
           <div className="px-5 py-4 space-y-4">
-            <AnimatePresence mode="wait">
-              {msg && (
-                <motion.div key={msg.type + msg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <AdminAlert type={msg.type}>{msg.text}</AdminAlert>
-                </motion.div>
-              )}
-            </AnimatePresence>
             <form onSubmit={addLevel} className="space-y-4">
               <AdminField label={t.levelLabel} required>
                 <AdminInput

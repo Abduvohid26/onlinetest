@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
 import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
-import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, PlusIcon } from './admin/ui';
+import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, AdminPageMessageStack, PlusIcon } from './admin/ui';
 
 /* ── Types ── */
 type Category = {
@@ -342,14 +342,13 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
 
   return (
     <div className="space-y-5">
-      {/* Page-level alert */}
-      <AnimatePresence>
-        {pageMsg && (
-          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <AdminAlert type={pageMsg.type === 'ok' ? 'success' : 'error'}>{pageMsg.text}</AdminAlert>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AdminPageMessageStack
+        messages={[pageMsg, importMsg]}
+        onDismiss={(m) => {
+          if (pageMsg && m.text === pageMsg.text) setPageMsg(null);
+          else setImportMsg(null);
+        }}
+      />
 
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
@@ -374,14 +373,6 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
           subtitle={t.testBankAiHint}
         >
           <div className="px-5 py-4 space-y-4">
-            <AnimatePresence mode="wait">
-              {importMsg && (
-                <motion.div key={importMsg.type + importMsg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                  <AdminAlert type={importMsg.type === 'ok' ? 'success' : 'error'}>{importMsg.text}</AdminAlert>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             <form key={formKey} onSubmit={importSmart} className="space-y-4">
               <AdminField label={`${t.testCollectionNameEn} *`}>
                 <AdminInput

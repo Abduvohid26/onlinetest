@@ -131,7 +131,12 @@ class ExamAdmin(admin.ModelAdmin):
         (
             "Savollar",
             {
-                "fields": ("questions_json", "bank_category_ids", "bank_question_count"),
+                "fields": (
+                    "questions_json",
+                    "bank_category_ids",
+                    "bank_question_count",
+                    "imentor_subject_codes",
+                ),
                 "classes": ("collapse",),
             },
         ),

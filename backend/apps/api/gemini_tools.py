@@ -232,16 +232,18 @@ def _resize_image_if_large(data: bytes, max_kb: int = 100) -> bytes:
 
 def generate_exam_ai_summary(questions: list[dict], answers: dict[str, str], language: str) -> dict:
     """
-    Imtihon natijalari tahlili.
-    TOKEN TEJASH: faqat xato javoblarni AI ga yuboramiz, to'g'rilar uchun fallback.
+    Imtihon natijalari tahlili — har bir xato uchun aniq tibbiy tushuntirish (AI).
+    TOKEN TEJASH: faqat xato javoblarni AI ga yuboramiz.
     """
     from apps.api.services import build_fallback_ai_summary
 
+    fallback = build_fallback_ai_summary(questions, answers)
+
     if not api_key_configured():
-        return build_fallback_ai_summary(questions, answers)
+        return fallback
+
     client = _client()
 
-    # Faqat xato javoblarni ajratib olamiz
     wrong_questions = []
     correct_map: dict[int, bool] = {}
     for q in questions:
@@ -250,28 +252,41 @@ def generate_exam_ai_summary(questions: list[dict], answers: dict[str, str], lan
         is_correct = st == q.get("correctAnswer")
         correct_map[qid] = is_correct
         if not is_correct:
+            opts = [str(o).strip() for o in (q.get("options") or []) if str(o).strip()][:6]
             wrong_questions.append({
                 "id": qid,
-                "q": q["text"][:200],  # Uzun savollarni qisqartirish
-                "correct": q.get("correctAnswer", "")[:100],
-                "student": st[:100] or "blank",
+                "question": str(q.get("text") or "")[:600],
+                "options": opts,
+                "correctAnswer": str(q.get("correctAnswer") or "")[:200],
+                "studentAnswer": (st or "—")[:200],
             })
 
-    # Agar hammasi to'g'ri bo'lsa — AI kerak emas
     if not wrong_questions:
-        return build_fallback_ai_summary(questions, answers)
+        out = dict(fallback)
+        out["source"] = "ai"
+        return out
 
     lang_code = "uz" if language == "uz" else "ru" if language == "ru" else "en"
-    lang_name = {"uz": "O'zbek", "ru": "Russian", "en": "English"}[lang_code]
+    lang_name = {"uz": "O'zbek (lotin)", "ru": "Rus", "en": "Ingliz"}[lang_code]
+    correct_comments = {
+        "uz": "Javob to'g'ri — klinik jihatdan mos tanlov.",
+        "ru": "Ответ верный — клинически обоснованный выбор.",
+        "en": "Correct — clinically appropriate choice.",
+    }
 
-    # Minimal structured prompt — faqat xato savollar
-    wrong_json = json.dumps(wrong_questions[:30], ensure_ascii=False)  # Max 30 xato
+    wrong_json = json.dumps(wrong_questions[:25], ensure_ascii=False)
     prompt = (
-        f"Medical exam errors analysis. Language: {lang_name}.\n"
-        f"Wrong answers (id,q,correct,student):\n{wrong_json}\n"
-        f"Return JSON only: {{\"overview\":\"1 sentence\","
-        f"\"items\":[{{\"questionId\":N,\"whyStudentWrong\":\"<20 words\","
-        f"\"whyCorrectIsRight\":\"<20 words\"}}]}}"
+        f"Siz tibbiy imtihon natijalarini tahlil qiluvchi o'qituvchisiz. Barcha matnlar faqat {lang_name} tilida.\n\n"
+        f"Har bir XATO javob uchun:\n"
+        f"- whyStudentWrong: 2–3 jumla — talaba tanlagan variant NIMA UCHUN bu klinik vaziyatda noto'g'ri "
+        f"(mexanizm, qoida, xavf yoki kontraindikatsiya). Shablon gaplar ishlatmang.\n"
+        f"- whyCorrectIsRight: 2–3 jumla — to'g'ri javob NIMA UCHUN mos (klinik asos, birinchi navbat, standart).\n\n"
+        f"TAQIQLANGAN: «mos kelmaydi», «yagona aniq variant», «to'g'ri yechim bilan» kabi umumiy shablonlar.\n"
+        f"Har bir savol uchun ALOHIDA, mazmunga bog'liq tushuntirish bering.\n\n"
+        f"Xato javoblar (JSON):\n{wrong_json}\n\n"
+        f"Faqat JSON qaytaring:\n"
+        f'{{"overview":"umumiy 1–2 jumla fikr ({lang_name})",'
+        f'"items":[{{"questionId":<id>,"whyStudentWrong":"...","whyCorrectIsRight":"..."}}]}}'
     )
 
     try:
@@ -283,8 +298,18 @@ def generate_exam_ai_summary(questions: list[dict], answers: dict[str, str], lan
         if not isinstance(obj.get("items"), list):
             raise ValueError("items missing")
 
-        # Xato va to'g'rilarni birlashtirish
-        ai_items_map = {item["questionId"]: item for item in obj["items"] if isinstance(item, dict)}
+        ai_items_map: dict[int, dict] = {}
+        for item in obj["items"]:
+            if not isinstance(item, dict):
+                continue
+            qid = item.get("questionId")
+            if qid is None:
+                continue
+            try:
+                ai_items_map[int(qid)] = item
+            except (TypeError, ValueError):
+                continue
+
         full_items = []
         for q in questions:
             qid = q["id"]
@@ -293,23 +318,35 @@ def generate_exam_ai_summary(questions: list[dict], answers: dict[str, str], lan
                 full_items.append({
                     "questionId": qid,
                     "isCorrect": True,
-                    "commentCorrect": "✓",
+                    "commentCorrect": correct_comments[lang_code],
                     "whyStudentWrong": "",
                     "whyCorrectIsRight": "",
                 })
             else:
                 ai = ai_items_map.get(qid, {})
+                why_wrong = str(ai.get("whyStudentWrong") or "").strip()
+                why_right = str(ai.get("whyCorrectIsRight") or "").strip()
+                fb_row = next((i for i in fallback["items"] if i.get("questionId") == qid), {})
+                if not why_wrong:
+                    why_wrong = fb_row.get("whyStudentWrong", "")
+                if not why_right:
+                    why_right = fb_row.get("whyCorrectIsRight", "")
                 full_items.append({
                     "questionId": qid,
                     "isCorrect": False,
                     "commentCorrect": "",
-                    "whyStudentWrong": ai.get("whyStudentWrong", ""),
-                    "whyCorrectIsRight": ai.get("whyCorrectIsRight", ""),
+                    "whyStudentWrong": why_wrong,
+                    "whyCorrectIsRight": why_right,
                 })
 
-        return {"overview": obj.get("overview", ""), "items": full_items}
+        return {
+            "overview": str(obj.get("overview") or fallback.get("overview") or "").strip(),
+            "items": full_items,
+            "source": "ai",
+        }
     except Exception:
-        return build_fallback_ai_summary(questions, answers)
+        _logger.warning("generate_exam_ai_summary failed, using fallback", exc_info=True)
+        return fallback
 
 
 # ---------------------------------------------------------------------------

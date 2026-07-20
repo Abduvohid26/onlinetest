@@ -5,7 +5,7 @@ import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../..
 import { fileToProfileImageBase64, ProfileImageError } from '../../lib/profileImage';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminAlert, AdminModal, AdminFileInput, PlusIcon,
+  AdminEmpty, AdminAlert, AdminModal, AdminFileInput, AdminPageMessageStack, PlusIcon,
 } from './ui';
 import type { Group, StudentRow } from './types';
 
@@ -165,9 +165,18 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
 
   return (
     <div className="space-y-5">
-      {pageMsg && (
-        <AdminAlert type={pageMsg.type === 'ok' ? 'success' : 'error'}>{pageMsg.text}</AdminAlert>
-      )}
+      <AdminPageMessageStack
+        messages={[
+          pageMsg,
+          addMsg,
+          addError ? { type: 'err', text: addError } : null,
+        ]}
+        onDismiss={(m) => {
+          if (pageMsg && m.text === pageMsg.text && m.type === pageMsg.type) setPageMsg(null);
+          else if (addMsg && m.text === addMsg.text && m.type === addMsg.type) setAddMsg(null);
+          else setAddError('');
+        }}
+      />
 
       {/* ── Talaba qo'shish ── */}
       <AdminCard
@@ -177,8 +186,6 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
         subtitle={t.adminStudentAddSubtitle}
       >
         <div className="px-5 py-4 space-y-4">
-          {addError && <AdminAlert type="error">{addError}</AdminAlert>}
-          {addMsg && <AdminAlert type={addMsg.type === 'ok' ? 'success' : 'error'}>{addMsg.text}</AdminAlert>}
           <form key={addFormKey} onSubmit={addStudent} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <AdminField label="ID" required>

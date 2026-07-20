@@ -207,3 +207,22 @@ class ExamRealtimeConsumer(AsyncJsonWebsocketConsumer):
             "student_exam_id": event.get("student_exam_id"),
             "can_retake": event.get("can_retake", False),
         })
+
+    async def exam_exam_retake(self, event: dict) -> None:
+        if event.get("exam_id") != self.exam_id:
+            return
+        await self.send_json({
+            "type": "exam_retake",
+            "student_id": event["student_id"],
+            "student_exam_id": event.get("student_exam_id"),
+            "exam_id": event["exam_id"],
+            "retakes_remaining": event.get("retakes_remaining", event.get("technical_retakes_remaining", 0)),
+            "technical_retakes_remaining": event.get("technical_retakes_remaining", event.get("retakes_remaining", 0)),
+            "retakes_used": event.get("retakes_used", 0),
+            "reason": event.get("reason", ""),
+            "identity_retake": event.get("identity_retake", False),
+        })
+
+    async def exam_technical_retake(self, event: dict) -> None:
+        """Eski WS event — exam_retake ga yo'naltiriladi."""
+        await self.exam_exam_retake(event)

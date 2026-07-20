@@ -57,6 +57,50 @@ export function computeYaw(lm: any[]): number | null {
   return (nose.x - left.x) / width - 0.5;
 }
 
+/** Active liveness challenge chegaralari (PreExamCheck bilan bir xil). */
+export const CHALLENGE_YAW_MIN = 0.18;
+export const CHALLENGE_CENTER_MAX = 0.17;
+
+/**
+ * Mirror preview ko'rsatmasiga mos burilish — realtimeProctor GAZE mapping bilan bir xil:
+ * musbat yaw = talaba chapga, manfiy yaw = talaba o'ngga burgan.
+ */
+export function challengeYawMatches(
+  direction: 'left' | 'right',
+  yaw: number,
+  minYaw = CHALLENGE_YAW_MIN,
+): boolean {
+  return direction === 'left' ? yaw >= minYaw : yaw <= -minYaw;
+}
+
+export function challengeYawCentered(
+  yaw: number,
+  maxAbs = CHALLENGE_CENTER_MAX,
+): boolean {
+  return Math.abs(yaw) <= maxAbs;
+}
+
+async function createFaceLandmarker(numFaces = 1): Promise<any | null> {
+  const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
+  const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+  const base = {
+    baseOptions: { modelAssetPath: FACE_MODEL },
+    runningMode: 'VIDEO' as const,
+    numFaces,
+  };
+  for (const delegate of ['GPU', 'CPU'] as const) {
+    try {
+      return await FaceLandmarker.createFromOptions(fileset, {
+        ...base,
+        baseOptions: { ...base.baseOptions, delegate },
+      });
+    } catch {
+      /* keyingi delegate */
+    }
+  }
+  return null;
+}
+
 export class FacePositionChecker {
   private video: HTMLVideoElement;
   private onUpdate: FacePositionUpdate;
@@ -74,14 +118,8 @@ export class FacePositionChecker {
 
   async init(): Promise<boolean> {
     try {
-      const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
-      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-      this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
-        runningMode: 'VIDEO',
-        numFaces: 2,
-      });
-      if (this.disposed) {
+      this.landmarker = await createFaceLandmarker(2);
+      if (this.disposed || !this.landmarker) {
         this.dispose();
         return false;
       }
@@ -202,14 +240,8 @@ export class YawChallengeTracker {
 
   async init(): Promise<boolean> {
     try {
-      const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
-      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-      this.landmarker = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
-        runningMode: 'VIDEO',
-        numFaces: 1,
-      });
-      if (this.disposed) {
+      this.landmarker = await createFaceLandmarker();
+      if (this.disposed || !this.landmarker) {
         this.dispose();
         return false;
       }

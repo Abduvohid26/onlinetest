@@ -3,9 +3,9 @@ import { motion } from 'motion/react';
 import { translations, Language, formatPreExamMediaAccessFailure } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
-import { examAuthHeaders } from '../lib/deviceFingerprint';
+import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
-import { FacePositionChecker, YawChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
+import { FacePositionChecker, YawChallengeTracker, type FacePositionStatus, challengeYawMatches, challengeYawCentered } from '../lib/facePositionCheck';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
@@ -31,20 +31,8 @@ const LIVENESS_H = 60;
 
 // Active liveness challenge (bosh burish) — passiv piksel-farq tekshiruvidan keyin,
 // video-replay/statik-foto spoofing'ga qarshi qo'shimcha qatlam sifatida ishlaydi.
-const CHALLENGE_YAW_MIN = 0.22; // position-gate'ning YAW_MAX (0.17) dan qattiqroq
-const CHALLENGE_CENTER_MAX = 0.17; // markazga qaytish — gate bilan bir xil chegara
-const CHALLENGE_CENTER_STREAK_NEEDED = 5; // markazda barqaror bo'lishi kerak bo'lgan freym soni
-const CHALLENGE_TIMEOUT_MS = 8000;
-/**
- * MUHIM: video preview CSS orqali oynalanadi (`scaleX(-1)`), lekin MediaPipe xom
- * (oynalanmagan) kamera bufer koordinatasi ustida ishlaydi (`computeYaw` ning
- * musbat/manfiy belgisi shu xom koordinataga tegishli). Talaba ko'rsatmani o'z
- * oynadagi (mirror) aksiga qarab bajaradi — shuning uchun "chapga bur" ko'rsatmasi
- * xom noseRelX'ning qaysi belgisiga mos kelishini BRAUZERDA QO'LDA TEKSHIRISH SHART
- * (production'ga chiqarishdan oldin). Agar teskari bo'lib chiqsa, faqat shu xaritani
- * almashtiring — boshqa hech narsaga tegishli emas.
- */
-const DIRECTION_SIGN: Record<'left' | 'right', number> = { left: -1, right: 1 };
+const CHALLENGE_CENTER_STREAK_NEEDED = 4; // markazda barqaror bo'lishi kerak bo'lgan freym soni
+const CHALLENGE_TIMEOUT_MS = 12000;
 
 /** Kadr yoritilishi/piksel yig'indisi o'zgarishi — foydalanuvchi harakat yoki tabiiy harakat */
 async function samplePassiveFrameMotion(captureFrame: () => number): Promise<boolean> {
@@ -81,6 +69,7 @@ export function PreExamCheck({
   const [agreed, setAgreed] = useState(false);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [starting, setStarting] = useState(false);
   /** Kamera bor, mikrofon ochilmagan — qizil xato emas, ogohlantirish */
   const [mediaHint, setMediaHint] = useState('');
   const [verifying, setVerifying] = useState(false);
@@ -455,14 +444,14 @@ export function PreExamCheck({
       if (cancelled) return;
       setChallengeStatus((prev) => {
         if (prev === 'waiting_turn') {
-          if (yaw !== null && yaw * DIRECTION_SIGN[direction] >= CHALLENGE_YAW_MIN) {
+          if (yaw !== null && challengeYawMatches(direction, yaw)) {
             challengeCenterStreakRef.current = 0;
             return 'waiting_center';
           }
           return prev;
         }
         if (prev === 'waiting_center') {
-          if (yaw !== null && Math.abs(yaw) <= CHALLENGE_CENTER_MAX) {
+          if (yaw !== null && challengeYawCentered(yaw)) {
             challengeCenterStreakRef.current += 1;
             if (challengeCenterStreakRef.current >= CHALLENGE_CENTER_STREAK_NEEDED) {
               return 'passed';
@@ -601,19 +590,56 @@ export function PreExamCheck({
     }
   };
 
-  const handleEnter = () => {
+  const handleEnter = async () => {
     if (exam.has_pin && !pin) {
       setError(t.enterPin);
       return;
     }
     setError('');
-    onComplete(
-      {
-        ...exam,
-        preExamPin: pin,
-      },
-      0,
-    );
+    setStarting(true);
+    try {
+      const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Student-Lang': lang,
+          ...examAuthHeaders(token),
+        },
+        body: JSON.stringify({ pin, student_lang: lang }),
+      });
+      const data = await readJsonSafe<{
+        error?: string;
+        exam?: any;
+        studentExamId?: number;
+        startedAt?: string;
+        sessionKey?: string;
+        sessionSeqStart?: number;
+        sessionChallenge?: string;
+        deviceToken?: string;
+      }>(res);
+      if (!res.ok || !data?.exam || data.studentExamId == null) {
+        setError(data?.error || t.preExamStartError);
+        return;
+      }
+      if (data.deviceToken) {
+        setDeviceSessionToken(data.deviceToken);
+      }
+      onComplete(
+        {
+          ...data.exam,
+          startedAt: data.startedAt,
+          sessionKey: data.sessionKey,
+          sessionSeqStart: data.sessionSeqStart,
+          sessionChallenge: data.sessionChallenge,
+          preExamPin: pin,
+        },
+        data.studentExamId,
+      );
+    } catch {
+      setError(t.preExamNetworkError);
+    } finally {
+      setStarting(false);
+    }
   };
 
   const positionLabel = (
@@ -939,11 +965,12 @@ export function PreExamCheck({
               <AdminBtn
                 variant="blue"
                 size="lg"
-                onClick={handleEnter}
-                disabled={!canStart}
+                onClick={() => void handleEnter()}
+                disabled={!canStart || starting}
+                loading={starting}
                 className="flex-1 sm:flex-none sm:px-8"
               >
-                {t.preExamEnterExam}
+                {starting ? t.preExamStarting : t.preExamEnterExam}
               </AdminBtn>
             </div>
           </div>

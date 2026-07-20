@@ -5,7 +5,7 @@ import { apiUrl } from '../../lib/apiUrl';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminAlert, PlusIcon,
+  AdminEmpty, AdminAlert, AdminPageMessageStack, PlusIcon,
 } from './ui';
 import type { StudentRow } from './types';
 
@@ -276,13 +276,14 @@ export function StaffPage({ token, lang }: Props) {
 
   return (
     <div className="space-y-3">
-      {pageMsg && (
-        <AnimatePresence mode="wait">
-          <motion.div key={pageMsg.type + pageMsg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-            <AdminAlert type={pageMsg.type === 'ok' ? 'success' : 'error'}>{pageMsg.text}</AdminAlert>
-          </motion.div>
-        </AnimatePresence>
-      )}
+      <AdminPageMessageStack
+        messages={[pageMsg, staffMsg, adminMsg]}
+        onDismiss={(m) => {
+          if (pageMsg && m.text === pageMsg.text) setPageMsg(null);
+          else if (staffMsg && m.text === staffMsg.text) setStaffMsg(null);
+          else setAdminMsg(null);
+        }}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-5 items-start">
 
@@ -291,13 +292,6 @@ export function StaffPage({ token, lang }: Props) {
           {/* Staff qo'shish */}
           <AdminCard icon={<PlusIcon />} title={t.addHodimCardTitle} subtitle={t.staffPortalSubtitle}>
             <div className="px-5 py-4 space-y-4">
-              <AnimatePresence mode="wait">
-                {staffMsg && (
-                  <motion.div key={staffMsg.type + staffMsg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                    <AdminAlert type={staffMsg.type === 'ok' ? 'success' : 'error'}>{staffMsg.text}</AdminAlert>
-                  </motion.div>
-                )}
-              </AnimatePresence>
               <form key={staffFormKey} onSubmit={addStaff} className="space-y-4">
                 <AdminField label="ID" required>
                   <AdminInput name="id" required autoComplete="off" placeholder="staff001" />
@@ -323,13 +317,6 @@ export function StaffPage({ token, lang }: Props) {
             subtitle={t.adminAdminSubtitle}
           >
             <div className="px-5 py-4 space-y-4">
-              <AnimatePresence mode="wait">
-                {adminMsg && (
-                  <motion.div key={adminMsg.type + adminMsg.text} initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                    <AdminAlert type={adminMsg.type === 'ok' ? 'success' : 'error'}>{adminMsg.text}</AdminAlert>
-                  </motion.div>
-                )}
-              </AnimatePresence>
               <form key={adminFormKey} onSubmit={addAdmin} className="space-y-4">
                 <AdminField label="ID" required>
                   <AdminInput name="id" required autoComplete="off" placeholder="admin001" />

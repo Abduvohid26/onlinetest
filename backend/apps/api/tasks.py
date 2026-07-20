@@ -160,7 +160,7 @@ def run_sweep_stale_sessions() -> dict:
 
     checked = 0
     flagged = 0
-    for se in candidates.select_related("student").iterator():
+    for se in candidates.select_related("student", "exam").iterator():
         checked += 1
         already_flagged_recently = ViolationLog.objects.filter(
             student_id=se.student_id,
@@ -182,7 +182,7 @@ def run_sweep_stale_sessions() -> dict:
         if se.started_at:
             logs_qs = logs_qs.filter(timestamp__gte=se.started_at)
         cnt_all = logs_qs.count()
-        apply_official_warning_or_ban(
+        result = apply_official_warning_or_ban(
             se,
             student_id=str(se.student_id),
             student_name=getattr(se.student, "name", str(se.student_id)),
@@ -192,7 +192,21 @@ def run_sweep_stale_sessions() -> dict:
             max_warnings_before_ban=max_warnings,
             auto_ban=auto_ban,
             global_account_ban=global_ban,
+            exam=se.exam,
+            violation_type="PROCTOR_FEED_LOST",
         )
+        if result.get("examRetake") or result.get("technicalRetake"):
+            from apps.api.proctor_exam_retake import notify_exam_retake
+
+            if not result.get("banned"):
+                notify_exam_retake(
+                    str(se.student_id),
+                    se.id,
+                    se.exam_id,
+                    remaining=int(result.get("retakesRemaining") or result.get("technicalRetakesRemaining") or 0),
+                    reason="Kamera oqimi to'xtab qoldi (server aniqladi)",
+                    retakes_used=int(result.get("retakesUsed") or result.get("technicalRetakesUsed") or 0),
+                )
         flagged += 1
 
     return {"checked": checked, "flagged": flagged}

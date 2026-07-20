@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { Login } from './pages/Login';
 import { AdminDashboard } from './pages/AdminDashboard';
@@ -129,6 +129,13 @@ function AppContent() {
   });
   const navigate = useNavigate();
   const location = useLocation();
+  const { examId: routeExamIdRaw } = useParams<{ examId?: string }>();
+  const routeExamId = routeExamIdRaw ? Number(routeExamIdRaw) : null;
+  const routePhase = location.pathname.endsWith('/room')
+    ? 'room'
+    : location.pathname.endsWith('/check')
+      ? 'check'
+      : null;
 
   useEffect(() => {
     safeStorageSet('lang', lang);
@@ -207,6 +214,7 @@ function AppContent() {
       setActiveExam(saved.activeExam);
       setStudentExamId(saved.studentExamId);
       setExamStatus('checking');
+      if (saved.activeExam?.id) navigate(`/exam/${saved.activeExam.id}/check`, { replace: true });
       return;
     }
     if (saved.examStatus === 'taking') {
@@ -220,13 +228,18 @@ function AppContent() {
             setActiveExam({ ...saved.activeExam, ...match });
             setStudentExamId(saved.studentExamId);
             setExamStatus('taking');
+            navigate(`/exam/${saved.activeExam.id}/room`, { replace: true });
           } else {
             clearExamFlow();
+            navigate('/', { replace: true });
           }
         })
-        .catch(() => clearExamFlow());
+        .catch(() => {
+          clearExamFlow();
+          navigate('/', { replace: true });
+        });
     }
-  }, [user?.role, token]);
+  }, [user?.role, token, navigate]);
 
   useEffect(() => {
     if (user?.role !== 'student') return;
@@ -241,20 +254,52 @@ function AppContent() {
     }
   }, [examStatus, activeExam, studentExamId, user?.role]);
 
+  useEffect(() => {
+    if (user?.role !== 'student' || !token || !routeExamId || Number.isNaN(routeExamId)) return;
+    if (activeExam?.id === routeExamId) return;
+    fetch(apiUrl('/api/student/exams'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(async (r) => {
+        const list = await readJsonSafe<any[]>(r);
+        const match = Array.isArray(list) ? list.find((e) => e.id === routeExamId) : null;
+        if (!match) {
+          navigate('/', { replace: true });
+          return;
+        }
+        setActiveExam(match);
+        setStudentExamId(match.student_exam_id ?? 0);
+        if (routePhase === 'check') setExamStatus('checking');
+        else if (routePhase === 'room') setExamStatus('taking');
+      })
+      .catch(() => navigate('/', { replace: true }));
+  }, [user?.role, token, routeExamId, routePhase, activeExam?.id, navigate]);
+
   const startExamCheck = (exam: any, seId: number) => {
     setActiveExam(exam);
     setStudentExamId(seId);
     setExamStatus('checking');
+    navigate(`/exam/${exam.id}/check`);
   };
 
   const beginExam = (examData: any, seId: number) => {
     setActiveExam(examData);
     setStudentExamId(seId);
     setExamStatus('taking');
+    navigate(`/exam/${examData.id}/room`);
+  };
+
+  const retakeRestartExam = () => {
+    if (!activeExam) return;
+    clearExamFlow();
+    setExamStatus('checking');
+    navigate(`/exam/${activeExam.id}/check`);
   };
 
   const resumeExam = async (exam: any, pin = '') => {
     if (!token) return;
+    if (exam.identity_refresh_required || exam.session_phase === 'after_retake') {
+      startExamCheck(exam, exam.student_exam_id ?? 0);
+      return;
+    }
     try {
       const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
         method: 'POST',
@@ -299,11 +344,24 @@ function AppContent() {
   };
 
   const finishExam = (submitPayload?: ExamResultPayload | null) => {
+    if (submitPayload == null) {
+      exitExamFlow();
+      return;
+    }
     clearExamFlow();
     setExamStatus('finished');
     setActiveExam(null);
     setStudentExamId(null);
-    setLastSubmitResult(submitPayload ?? null);
+    setLastSubmitResult(submitPayload);
+    navigate('/');
+  };
+
+  const exitExamFlow = () => {
+    clearExamFlow();
+    setExamStatus('pending');
+    setActiveExam(null);
+    setStudentExamId(null);
+    navigate('/');
   };
 
   if (!token || !user) {
@@ -439,24 +497,25 @@ function AppContent() {
                 <StudentDashboard token={token} user={user} onStartExam={startExamCheck} onResumeExam={resumeExam} lang={lang} />
               </div>
             )}
-            {user.role === 'student' && location.pathname === '/' && examStatus === 'checking' && activeExam && (
+            {user.role === 'student' && examStatus === 'checking' && activeExam && (
               <PreExamCheck 
                 exam={activeExam} 
                 token={token} 
                 lang={lang}
                 user={user}
                 onComplete={beginExam} 
-                onCancel={() => setExamStatus('pending')} 
+                onCancel={exitExamFlow} 
               />
             )}
-            {user.role === 'student' && location.pathname === '/' && examStatus === 'taking' && activeExam && (
+            {user.role === 'student' && examStatus === 'taking' && activeExam && (
               <ExamRoom 
                 exam={activeExam} 
                 studentExamId={studentExamId ?? 0} 
                 token={token} 
                 user={user}
                 lang={lang}
-                onFinish={finishExam} 
+                onFinish={finishExam}
+                onRetakeRestart={retakeRestartExam}
               />
             )}
             {user.role === 'student' && location.pathname === '/' && examStatus === 'finished' && lastSubmitResult && (
@@ -467,6 +526,7 @@ function AppContent() {
                 onBack={() => {
                   setLastSubmitResult(null);
                   setExamStatus('pending');
+                  navigate('/');
                 }}
               />
             )}
@@ -477,7 +537,7 @@ function AppContent() {
                 </div>
                 <h2 className="text-3xl font-bold mb-4 tracking-tight">{t.examFinishedTitle}</h2>
                 <p className="text-gray-500 mb-8 text-lg">{t.examFinishedBody}</p>
-                <Button onClick={() => setExamStatus('pending')} size="lg">{t.studentDash}</Button>
+                <Button onClick={() => { setExamStatus('pending'); navigate('/'); }} size="lg">{t.studentDash}</Button>
               </div>
             )}
           </motion.div>
@@ -504,6 +564,8 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/verify/result/:resultId" element={<PublicVerifyResult />} />
+        <Route path="/exam/:examId/check" element={<AppContent />} />
+        <Route path="/exam/:examId/room" element={<AppContent />} />
         <Route path="*" element={<AppContent />} />
       </Routes>
     </Router>

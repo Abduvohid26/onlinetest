@@ -37,6 +37,10 @@ class StudentExam(models.Model):
     proctor_official_warnings = models.PositiveSmallIntegerField(default=0)
     proctor_last_warning_at = models.DateTimeField(null=True, blank=True)
     proctor_last_frame_at = models.DateTimeField(null=True, blank=True)
+    technical_retakes_used = models.PositiveSmallIntegerField(default=0)
+    bonus_technical_retakes = models.PositiveSmallIntegerField(default=0)
+    identity_retakes_used = models.PositiveSmallIntegerField(default=0)
+    ban_reason = models.CharField(max_length=32, blank=True, default="")
 
     class Meta:
         app_label = "core"
