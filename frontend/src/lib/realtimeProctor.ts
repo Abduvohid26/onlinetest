@@ -63,10 +63,21 @@ export type LiveSignalType =
   | 'MULTI_FACE';
 export const LIVE_SIGNAL_CONFIRM_MS = 1500;
 export const LIVE_SIGNAL_ESCALATE_MS = 4000;
+// JIDDIY, aniq qoidabuzarliklar (yuz umuman yo'q = turib ketdi/chiqib ketdi; kadrda
+// ko'p yuz = kimdir keldi) uchun TEZ eskalatsiya — bularni "tuzatishga vaqt berish"
+// mantig'i shart emas, darhol ushlash kerak.
+export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 
-// Kichik chip (kamera panelidagi sariq qator) FAQAT shu turlar uchun chiqadi.
-// Qolganlari (pozitsiya/gaze/yuz) kamera badge'ida ko'rsatiladi — takror bo'lmasin.
-const CHIP_SIGNAL_TYPES = new Set<LiveSignalType>(['TALKING', 'MOVEMENT', 'HAND']);
+// Kichik chip (kamera panelidagi sariq qator) shu turlar uchun chiqadi. Pozitsiya/gaze
+// (uzoq/yaqin/markaz/burilish) kamera badge'ida ko'rsatiladi — takror bo'lmasin. Lekin
+// yuz yo'q / ko'p yuz — jiddiy, shu sabab ular ham chip bilan aniq ko'rsatiladi.
+const CHIP_SIGNAL_TYPES = new Set<LiveSignalType>([
+  'TALKING',
+  'MOVEMENT',
+  'HAND',
+  'NO_FACE',
+  'MULTI_FACE',
+]);
 
 const env = (import.meta as any).env || {};
 const WASM_BASE: string =
@@ -80,7 +91,10 @@ const HAND_MODEL: string =
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
 // Detection tezligi va bardoshlilik. Tez aniqlash uchun streak/cooldown kichik.
-const DETECT_INTERVAL_MS = 130; // ~7-8 fps
+const DETECT_INTERVAL_MS = 150; // ~6.5 fps (yuk/tezlik balansi — proctoring uchun yetarli)
+// Qo'l modeli har necha kadrda ishlasin (performance). 3 = ~2.5 fps qo'l uchun —
+// qo'l ko'tarish sekin (3-4s eskalatsiya), shu sabab yetarli; MediaPipe yuki kamayadi.
+const HAND_DETECT_EVERY = 3;
 const PER_TYPE_COOLDOWN_MS = 3500; // bir tur uchun emit oralig'i (server ham dedup qiladi)
 
 // BARCHA real-time signal turi (yuz yo'q/ko'p yuz, gaze, pozitsiya, qimirlash,
@@ -134,6 +148,10 @@ export class RealtimeProctor {
   private timer: number | null = null;
   private running = false;
   private disposed = false;
+  // Performance: qo'l modelini har kadrda emas, har HAND_DETECT_EVERY kadrda ishlatamiz
+  // (qo'l ko'tarish sekin harakat — 7fps shart emas). Bu MediaPipe yukini kamaytiradi.
+  private frameCount = 0;
+  private lastHandsPresent = false;
 
   private lastEmit: Record<string, number> = {};
   // Davomiy signal (kichik→katta eskalatsiya) uchun — necha vaqtdan beri uzluksiz faol.
@@ -175,7 +193,9 @@ export class RealtimeProctor {
       this.faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
         runningMode: 'VIDEO',
-        numFaces: 3,
+        // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
+        // izlash har kadrda ortiqcha yuk edi.
+        numFaces: 2,
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: false,
       });
@@ -185,7 +205,8 @@ export class RealtimeProctor {
         this.handLandmarker = await HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
           runningMode: 'VIDEO',
-          numHands: 2,
+          // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
+          numHands: 1,
         });
       } catch {
         this.handLandmarker = null;
@@ -284,11 +305,15 @@ export class RealtimeProctor {
     // 0) Qo'l/imo-ishora — YUZDAN OLDIN tekshiramiz: qo'l yuzga yaqin/ustida bo'lsa,
     // FaceLandmarker og'iz nuqtalarini noto'g'ri o'qib, soxta "gapiryapti" signali
     // berishi mumkin (occlusion) — shu holatni og'iz tekshiruviga xabar beramiz.
-    let handsPresent = false;
-    if (this.handLandmarker) {
+    // Performance: qo'l modeli har HAND_DETECT_EVERY kadrda ishlaydi (oradagi kadrlarda
+    // oxirgi natija ishlatiladi — qo'l holati 260ms da keskin o'zgarmaydi).
+    this.frameCount += 1;
+    let handsPresent = this.lastHandsPresent;
+    if (this.handLandmarker && this.frameCount % HAND_DETECT_EVERY === 0) {
       try {
         const hres = this.handLandmarker.detectForVideo(v, ts + 0.001);
         handsPresent = (hres?.landmarks?.length || 0) > 0;
+        this.lastHandsPresent = handsPresent;
       } catch {
         /* ignore */
       }
@@ -312,13 +337,13 @@ export class RealtimeProctor {
 
     const faceCount = faces.length;
 
-    // 1) Yuz yo'q / ko'p yuz — kichik→katta eskalatsiya (qonun): 1.5s kichik, 3s rasmiy.
-    // Identity xavfsizligi uchun "recheck" DARHOL ishlaydi (kim o'tirganini tez ushlash),
-    // lekin RASMIY violation faqat holat uzluksiz 3s davom etsagina yuboriladi.
+    // 1) Yuz yo'q / ko'p yuz — JIDDIY, TEZ eskalatsiya (~1.6s). Yuz umuman yo'q =
+    // talaba turib/chiqib ketdi; ko'p yuz = kimdir keldi. Bularni "tuzatishga vaqt"
+    // berish mantig'i shart emas — darhol ushlash kerak. "recheck" ham darhol ishlaydi.
     this.liveMs.NO_FACE = this.trackContinuous('noFace', faceCount === 0);
-    if (this.liveMs.NO_FACE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_NOT_VISIBLE');
+    if (this.liveMs.NO_FACE >= LIVE_SIGNAL_ESCALATE_FAST_MS) this.emit('FACE_NOT_VISIBLE');
     this.liveMs.MULTI_FACE = this.trackContinuous('multiFace', faceCount >= 2);
-    if (this.liveMs.MULTI_FACE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('MULTIPLE_FACES');
+    if (this.liveMs.MULTI_FACE >= LIVE_SIGNAL_ESCALATE_FAST_MS) this.emit('MULTIPLE_FACES');
 
     // Person-swap: yuz yo'qolib qayta paydo bo'lsa — kim qaytganini tekshir (darhol).
     if (faceCount === 0) {
