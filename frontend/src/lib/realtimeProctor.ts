@@ -47,10 +47,19 @@ export type FaceStatusLive =
  *      vizual ogohlantirish chiqadi (hali rasmiy emas, backendga yuborilmaydi).
  *   2) Signal shundan keyin ham davom etib, jami LIVE_SIGNAL_ESCALATE_MS (3s) ga
  *      yetsa — haqiqiy (backendga yuboriladigan) rasmiy ogohlantirishga aylanadi.
- * Bir martalik hodisalar (tab-switch, print-screen va h.k.) bu mexanizmga
- * kirmaydi — ular hozirgidek darhol qoladi.
+ * Yuz yo'q (NO_FACE) va ko'p yuz (MULTI_FACE) ham shu qonunga bo'ysunadi — lekin
+ * identity xavfsizligi uchun "recheck" darhol ishlaydi (rasmiy violation esa 3s da).
  */
-export type LiveSignalType = 'TALKING' | 'HEAD_AWAY' | 'TOO_FAR' | 'TOO_CLOSE' | 'OFF_CENTER' | 'MOVEMENT' | 'HAND';
+export type LiveSignalType =
+  | 'TALKING'
+  | 'HEAD_AWAY'
+  | 'TOO_FAR'
+  | 'TOO_CLOSE'
+  | 'OFF_CENTER'
+  | 'MOVEMENT'
+  | 'HAND'
+  | 'NO_FACE'
+  | 'MULTI_FACE';
 export const LIVE_SIGNAL_CONFIRM_MS = 1500;
 export const LIVE_SIGNAL_ESCALATE_MS = 3000;
 
@@ -69,16 +78,9 @@ const HAND_MODEL: string =
 const DETECT_INTERVAL_MS = 130; // ~7-8 fps
 const PER_TYPE_COOLDOWN_MS = 3500; // bir tur uchun emit oralig'i (server ham dedup qiladi)
 
-// Streak: signal "rost" deb hisoblanishidan oldin necha ketma-ket frame kerak.
-// Past qiymat = tezroq aniqlash (~ frame * 130ms).
-// gaze/mouth/tooFar/tooClose/offCenter/movement/hand — kichik→katta eskalatsiya
-// qoidasiga o'tkazilgan (trackContinuous + LIVE_SIGNAL_ESCALATE_MS), shu yerda
-// streak shart emas. FACE_NOT_VISIBLE/MULTIPLE_FACES — identity xavfsizligi bilan
-// bog'liq, ataylab darhol (qonun mustasnosi) qoladi.
-const STREAK = {
-  noFace: 6, // ~0.8s yuz yo'q
-  multiFace: 3, // ~0.4s 2+ yuz (tez!)
-};
+// BARCHA real-time signal turi (yuz yo'q/ko'p yuz, gaze, pozitsiya, qimirlash,
+// qo'l, og'iz) kichik→katta eskalatsiya qoidasiga o'tkazilgan (trackContinuous +
+// LIVE_SIGNAL_ESCALATE_MS). Bu yerda alohida streak konstantalar shart emas.
 
 // Yuz o'lchami va pozitsiya chegaralari (normalized; facePositionCheck.ts bilan moslangan).
 const FACE_MIN_HEIGHT = 0.26;
@@ -129,7 +131,6 @@ export class RealtimeProctor {
   private disposed = false;
 
   private lastEmit: Record<string, number> = {};
-  private streaks: Record<string, number> = {};
   // Davomiy signal (kichik→katta eskalatsiya) uchun — necha vaqtdan beri uzluksiz faol.
   private activeSince: Record<string, number> = {};
   private lastActiveAt: Record<string, number> = {};
@@ -151,6 +152,8 @@ export class RealtimeProctor {
     OFF_CENTER: 0,
     MOVEMENT: 0,
     HAND: 0,
+    NO_FACE: 0,
+    MULTI_FACE: 0,
   };
 
   constructor(video: HTMLVideoElement, cb: RealtimeProctorCallbacks) {
@@ -268,20 +271,6 @@ export class RealtimeProctor {
     return 0;
   }
 
-  /** Streak hisoblagich: kerakli ketma-ketlikka yetganda true qaytaradi (va resetlaydi). */
-  private streak(key: string, active: boolean, need: number): boolean {
-    if (!active) {
-      this.streaks[key] = 0;
-      return false;
-    }
-    this.streaks[key] = (this.streaks[key] || 0) + 1;
-    if (this.streaks[key] >= need) {
-      this.streaks[key] = 0;
-      return true;
-    }
-    return false;
-  }
-
   private detectOnce(): void {
     const v = this.video;
     if (!v || v.readyState < 2 || v.videoWidth === 0) return;
@@ -318,14 +307,15 @@ export class RealtimeProctor {
 
     const faceCount = faces.length;
 
-    // 1) Yuz yo'q / ko'p yuz
-    if (this.streak('noFace', faceCount === 0, STREAK.noFace)) this.emit('FACE_NOT_VISIBLE');
-    if (this.streak('multiFace', faceCount >= 2, STREAK.multiFace)) {
-      this.emit('MULTIPLE_FACES');
-      this.requestRecheck(); // ko'p yuz — kim o'tirganini tekshir
-    }
+    // 1) Yuz yo'q / ko'p yuz — kichik→katta eskalatsiya (qonun): 1.5s kichik, 3s rasmiy.
+    // Identity xavfsizligi uchun "recheck" DARHOL ishlaydi (kim o'tirganini tez ushlash),
+    // lekin RASMIY violation faqat holat uzluksiz 3s davom etsagina yuboriladi.
+    this.liveMs.NO_FACE = this.trackContinuous('noFace', faceCount === 0);
+    if (this.liveMs.NO_FACE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_NOT_VISIBLE');
+    this.liveMs.MULTI_FACE = this.trackContinuous('multiFace', faceCount >= 2);
+    if (this.liveMs.MULTI_FACE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('MULTIPLE_FACES');
 
-    // Person-swap: yuz yo'qolib qayta paydo bo'lsa — kim qaytganini tekshir.
+    // Person-swap: yuz yo'qolib qayta paydo bo'lsa — kim qaytganini tekshir (darhol).
     if (faceCount === 0) {
       this.faceWasAbsent = true;
       this.cb.onFaceStatus?.('NO_FACE');
@@ -336,6 +326,7 @@ export class RealtimeProctor {
 
     if (faceCount >= 2) {
       this.cb.onFaceStatus?.('MULTIPLE_FACES');
+      this.requestRecheck(); // ko'p yuz — kim o'tirganini darhol tekshir
     }
 
     if (faceCount >= 1) {
@@ -353,11 +344,16 @@ export class RealtimeProctor {
 
       this.analyzeHeadAndMovement(faces[0], faceBlendshapes, handsPresent);
     } else {
+      // Yuz yo'q — barcha yuzga bog'liq davomiy signallarni so'ndiramiz. MOVEMENT/HAND
+      // ham reset qilinmasa, yuz yo'qolganda eskirgan qiymat kamera panelida noto'g'ri
+      // chip ko'rsatishi mumkin edi (masalan "qimirlash" — yuz yo'q bo'lsa ham).
       this.liveMs.TOO_FAR = this.trackContinuous('tooFar', false);
       this.liveMs.TOO_CLOSE = this.trackContinuous('tooClose', false);
       this.liveMs.OFF_CENTER = this.trackContinuous('offCenter', false);
       this.liveMs.HEAD_AWAY = 0;
       this.liveMs.TALKING = this.trackContinuous('mouth', false);
+      this.liveMs.MOVEMENT = this.trackContinuous('move', false);
+      this.moveEma = 0;
       this.prevNose = null;
       this.mouthHistory = [];
       this.jawOpenHistory = [];

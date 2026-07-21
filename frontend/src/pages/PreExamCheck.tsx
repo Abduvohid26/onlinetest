@@ -67,6 +67,15 @@ export function PreExamCheck({
   onComplete: (examData: any, seId: number) => void;
   onCancel: () => void;
 }) {
+  // Retake holatini faqat transient prop'dan emas, exam ma'lumotidan ham aniqlaymiz —
+  // shunda retake PreExamCheck'da brauzer yangilansa ham (prop yo'qolsa) PIN/pozitsiya
+  // gate qayta talab qilinmaydi (backend baribir retake'da PIN so'ramaydi).
+  const isRetakeResolved = Boolean(
+    isRetake ||
+      exam?.session_phase === 'after_retake' ||
+      (exam?.technical_retakes_used ?? 0) > 0 ||
+      (exam?.identity_retakes_used ?? 0) > 0,
+  );
   const [cameraReady, setCameraReady] = useState(false);
   const [micReady, setMicReady] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -592,7 +601,7 @@ export function PreExamCheck({
   };
 
   const handleEnter = async () => {
-    if (exam.has_pin && !pin && !isRetake) {
+    if (exam.has_pin && !pin && !isRetakeResolved) {
       setError(t.enterPin);
       return;
     }
@@ -671,7 +680,7 @@ export function PreExamCheck({
   if (!micReady) blocked.push(t.preExamBlockedMic);
   if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
   if (!agreed) blocked.push(t.preExamBlockedAgree);
-  if (exam.has_pin && !pin && !isRetake) blocked.push(t.preExamBlockedPin);
+  if (exam.has_pin && !pin && !isRetakeResolved) blocked.push(t.preExamBlockedPin);
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
@@ -833,7 +842,7 @@ export function PreExamCheck({
                   </div>
                 </div>
 
-                {!verified && !isRetake && (
+                {!verified && !isRetakeResolved && (
                   <div className={`rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors ${positionOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                     <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${positionOk ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
                     <p className={`text-[12.5px] font-medium leading-snug ${positionOk ? 'text-emerald-700' : 'text-amber-700'}`}>{positionLabel}</p>
@@ -842,7 +851,7 @@ export function PreExamCheck({
 
                 <AdminBtn
                   onClick={verifyIdentity}
-                  disabled={!cameraReady || verifying || verified || (!positionOk && !isRetake)}
+                  disabled={!cameraReady || verifying || verified || (!positionOk && !isRetakeResolved)}
                   variant={verified ? 'emerald' : 'blue'}
                   size="md"
                   loading={verifying}
@@ -919,7 +928,7 @@ export function PreExamCheck({
 
         {/* ── Footer action bar (doim ko'rinadi, scroll ustida emas) ── */}
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
-          {exam.has_pin && !isRetake && (
+          {exam.has_pin && !isRetakeResolved && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
               <div className="flex items-center gap-2.5 shrink-0">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500">

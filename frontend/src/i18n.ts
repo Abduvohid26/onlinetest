@@ -215,11 +215,12 @@ export const translations = {
     technicalRetakeTitle: "Qoidabuzarlik — qayta topshirish",
     technicalRetakeViolationLabel: "Qoidabuzarlik",
     technicalRetakeBody:
-      "Bosh sahifadan imtihonni qayta boshlang.",
+      "Bu urinishdan chetlatildingiz. Imtihon vaqti tugamaguncha bosh sahifadagi “Qayta boshlash” tugmasi orqali istalgan vaqtda qaytadan kirishingiz mumkin. Qaytmasangiz yoki vaqt tugasa, shu urinish natijasi yoziladi.",
     technicalRetakeUsedRemaining:
       "{used} marta sarflandi · Yana {remaining} ta imkoniyat qoldi",
     technicalRetakeBackBtn: "Bosh sahifaga qaytish",
     technicalRetakeRestartBtn: "Qayta boshlash",
+    technicalRetakeRestartNow: "Hozir qayta boshlash",
     proctorProfileLabel: "Qoidalar profili",
     proctorProfileSoft: "Yumshoq",
     proctorProfileStandard: "Standart",
@@ -909,11 +910,12 @@ export const translations = {
     technicalRetakeTitle: "Нарушение — пересдача",
     technicalRetakeViolationLabel: "Нарушение",
     technicalRetakeBody:
-      "Начните экзамен заново с главной страницы.",
+      "Вы отстранены от этой попытки. Пока экзамен открыт, вы можете начать заново в любое время кнопкой «Начать заново» на главной. Если не вернётесь или время выйдет — засчитается результат этой попытки.",
     technicalRetakeUsedRemaining:
       "Использовано {used} · Осталось {remaining} попыток",
     technicalRetakeBackBtn: "На главную",
     technicalRetakeRestartBtn: "Начать заново",
+    technicalRetakeRestartNow: "Начать сейчас",
     proctorProfileLabel: "Профиль правил",
     proctorProfileSoft: "Мягкий",
     proctorProfileStandard: "Стандарт",
@@ -1599,11 +1601,12 @@ export const translations = {
     technicalRetakeTitle: "Violation — retake",
     technicalRetakeViolationLabel: "Violation",
     technicalRetakeBody:
-      "Restart the exam from the dashboard.",
+      "You've been removed from this attempt. While the exam is open you can restart anytime with the “Restart” button on your dashboard. If you don't return or time runs out, this attempt's result is recorded.",
     technicalRetakeUsedRemaining:
       "{used} used · {remaining} attempt(s) left",
     technicalRetakeBackBtn: "Back to dashboard",
     technicalRetakeRestartBtn: "Restart",
+    technicalRetakeRestartNow: "Restart now",
     proctorProfileLabel: "Rules profile",
     proctorProfileSoft: "Soft",
     proctorProfileStandard: "Standard",

@@ -263,6 +263,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "proctor.sweep_stale_sessions",
         "schedule": float(os.environ.get("PROCTOR_SWEEP_INTERVAL_SECONDS", "60")),
     },
+    # Vaqti tugagan imtihonlarni avtomatik yakunlash: kirib tugatmaganni ballash,
+    # retake'ga qaytmaganni "Failed", umuman kirmaganni "Failed (kelmagan)" qilish.
+    "exam-finalize-ended-exams": {
+        "task": "exam.finalize_ended_exams",
+        "schedule": float(os.environ.get("EXAM_FINALIZE_INTERVAL_SECONDS", "300")),
+    },
 }
 
 # SPA boshqa domen orqali POST (multipart /api/admin/...) yuborilganda Django CSRF

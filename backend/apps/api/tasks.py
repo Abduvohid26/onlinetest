@@ -215,3 +215,83 @@ def run_sweep_stale_sessions() -> dict:
 @shared_task(name="proctor.sweep_stale_sessions", bind=True, max_retries=0)
 def sweep_stale_sessions(self) -> dict:
     return run_sweep_stale_sessions()
+
+
+def run_finalize_ended_exams() -> dict:
+    """Vaqti tugagan imtihonlarni avtomatik yakunlaydi (davriy beat task).
+
+    Har bir tugagan imtihon uchun, unga tayinlangan guruh(lar)dagi har bir talaba:
+      - "In Progress" (kirib tugatmagan)  → draft javoblar bilan ballanadi (Completed).
+      - "Pending" (retake berilgan, lekin oyna ochiq ekan qaytmagan) → "Failed"
+        (oldingi urinish yiqilgan hisoblanadi).
+      - Umuman kirmagan (sessiya yo'q) → "Failed" + started_at=None (KELMAGAN/absent).
+      - Completed/Banned/Failed → allaqachon yakuniy, tegilmaydi (idempotent).
+    """
+    from datetime import timedelta
+
+    from django.utils import timezone as dj_tz
+
+    from apps.api.services import finalize_student_exam_session, safe_json_loads
+    from apps.core.models import AppUser, Exam, ExamGroup, StudentExam
+
+    now = dj_tz.now()
+    # Faqat yaqinda tugagan imtihonlarni skan qilamiz (eski imtihonlar qayta-qayta
+    # aylanmasin). Idempotent — yakuniy sessiyalar o'tkazib yuboriladi.
+    lookback_days = max(1, int(os.environ.get("EXAM_FINALIZE_LOOKBACK_DAYS", "3")))
+    window_start = now - timedelta(days=lookback_days)
+    exams = Exam.objects.filter(end_time__isnull=False, end_time__lt=now, end_time__gte=window_start)
+
+    finalized = 0
+    absent = 0
+    for exam in exams.iterator():
+        group_ids = list(
+            ExamGroup.objects.filter(exam_id=exam.id).values_list("group_id", flat=True)
+        )
+        if not group_ids:
+            continue
+        student_ids = list(
+            AppUser.objects.filter(role="student", group_id__in=group_ids).values_list(
+                "id", flat=True
+            )
+        )
+        if not student_ids:
+            continue
+        ses_by_student = {
+            se.student_id: se
+            for se in StudentExam.objects.filter(exam_id=exam.id, student_id__in=student_ids)
+        }
+        for sid in student_ids:
+            se = ses_by_student.get(sid)
+            if se is None:
+                # Umuman kirmagan — KELMAGAN (absent). started_at=None bilan ajratiladi.
+                StudentExam.objects.create(
+                    student_id=sid,
+                    exam_id=exam.id,
+                    status="Failed",
+                    score=None,
+                    started_at=None,
+                )
+                absent += 1
+                continue
+            status = (se.status or "").strip()
+            if status == "In Progress":
+                answers = safe_json_loads(se.draft_answers_json, {})
+                flagged = safe_json_loads(se.draft_flagged_json, [])
+                try:
+                    finalize_student_exam_session(se, exam, answers, flagged)
+                    finalized += 1
+                except Exception:  # noqa: BLE001 — bitta sessiya xatosi butun taskni buzmasin
+                    continue
+            elif status == "Pending":
+                # Retake berilgan, lekin imtihon vaqti tugaguncha qaytmadi — yiqilgan.
+                se.status = "Failed"
+                se.save(update_fields=["status"])
+                finalized += 1
+            # Completed / Banned / Failed → yakuniy, tegilmaydi.
+
+    return {"finalized": finalized, "absent": absent}
+
+
+@shared_task(name="exam.finalize_ended_exams", bind=True, max_retries=0)
+def finalize_ended_exams(self) -> dict:
+    return run_finalize_ended_exams()

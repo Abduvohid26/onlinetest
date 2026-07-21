@@ -29,6 +29,10 @@ const LOCAL: Record<Language, Record<string, string>> = {
     filterEmpty: 'Bu holatda natija topilmadi',
     attemptHistory: 'Urinish tarixi',
     failedScore: 'Ball yetarli emas',
+    restartExam: 'Qayta boshlash',
+    absentStatus: 'Kelmagan',
+    absentHint: 'Imtihonga umuman kirmadingiz',
+    retakeAvailable: 'Oldingi urinish yiqildi. Imtihon vaqti tugamaguncha qayta boshlashingiz mumkin.',
   },
   ru: {
     greeting: 'Добро пожаловать',
@@ -45,6 +49,10 @@ const LOCAL: Record<Language, Record<string, string>> = {
     filterEmpty: 'Нет результатов с этим статусом',
     attemptHistory: 'История попыток',
     failedScore: 'Недостаточный балл',
+    restartExam: 'Начать заново',
+    absentStatus: 'Не явился',
+    absentHint: 'Вы не заходили на экзамен',
+    retakeAvailable: 'Прошлая попытка провалена. Пока экзамен открыт, можно начать заново.',
   },
   en: {
     greeting: 'Welcome',
@@ -61,6 +69,10 @@ const LOCAL: Record<Language, Record<string, string>> = {
     filterEmpty: 'No results for this status',
     attemptHistory: 'Attempt history',
     failedScore: 'Insufficient score',
+    restartExam: 'Restart',
+    absentStatus: 'Absent',
+    absentHint: 'You did not enter the exam',
+    retakeAvailable: 'Previous attempt failed. You can restart while the exam is open.',
   },
 };
 
@@ -559,6 +571,18 @@ export function StudentDashboard({
                   const isUpcoming = now < startMs;
                   const untilStart = msUntil(e.start_time, now);
                   const retakesBlocked = Boolean(e.exam_retakes_blocked);
+                  // Retake-pending: oldingi urinishda yiqilgan, lekin retake qolgan va
+                  // sessiya hali "In Progress" emas (Pending). Talaba imtihon oynasi ochiq
+                  // ekan panelidan "Qayta boshlash" orqali qaytadan kiradi (majburiy emas).
+                  const retakePending = Boolean(
+                    e.student_exam_id &&
+                      !e.in_progress &&
+                      !retakesBlocked &&
+                      isOngoing &&
+                      (e.session_phase === 'after_retake' ||
+                        (e.violation_retakes_used ?? 0) > 0 ||
+                        (e.identity_retakes_used ?? 0) > 0),
+                  );
                   const showLive = (isOngoing || e.in_progress) && !retakesBlocked;
 
                   return (
@@ -746,6 +770,21 @@ export function StudentDashboard({
                           <AdminBtn variant="ghost" size="lg" className="w-full" disabled>
                             {t.examCardRetakesBlocked}
                           </AdminBtn>
+                        ) : retakePending ? (
+                          <div className="space-y-2">
+                            <p className="text-[12px] text-amber-700 leading-snug">{L.retakeAvailable}</p>
+                            <AdminBtn
+                              variant="amber"
+                              size="lg"
+                              className="w-full"
+                              onClick={() => onStartExam(e, e.student_exam_id ?? 0)}
+                              iconRight={
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                              }
+                            >
+                              {L.restartExam}
+                            </AdminBtn>
+                          </div>
                         ) : isOngoing ? (
                           <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => onStartExam(e, 0)} iconRight={
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M9 5l7 7-7 7" /></svg>
@@ -795,6 +834,7 @@ export function StudentDashboard({
                   const isCompleted = r.status === 'Completed';
                   const isBannedRes = r.status === 'Banned';
                   const isFailedRes = r.status === 'Failed';
+                  const isAbsent = Boolean(r.absent); // umuman kirmagan (Failed + started_at yo'q)
                   const pct = typeof r.percentage === 'number' ? r.percentage : null;
                   const tone = pct != null ? scoreTone(pct) : null;
                   const examAppeals = banAppeals.filter((a) => a.exam_id === r.exam_id);
@@ -814,10 +854,11 @@ export function StudentDashboard({
                         <span className={`shrink-0 text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md ${
                           isCompleted ? 'bg-emerald-50 text-emerald-700' :
                           isBannedRes ? 'bg-red-50 text-red-700' :
+                          isAbsent ? 'bg-gray-100 text-gray-600' :
                           isFailedRes ? 'bg-orange-50 text-orange-700' :
                           'bg-amber-50 text-amber-700'
                         }`}>
-                          {isCompleted ? t.resultStatusCompleted : isBannedRes ? t.resultStatusBanned : isFailedRes ? t.resultStatusFailed : t.resultStatusOther}
+                          {isCompleted ? t.resultStatusCompleted : isBannedRes ? t.resultStatusBanned : isAbsent ? L.absentStatus : isFailedRes ? t.resultStatusFailed : t.resultStatusOther}
                         </span>
                       </div>
 
@@ -837,6 +878,16 @@ export function StudentDashboard({
                               {r.completed_at && <span className="tabular-nums">{new Date(r.completed_at).toLocaleDateString()}</span>}
                             </div>
                           </>
+                        ) : isAbsent ? (
+                          <div className="flex items-center gap-3 py-1">
+                            <div className="w-10 h-10 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636L5.636 18.364m0-12.728l12.728 12.728M12 21a9 9 0 100-18 9 9 0 000 18z" /></svg>
+                            </div>
+                            <div>
+                              <div className="text-[14px] font-semibold text-gray-900">{L.absentStatus}</div>
+                              <div className="text-[12px] text-gray-500">{L.absentHint}</div>
+                            </div>
+                          </div>
                         ) : isFailedRes ? (
                           <div className="flex items-center gap-3 py-1">
                             <div className="w-10 h-10 rounded-lg bg-orange-50 text-orange-600 flex items-center justify-center shrink-0">

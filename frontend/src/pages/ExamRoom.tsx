@@ -7,6 +7,7 @@ import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
 import { LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS } from '../lib/realtimeProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, isFaceVisibleForTalk, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
+import { ViolationGate } from '../lib/violationGate';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -24,7 +25,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -43,6 +44,12 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveMovement: "Haddan tashqari qimirlash — tinch o'tiring",
     liveAmbientNoise: "Tashqi shovqin bor — jimlikni saqlang",
     liveHand: "Qo'l ko'tarilgan — qo'llaringizni stolda ushlang",
+    liveNoFace: "Yuzingiz ko'rinmayapti — kameraga qarang",
+    liveMultiFace: "Kadrda bir nechta shaxs — yolg'iz qoling",
+    liveScreenshot: "Ekran surati urinishi — to'xtating",
+    liveClipboard: "Nusxa ko'chirish urinishi — to'xtating",
+    liveDevtools: "Developer tools urinishi — to'xtating",
+    liveTabSwitch: "Boshqa oynaga o'tildi — imtihonga qayting",
   },
   ru: {
     answered: 'Отвечено',
@@ -62,6 +69,12 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveMovement: 'Слишком много движений — сидите спокойно',
     liveAmbientNoise: 'Посторонний шум — соблюдайте тишину',
     liveHand: 'Рука поднята — держите руки на столе',
+    liveNoFace: 'Лицо не видно — смотрите в камеру',
+    liveMultiFace: 'В кадре несколько лиц — будьте одни',
+    liveScreenshot: 'Попытка снимка экрана — прекратите',
+    liveClipboard: 'Попытка копирования — прекратите',
+    liveDevtools: 'Попытка открыть Developer tools — прекратите',
+    liveTabSwitch: 'Переход в другое окно — вернитесь к экзамену',
   },
   en: {
     answered: 'Answered',
@@ -81,6 +94,12 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveMovement: 'Excessive movement — please stay still',
     liveAmbientNoise: 'Background noise detected — please stay quiet',
     liveHand: 'Hand raised — keep your hands on the desk',
+    liveNoFace: 'Face not visible — look at the camera',
+    liveMultiFace: 'Multiple people in frame — stay alone',
+    liveScreenshot: 'Screenshot attempt — please stop',
+    liveClipboard: 'Copy attempt — please stop',
+    liveDevtools: 'Developer tools attempt — please stop',
+    liveTabSwitch: 'Switched to another window — return to the exam',
   },
 };
 
@@ -378,6 +397,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
    *  davrda ko'rinib turadi, signal to'xtasa yashiriladi. 5s uzluksiz davom etsa mavjud
    *  logViolation oqimi rasmiy ogohlantirish modalini ochadi. */
   const [liveSignalLabel, setLiveSignalLabel] = useState<string | null>(null);
+  /** Event/tab-manba qoidabuzarliklari (print-screen, clipboard, devtools, tab) uchun
+   *  kichik yorliq — video/audio dan alohida qatorda. */
+  const [eventLiveLabel, setEventLiveLabel] = useState<string | null>(null);
+  /** Barcha event/tab-manba qoidabuzarliklarini yagona 1.5s→3s qonuni bilan boshqaradi. */
+  const eventGateRef = useRef<ViolationGate | null>(null);
   const [identityStatus, setIdentityStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
   const identityStatusTimerRef = useRef<number | null>(null);
   const [proctorRetryNonce, setProctorRetryNonce] = useState(0);
@@ -385,7 +409,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [cameraErrorHint, setCameraErrorHint] = useState('');
   const enableSizeHeuristicDevtools =
     String(import.meta.env.VITE_DEVTOOLS_SIZE_HEURISTIC || '').toLowerCase().trim() === 'true';
-  const devtoolsShortcutCooldownUntilRef = useRef(0);
   const vacStateRef = useRef({
     seq: Number(exam.sessionSeqStart || 1),
     challengeSeed: exam.sessionChallenge as string | undefined,
@@ -738,6 +761,17 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const answersRef = useRef(answers);
   const flaggedRef = useRef(flaggedQuestions);
   const submittingRef = useRef(false);
+
+  /** Bir martalik hodisa (print-screen, clipboard, devtools) — endi darhol rasmiy
+   *  YUBORMAYMIZ. Yagona darvozaga (eventGateRef) belgilaymiz: qonun bo'yicha 1.5s
+   *  kichik yorliq, 3s uzluksiz takrorlansa rasmiy (tick loop hal qiladi). */
+  const markGateEvent = useCallback((type: string) => {
+    if (bannedRef.current || !sessionStartedRef.current) return;
+    if (!eventGateRef.current) {
+      eventGateRef.current = new ViolationGate(LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS);
+    }
+    eventGateRef.current.markEvent(type);
+  }, []);
   useEffect(() => {
     answersRef.current = answers;
   }, [answers]);
@@ -809,8 +843,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** DevTools/clipboard/varaq — bir "urinish"da yuboriladigan bir nechta signal; bittasini yuborish. */
   const focusBurstLockUntilRef = useRef(0);
   const blurViolationTimerRef = useRef<number | null>(null);
-  const hiddenViolationTimerRef = useRef<number | null>(null);
-  const hiddenHardViolationTimerRef = useRef<number | null>(null);
   const FOCUS_BURST_TYPES = new Set([
     'DEVTOOLS_OPEN',
     'CLIPBOARD_ATTEMPT',
@@ -962,14 +994,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   useEffect(() => {
     if (banned) return;
 
-    // Security: Disable right click, copy/paste, and keyboard shortcuts (+ hard violation logging)
+    // Security: Disable right click, copy/paste, and keyboard shortcuts.
+    // Qonun bo'yicha: darhol rasmiy YUBORMAYMIZ — darvozaga belgilaymiz (1.5s kichik,
+    // 3s uzluksiz takror → rasmiy). Bir marta tasodifiy bosish jazolanmaydi.
     const handleContextMenu = (e: Event) => {
       e.preventDefault();
-      void logViolationRef.current('CLIPBOARD_ATTEMPT');
+      markGateEvent('CLIPBOARD_ATTEMPT');
     };
     const handleCopyPaste = (e: Event) => {
       e.preventDefault();
-      void logViolationRef.current('CLIPBOARD_ATTEMPT');
+      markGateEvent('CLIPBOARD_ATTEMPT');
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = (e.key || '').toLowerCase();
@@ -978,7 +1012,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
       if (isPrintScreenKeyboardEvent(e)) {
         e.preventDefault();
-        reportPrintScreenViolation((t) => void logViolationRef.current(t));
+        reportPrintScreenViolation((t) => markGateEvent(t));
         return;
       }
       const isClipboardCombo = (e.ctrlKey || e.metaKey) && ['c', 'v', 'x', 'a'].includes(key);
@@ -987,20 +1021,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         ((e.ctrlKey || e.metaKey) && e.shiftKey && ['i', 'j'].includes(key));
       if (isDevtoolsCombo) {
         e.preventDefault();
-        const now = Date.now();
-        if (
-          now >= devtoolsShortcutCooldownUntilRef.current &&
-          document.hasFocus() &&
-          Boolean(document.fullscreenElement)
-        ) {
-          devtoolsShortcutCooldownUntilRef.current = now + 20_000;
-          void logViolationRef.current('DEVTOOLS_OPEN');
+        if (document.hasFocus() && Boolean(document.fullscreenElement)) {
+          markGateEvent('DEVTOOLS_OPEN');
         }
         return;
       }
       if (isClipboardCombo) {
         e.preventDefault();
-        void logViolationRef.current('CLIPBOARD_ATTEMPT');
+        markGateEvent('CLIPBOARD_ATTEMPT');
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) {
@@ -1018,7 +1046,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     const handleKeyUp = (e: KeyboardEvent) => {
       if (isPrintScreenKeyboardEvent(e)) {
         e.preventDefault();
-        reportPrintScreenViolation((t) => void logViolationRef.current(t));
+        reportPrintScreenViolation((t) => markGateEvent(t));
       }
     };
 
@@ -1032,11 +1060,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     document.addEventListener('gesturestart', blockGesture);
     document.addEventListener('gesturechange', blockGesture);
 
+    // DevTools o'lcham-evristikasi: ochiq panel — DAVOMIY holat. Tez (500ms) poll qilib
+    // darvozaga belgilaymiz; panel ochiq turgan har lahzada marklanadi → 3s uzluksiz
+    // bo'lsa qonun bo'yicha rasmiyga o'tadi (bir zumlik o'lcham o'zgarishi jazolanmaydi).
     let devtoolsTick: number | null = null;
     if (enableSizeHeuristicDevtools) {
       let consecutiveHits = 0;
       devtoolsTick = window.setInterval(() => {
-        if (bannedRef.current) return;
+        if (bannedRef.current || !sessionStartedRef.current) return;
         if (!document.fullscreenElement || !document.hasFocus()) {
           consecutiveHits = 0;
           return;
@@ -1045,11 +1076,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         const dh = Math.abs((window.outerHeight || 0) - (window.innerHeight || 0));
         const suspicious = dw > 320 && dh > 180;
         consecutiveHits = suspicious ? consecutiveHits + 1 : 0;
-        if (consecutiveHits >= 2) {
-          consecutiveHits = 0;
-          void logViolationRef.current('DEVTOOLS_OPEN');
-        }
-      }, 12_000);
+        if (consecutiveHits >= 2) markGateEvent('DEVTOOLS_OPEN');
+      }, 500);
     }
 
     // Har bir klik/touch — fullscreen (ESC gate ochiq bo'lsa, faqat gate tugmasi ishlaydi).
@@ -1315,6 +1343,49 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     return () => clearInterval(id);
   }, [banned, sessionStarted]);
 
+  // --- Yagona darvoza tick loop (event/tab-manba qoidabuzarliklari) ---
+  // Qonun (README.md): har bir tur uchun 1.5s uzluksiz → kamera panelida kichik yorliq,
+  // 3s → rasmiy (logViolation), so'ng reset (tinimsiz takrorlanmasin).
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    if (!eventGateRef.current) {
+      eventGateRef.current = new ViolationGate(LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS);
+    }
+    const gate = eventGateRef.current;
+    // Faqat event-manba (markEvent orqali marklanadigan) turlar bu ro'yxatda.
+    const EVENT_TYPES = ['PRINT_SCREEN', 'CLIPBOARD_ATTEMPT', 'DEVTOOLS_OPEN'];
+    const LABEL: Record<string, keyof (typeof EXAM_L)['uz']> = {
+      PRINT_SCREEN: 'liveScreenshot',
+      CLIPBOARD_ATTEMPT: 'liveClipboard',
+      DEVTOOLS_OPEN: 'liveDevtools',
+      TAB_SWITCH_HARD: 'liveTabSwitch',
+    };
+    const id = window.setInterval(() => {
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      const now = Date.now();
+      let best: { type: string; ms: number } | null = null;
+
+      const consider = (type: string, activeState: boolean) => {
+        const ms = gate.push(type, activeState, now);
+        if (ms >= LIVE_SIGNAL_ESCALATE_MS) {
+          gate.reset(type);
+          void logViolationRef.current(type);
+        } else if (ms >= LIVE_SIGNAL_CONFIRM_MS && (!best || ms > best.ms)) {
+          best = { type, ms };
+        }
+      };
+
+      for (const type of EVENT_TYPES) consider(type, false);
+      // Tab yashiringan — davomiy holat (poll). blurIgnoreUntil (fullscreen so'rovi) e'tiborsiz.
+      const tabHidden =
+        document.visibilityState === 'hidden' && now >= blurIgnoreUntilRef.current;
+      consider('TAB_SWITCH_HARD', tabHidden);
+
+      setEventLiveLabel(best ? EXAM_L[langRef.current][LABEL[(best as { type: string }).type]] : null);
+    }, 250);
+    return () => clearInterval(id);
+  }, [banned, sessionStarted]);
+
   const [identityTerminated, setIdentityTerminated] = useState(false);
 
   // --- Violation logging ---
@@ -1375,6 +1446,15 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         startupGrace?: boolean;
         officialWarnings?: number;
         mergeWindowSeconds?: number;
+        // Ban/retake javob maydonlari (backend: student_violations, proctor_exam_retake).
+        banReason?: string;
+        technicalRetake?: boolean;
+        examRetake?: boolean;
+        identityRetake?: boolean;
+        retakesRemaining?: number;
+        retakesUsed?: number;
+        technicalRetakesRemaining?: number;
+        technicalRetakesUsed?: number;
       }>(res)) || {};
 
       if (!res.ok) {
@@ -1528,6 +1608,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         OFF_CENTER: EXAM_L[langRef.current].liveOffCenter,
         MOVEMENT: EXAM_L[langRef.current].liveMovement,
         HAND: EXAM_L[langRef.current].liveHand,
+        NO_FACE: EXAM_L[langRef.current].liveNoFace,
+        MULTI_FACE: EXAM_L[langRef.current].liveMultiFace,
       }[type];
       // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Signal jami
       // LIVE_SIGNAL_ESCALATE_MS (3s) ga yetsa, logViolation orqali mavjud rasmiy
@@ -1622,60 +1704,19 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }, [banned, user.profile_image, nextGuardHeaders, sessionStarted]);
 
   // --- Tab / visibility (masofaviy nazorat) ---
-  // SOFT: darhol (500ms) — qisqa alt-tab, false-positive ko'p (bir martalik hodisa,
-  // qonun mustasnosi — chunki oyna yashiringanida kamera panelidagi kichik yorliqni
-  // talaba baribir ko'ra olmaydi).
-  // HARD: talaba LIVE_SIGNAL_ESCALATE_MS (qonun bilan bir xil, 3s) davomida uzluksiz
-  // boshqa oynada qolsa — bu ancha jiddiy signal, rasmiy ogohlantirishga aylanadi.
+  // Oyna yashiringan holati (document.visibilityState === 'hidden') — DAVOMIY holat,
+  // shu sabab u ham yagona darvoza (eventGateRef) orqali qonunga bo'ysunadi: 3s uzluksiz
+  // boshqa oynada qolsa rasmiy (TAB_SWITCH_HARD). Poll markazlashgan gate tick loopida.
+  // Bu yerda faqat pagehide (sahifadan chiqib ketish) — bu terminal hodisa, kutib
+  // bo'lmaydi, shu sabab darhol yozib qoldiramiz (eng oxirgi signal).
   useEffect(() => {
-    const clearHiddenTimer = () => {
-      if (hiddenViolationTimerRef.current !== null) {
-        window.clearTimeout(hiddenViolationTimerRef.current);
-        hiddenViolationTimerRef.current = null;
-      }
-      if (hiddenHardViolationTimerRef.current !== null) {
-        window.clearTimeout(hiddenHardViolationTimerRef.current);
-        hiddenHardViolationTimerRef.current = null;
-      }
-    };
-
-    const onVis = () => {
-      if (bannedRef.current || !sessionStartedRef.current) return;
-      if (Date.now() < blurIgnoreUntilRef.current) return;
-      if (document.visibilityState === 'hidden') {
-        clearHiddenTimer();
-        hiddenViolationTimerRef.current = window.setTimeout(() => {
-          hiddenViolationTimerRef.current = null;
-          if (bannedRef.current || !sessionStartedRef.current) return;
-          if (document.visibilityState === 'hidden') {
-            void logViolationRef.current('TAB_SWITCH_SOFT');
-          }
-        }, 500);
-        hiddenHardViolationTimerRef.current = window.setTimeout(() => {
-          hiddenHardViolationTimerRef.current = null;
-          if (bannedRef.current || !sessionStartedRef.current) return;
-          if (document.visibilityState === 'hidden') {
-            void logViolationRef.current('TAB_SWITCH_HARD');
-          }
-        }, LIVE_SIGNAL_ESCALATE_MS);
-      } else {
-        clearHiddenTimer();
-      }
-    };
-
     const onPageHide = () => {
       if (bannedRef.current || !sessionStartedRef.current) return;
       if (Date.now() < blurIgnoreUntilRef.current) return;
       void logViolationRef.current('TAB_SWITCH_SOFT');
     };
-
-    document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', onPageHide);
-    return () => {
-      clearHiddenTimer();
-      document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('pagehide', onPageHide);
-    };
+    return () => window.removeEventListener('pagehide', onPageHide);
   }, []);
 
   const runSubmitCore = useCallback(
@@ -2010,9 +2051,21 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 .replace('{remaining}', String(examRetakeNotice.remaining))}
             </p>
             <p className="text-gray-600 mb-6 leading-relaxed text-sm">{t.technicalRetakeBody}</p>
-            <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => (onRetakeRestart ? onRetakeRestart() : onFinish(null))}>
-              {onRetakeRestart ? t.technicalRetakeRestartBtn : t.technicalRetakeBackBtn}
+            {/* Yiqilganda majburiy qayta boshlash YO'Q — asosiy tugma bosh sahifaga
+                qaytaradi; talaba imtihon vaqti tugamaguncha panelidan istalgan vaqtda
+                qayta boshlaydi. Xohlasa, shu yerdan darhol ham boshlashi mumkin. */}
+            <AdminBtn variant="blue" size="lg" className="w-full" onClick={() => onFinish(null)}>
+              {t.technicalRetakeBackBtn}
             </AdminBtn>
+            {onRetakeRestart ? (
+              <button
+                type="button"
+                onClick={() => onRetakeRestart()}
+                className="w-full mt-2.5 text-[13px] font-medium text-amber-700 hover:text-amber-800 underline underline-offset-2"
+              >
+                {t.technicalRetakeRestartNow}
+              </button>
+            ) : null}
           </div>
         </motion.div>
       </div>,
@@ -2558,6 +2611,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <div className="px-3 py-1.5 bg-sky-50 border-b border-sky-100 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0" />
                     <span className="text-[11px] font-medium text-sky-800 truncate">{audioLiveLabel}</span>
+                  </div>
+                )}
+                {eventLiveLabel && (
+                  <div className="px-3 py-1.5 bg-rose-50 border-b border-rose-100 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                    <span className="text-[11px] font-medium text-rose-800 truncate">{eventLiveLabel}</span>
                   </div>
                 )}
                 <div className="p-2 pb-2">

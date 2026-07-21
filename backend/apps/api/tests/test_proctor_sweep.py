@@ -125,10 +125,24 @@ class ProctorSweepTests(TestCase):
             1,
         )
 
-    @mock.patch.dict(os.environ, {"PROCTOR_SWEEP_RELOG_MINUTES": "5"}, clear=False)
+    @mock.patch.dict(
+        os.environ,
+        {"PROCTOR_SWEEP_RELOG_MINUTES": "5", "PROCTOR_MAX_WARNINGS_BEFORE_BAN": "4"},
+        clear=False,
+    )
     def test_four_sweeps_apart_bans_session(self):
-        """HTTP oqimi bilan bir xil: 3 ogohlantirish, 4-chi PROCTOR_FEED_LOST da ban."""
+        """3 ogohlantirish, 4-chi PROCTOR_FEED_LOST da ban.
+
+        Bu test o'z tuzilishi bo'yicha 4 sweep = 3 ogohlantirish + 4-da ban, ya'ni
+        max_warnings=4 stsenariysini tekshiradi (default 3 emas — u holda 3-da ban
+        bo'lardi; buni PROCTOR_MAX_WARNINGS_BEFORE_BAN=4 bilan aniq beramiz). Shuningdek
+        retake-siz (strict) imtihon: aks holda 4-ogohlantirishda ban o'rniga texnik
+        retake beriladi, shu sabab retake o'chiriladi.
+        """
         now = dj_tz.now()
+        Exam.objects.filter(pk=self.exam.id).update(
+            technical_retakes_allowed=0, identity_retakes_allowed=0
+        )
         se = self._make_session(
             started_at=now - timedelta(hours=1),
             proctor_last_frame_at=now - timedelta(seconds=200),

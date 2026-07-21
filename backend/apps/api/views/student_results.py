@@ -111,6 +111,9 @@ def student_results(request):
             total = len(safe_json_loads(se.exam.questions_json, []))
         pct = round((se.score / total) * 100) if total and se.score is not None else None
         attempts_count = 1 + int(se.technical_retakes_used or 0) + int(se.identity_retakes_used or 0)
+        # KELMAGAN (absent): imtihon vaqti tugaganda umuman kirmagan talaba uchun fon
+        # vazifa "Failed" + started_at=None yozadi. Buni natijalarda ajratib ko'rsatamiz.
+        is_absent = (se.status or "").strip() == "Failed" and se.started_at is None and se.score is None
         out.append(
             {
                 "id": se.id,
@@ -125,6 +128,7 @@ def student_results(request):
                 "ban_reason": (getattr(se, "ban_reason", "") or "").strip(),
                 "attempts_count": attempts_count,
                 "attempt_history": build_attempt_history(u.id, se.exam_id) if attempts_count > 1 else [],
+                "absent": is_absent,
             }
         )
     return Response(out)

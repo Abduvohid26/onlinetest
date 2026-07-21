@@ -680,6 +680,12 @@ class ExamFlowApiTests(TestCase):
         )
         self.assertEqual(r0.status_code, 200)
         self._start_exam_session(r0.json()["token"], self.exam_a.id, st4.id)
+        # Retake imkoniyati bo'lmagan (strict) imtihon — identity substitution DARHOL ban.
+        # (Default imtihonda avval 1 ta identity retake beriladi; bu test aynan
+        #  retake-siz stsenariyni tekshiradi.)
+        Exam.objects.filter(pk=self.exam_a.id).update(
+            identity_retakes_allowed=0, technical_retakes_allowed=0
+        )
         r = self.client.post(
             "/api/student/violations",
             {"exam_id": self.exam_a.id, "violation_type": "IDENTITY_SUBSTITUTION", "screenshot_url": ""},
@@ -1195,6 +1201,10 @@ class ExamFlowApiTests(TestCase):
         )
         self.assertEqual(r0.status_code, 200)
         self._start_exam_session(r0.json()["token"], self.exam_a.id, st7.id)
+        # Retake-siz (strict) imtihon — hardened kombinatsiya DARHOL ban qilishi kerak.
+        Exam.objects.filter(pk=self.exam_a.id).update(
+            identity_retakes_allowed=0, technical_retakes_allowed=0
+        )
         r1 = self.client.post(
             "/api/student/violations",
             {"exam_id": self.exam_a.id, "violation_type": "MULTIPLE_FACES", "screenshot_url": ""},

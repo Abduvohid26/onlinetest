@@ -137,12 +137,23 @@ def _ban_after_retake_response(
 
 
 def exam_retakes_exhausted(se: StudentExam, exam: Exam) -> bool:
-    """Barcha qayta topshirishlar ishlatilgan (keyingi start bloklanadi)."""
+    """Berilgan qayta topshirishni resume qilib bo'lmaydimi (start bloklanadi).
+
+    MUHIM: hisoblagich (technical/identity_retakes_used) retake BERILGANDA oshiriladi,
+    va `..._remaining()` max(0, ...) bilan cheklangan (hech qachon manfiy emas). Shu sabab
+    "remaining == 0" ni "tugagan" deb hisoblab bo'lmaydi — yangi berilgan (lekin hali
+    resume qilinmagan) identity retake uchun ham remaining == 0 bo'ladi; aks holda talaba
+    berilgan retake'ni hech qachon resume qila olmasdi. To'g'ri mezon: `used > budget`,
+    ya'ni admin ruxsatni keyin kamaytirgan va talaba allaqachon ko'proq retake ishlatib
+    qo'ygan. Oddiy oqimda `used <= budget` (grant paytida remaining > 0 tekshiriladi), shu
+    sabab Pending sessiya doim resume qilinadi; keyingi qoidabuzarlik try_apply_exam_retake
+    ichida (remaining <= 0) ban qiladi.
+    """
     v_used = max(0, int(getattr(se, "technical_retakes_used", 0) or 0))
     id_used = max(0, int(getattr(se, "identity_retakes_used", 0) or 0))
-    if v_used > 0 and violation_retakes_remaining(se, exam) <= 0:
+    if v_used > violation_retakes_budget(se, exam):
         return True
-    if id_used > 0 and identity_retakes_remaining(se, exam) <= 0:
+    if id_used > identity_retakes_budget(exam):
         return True
     return False
 
