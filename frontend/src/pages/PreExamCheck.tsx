@@ -77,6 +77,11 @@ export function PreExamCheck({
       (exam?.technical_retakes_used ?? 0) > 0 ||
       (exam?.identity_retakes_used ?? 0) > 0,
   );
+  // PIN kerakmi — exam obyekti ikki xil shaklda kelishi mumkin: imtihonlar ro'yxati
+  // `has_pin` (bool) beradi, /start javobi esa `pin` (qiymat). Retake "Hozir qayta
+  // boshlash" oqimida activeExam /start shaklida bo'ladi — shu sabab ikkalasini ham
+  // tekshiramiz, aks holda PIN maydoni ko'rinmay qolardi (lekin backend PIN so'raydi).
+  const needsPin = Boolean(exam?.has_pin) || Boolean(exam?.pin);
   const [cameraReady, setCameraReady] = useState(false);
   const [micReady, setMicReady] = useState(false);
   const [agreed, setAgreed] = useState(false);
@@ -602,7 +607,7 @@ export function PreExamCheck({
   };
 
   const handleEnter = async () => {
-    if (exam.has_pin && !pin) {
+    if (needsPin && !pin) {
       setError(t.enterPin);
       return;
     }
@@ -681,7 +686,7 @@ export function PreExamCheck({
   if (!micReady) blocked.push(t.preExamBlockedMic);
   if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
   if (!agreed) blocked.push(t.preExamBlockedAgree);
-  if (exam.has_pin && !pin) blocked.push(t.preExamBlockedPin);
+  if (needsPin && !pin) blocked.push(t.preExamBlockedPin);
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
@@ -929,7 +934,7 @@ export function PreExamCheck({
 
         {/* ── Footer action bar (doim ko'rinadi, scroll ustida emas) ── */}
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
-          {exam.has_pin && (
+          {needsPin && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
               <div className="flex items-center gap-2.5 shrink-0">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500">

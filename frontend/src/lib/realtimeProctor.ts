@@ -460,13 +460,19 @@ export class RealtimeProctor {
   ): void {
     let talking = false;
 
-    // MediaPipe blendshape — eng ishonchli yo'l.
+    // MediaPipe blendshape — eng ishonchli yo'l. Tarix oynasi ATAYLAB qisqa (8 kadr
+    // ~1s): talaba og'zini to'xtatgach, harakat namunalari tez "eskiradi" va `talking`
+    // darhol o'chadi. Aks holda (uzun oyna) to'xtagandan keyin ham bir necha soniya
+    // "gapiryapti" deb sanalib, kichik ogohlantirishda to'xtasa ham rasmiy kelardi.
     const jaw = blendshapes?.find((b) => b.categoryName === 'jawOpen');
     if (jaw) {
       const jawHist = this.jawOpenHistory;
       jawHist.push(jaw.score);
-      if (jawHist.length > 14) jawHist.shift();
-      if (jawHist.length >= 7) {
+      if (jawHist.length > 8) jawHist.shift();
+      // Joriy kadr og'iz yopiq bo'lsa (past jawOpen), harakat allaqachon tugagan —
+      // tarixga qaramay tez bo'shatamiz (faqat aniq davomiy harakatda talking=true).
+      const jawClosedNow = jaw.score < 0.12;
+      if (!jawClosedNow && jawHist.length >= 5) {
         const mean = jawHist.reduce((a, b) => a + b, 0) / jawHist.length;
         const amp = Math.max(...jawHist) - Math.min(...jawHist);
         let crossings = 0;
@@ -476,7 +482,7 @@ export class RealtimeProctor {
         talking =
           (crossings >= 3 && amp >= 0.055) ||
           (jaw.score >= 0.22 && amp >= 0.04) ||
-          jawHist.filter((s) => s >= 0.15).length >= 5;
+          jawHist.filter((s) => s >= 0.15).length >= 4;
       }
     }
 
@@ -492,8 +498,8 @@ export class RealtimeProctor {
         const mar = vertical / horizontal;
         const hist = this.mouthHistory;
         hist.push(mar);
-        if (hist.length > 12) hist.shift();
-        if (hist.length >= 7) {
+        if (hist.length > 8) hist.shift();
+        if (hist.length >= 5) {
           const mean = hist.reduce((a, b) => a + b, 0) / hist.length;
           const amp = Math.max(...hist) - Math.min(...hist);
           let crossings = 0;
@@ -506,13 +512,12 @@ export class RealtimeProctor {
     }
 
     // Qo'l yuz/og'iz ustida yoki yaqinida bo'lsa — landmark occlusion soxta
-    // "gapiryapti" signali berishi mumkin, shu sabab bu freymda hisobga olinmaydi
-    // (hisoblagich to'xtaydi, lekin darhol nolga tushmaydi — grace o'z ishini qiladi).
+    // "gapiryapti" signali berishi mumkin, shu sabab bu freymda hisobga olinmaydi.
     const talking2 = talking && !handsPresent;
 
-    // Gapirish — kichik→katta eskalatsiya. Tabiiy nutqda so'zlar orasida qisqa
-    // pauza bo'ladi, shu sabab grace oynasi boshqa signallardan kattaroq (1000ms).
-    const talkMs = this.trackContinuous('mouth', talking2, 1000);
+    // Gapirish — kichik→katta eskalatsiya. Grace qisqa (350ms): to'xtaganда darhol
+    // bo'shasin — shunda kichik ogohlantirishda to'xtagan talaba rasmiy olmaydi.
+    const talkMs = this.trackContinuous('mouth', talking2, 350);
     if (talkMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('MOUTH_MOVEMENT_TALKING');
     this.liveMs.TALKING = talkMs;
   }

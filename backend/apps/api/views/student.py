@@ -739,6 +739,7 @@ def student_exams_start(request, pk: int):
         "language": ex_lang,
         "language_mode": exam.language,
         "pin": exam.pin,
+        "has_pin": bool(exam.pin),
         "custom_rules": exam.custom_rules,
         "exam_mode": exam.exam_mode,
         "questions": shuffled,
