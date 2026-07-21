@@ -152,19 +152,24 @@ export class VoiceActivityTracker {
   }
 }
 
-const AMBIENT_RMS_MIN = 0.055;
+// Tashqi shovqin chegarasi — ATAYLAB baland qo'yilgan. Oddiy xona shovqini
+// (ventilyator, uzoq shovqin, klaviatura) jazolanmasin; faqat haqiqatan baland,
+// davomiy shovqin (musiqa, televizor, yaqin suhbat gurillashi) aniqlansin.
+// (Bundan tashqari ContinuousSignalTracker orqali 3s uzluksiz talab qilinadi.)
+const AMBIENT_RMS_MIN = 0.11;
+const AMBIENT_FLOOR_MULT = 3.0;
 
 /**
  * Baland tashqi shovqin (musiqa, televizor, eshik — inson nutqi emas) — xom holat.
  */
 export class AmbientNoiseTracker {
-  private noiseFloor = 0.018;
+  private noiseFloor = 0.02;
   private calibrateLeft = 45;
   private prevRms = 0;
 
   push(frame: VoiceFrame): boolean {
     if (this.calibrateLeft > 0) {
-      this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
+      this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.9);
       this.calibrateLeft -= 1;
     }
 
@@ -175,7 +180,7 @@ export class AmbientNoiseTracker {
     return (
       !frame.humanVoice &&
       frame.rms >= AMBIENT_RMS_MIN &&
-      frame.rms > this.noiseFloor * 2.0 &&
+      frame.rms > this.noiseFloor * AMBIENT_FLOOR_MULT &&
       (frame.lowFreqRatio > 0.35 || frame.speechRatio < 0.45)
     );
   }

@@ -68,8 +68,9 @@ export function PreExamCheck({
   onCancel: () => void;
 }) {
   // Retake holatini faqat transient prop'dan emas, exam ma'lumotidan ham aniqlaymiz —
-  // shunda retake PreExamCheck'da brauzer yangilansa ham (prop yo'qolsa) PIN/pozitsiya
-  // gate qayta talab qilinmaydi (backend baribir retake'da PIN so'ramaydi).
+  // shunda retake PreExamCheck'da brauzer yangilansa ham (prop yo'qolsa) pozitsiya gate
+  // qayta talab qilinmaydi. DIQQAT: PIN retake'da HAM talab qilinadi (bu faqat pozitsiya
+  // gate uchun); shaxs (identity) va jonlilik ham har safar tekshiriladi.
   const isRetakeResolved = Boolean(
     isRetake ||
       exam?.session_phase === 'after_retake' ||
@@ -601,7 +602,7 @@ export function PreExamCheck({
   };
 
   const handleEnter = async () => {
-    if (exam.has_pin && !pin && !isRetakeResolved) {
+    if (exam.has_pin && !pin) {
       setError(t.enterPin);
       return;
     }
@@ -680,7 +681,7 @@ export function PreExamCheck({
   if (!micReady) blocked.push(t.preExamBlockedMic);
   if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
   if (!agreed) blocked.push(t.preExamBlockedAgree);
-  if (exam.has_pin && !pin && !isRetakeResolved) blocked.push(t.preExamBlockedPin);
+  if (exam.has_pin && !pin) blocked.push(t.preExamBlockedPin);
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
@@ -928,7 +929,7 @@ export function PreExamCheck({
 
         {/* ── Footer action bar (doim ko'rinadi, scroll ustida emas) ── */}
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
-          {exam.has_pin && !isRetakeResolved && (
+          {exam.has_pin && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
               <div className="flex items-center gap-2.5 shrink-0">
                 <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500">

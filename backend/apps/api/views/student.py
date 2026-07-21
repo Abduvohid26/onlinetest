@@ -366,17 +366,8 @@ def student_exams_start(request, pk: int):
     exam = Exam.objects.filter(pk=pk).first()
     if not exam:
         return Response({"error": "Exam not found"}, status=404)
-    existing_se = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
-    # Retake (qoidabuzarlik/identity qayta topshirish) — talaba PIN'ni birinchi
-    # kirishda allaqachon tasdiqlagan, qayta so'ralmasin.
-    is_retake_resume = bool(
-        existing_se
-        and (
-            int(getattr(existing_se, "technical_retakes_used", 0) or 0) > 0
-            or int(getattr(existing_se, "identity_retakes_used", 0) or 0) > 0
-        )
-    )
-    if exam.pin and exam.pin != pin and not is_retake_resume:
+    # PIN har safar (retake/qayta kirishda ham) talab qilinadi.
+    if exam.pin and exam.pin != pin:
         return Response({"error": "Invalid PIN"}, status=403)
     if not ExamGroup.objects.filter(exam_id=pk, group_id=u.group_id).exists():
         return Response({"error": "Exam not assigned to your group"}, status=403)
