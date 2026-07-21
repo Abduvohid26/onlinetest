@@ -22,14 +22,17 @@ export interface VoiceFrame {
   harmonicity: number;
 }
 
-const RMS_VOICE = 0.042;
-const ZCR_MIN = 0.024;
-const ZCR_MAX = 0.17;
-const SPEECH_BAND_RATIO_MIN = 0.52;
-const SPEECH_FLATNESS_MAX = 0.58;
+// Ovoz (inson nutqi) chegaralari — biroz sezgirroq: tashqi/uzoq odam ovozini ham
+// (kamerasiz yon tomondan gapirsa) ushlash uchun. Bu SHOVQIN'dan (ambient) alohida —
+// shovqin baland qoladi, ovoz esa sezgirroq.
+const RMS_VOICE = 0.034;
+const ZCR_MIN = 0.022;
+const ZCR_MAX = 0.18;
+const SPEECH_BAND_RATIO_MIN = 0.48;
+const SPEECH_FLATNESS_MAX = 0.6;
 const LOW_FREQ_RATIO_MAX = 0.55;
 const CREST_IMPULSE_MIN = 7.5;
-const HARMONICITY_MIN = 0.3;
+const HARMONICITY_MIN = 0.26;
 
 function speechBandMetrics(analyser: AnalyserNode): {
   speechRatio: number;
@@ -147,7 +150,8 @@ export class VoiceActivityTracker {
     this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
     if (spike) return false;
 
-    const aboveFloor = frame.rms > this.noiseFloor * 1.45;
+    // Sezgirroq: uzoq/sekin ovoz ham fon shovqinidan sal balandroq bo'lsa yetadi.
+    const aboveFloor = frame.rms > this.noiseFloor * 1.3;
     return frame.humanVoice && aboveFloor;
   }
 }
