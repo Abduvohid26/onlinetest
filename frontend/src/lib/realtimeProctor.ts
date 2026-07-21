@@ -64,6 +64,10 @@ export type LiveSignalType =
 export const LIVE_SIGNAL_CONFIRM_MS = 1500;
 export const LIVE_SIGNAL_ESCALATE_MS = 4000;
 
+// Kichik chip (kamera panelidagi sariq qator) FAQAT shu turlar uchun chiqadi.
+// Qolganlari (pozitsiya/gaze/yuz) kamera badge'ida ko'rsatiladi — takror bo'lmasin.
+const CHIP_SIGNAL_TYPES = new Set<LiveSignalType>(['TALKING', 'MOVEMENT', 'HAND']);
+
 const env = (import.meta as any).env || {};
 const WASM_BASE: string =
   env.VITE_MEDIAPIPE_WASM_BASE ||
@@ -360,9 +364,12 @@ export class RealtimeProctor {
       this.jawOpenHistory = [];
     }
 
-    // Shu freymdagi eng "shoshilinch" davomiy signalni kamera panelida ko'rsatish uchun tanlaymiz.
+    // Kichik chip (onLiveSignal) — FAQAT badge'siz signallar uchun. Pozitsiya/gaze/yuz
+    // (NO_FACE, MULTI_FACE, TOO_FAR/CLOSE, OFF_CENTER, HEAD_AWAY) allaqachon kamera
+    // badge'ida (fsCfg) ko'rsatiladi — chip ularni takrorlamasin. Gapirish, qimirlash,
+    // qo'l ko'tarishning badge'i yo'q, shu sabab ular uchun chip kerak.
     const best = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>)
-      .filter(([, ms]) => ms >= LIVE_SIGNAL_CONFIRM_MS)
+      .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms >= LIVE_SIGNAL_CONFIRM_MS)
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
   }

@@ -152,11 +152,11 @@ export class VoiceActivityTracker {
   }
 }
 
-// Tashqi shovqin chegarasi — ATAYLAB baland qo'yilgan. Oddiy xona shovqini
-// (ventilyator, uzoq shovqin, klaviatura) jazolanmasin; faqat haqiqatan baland,
-// davomiy shovqin (musiqa, televizor, yaqin suhbat gurillashi) aniqlansin.
-// (Bundan tashqari ContinuousSignalTracker orqali 3s uzluksiz talab qilinadi.)
-const AMBIENT_RMS_MIN = 0.11;
+// Tashqi shovqin chegarasi — ATAYLAB baland. Oddiy xona shovqini (ventilyator, uzoq
+// shovqin, klaviatura, "taq" bir martalik urish) jazolanmasin; faqat haqiqatan baland
+// va DAVOMIY shovqin (musiqa, televizor) aniqlansin. Bir martalik "taq"ni qisqa grace
+// (ambient tracker 300ms) va spike-filtr bloklaydi; ustiga 4s uzluksiz talab qilinadi.
+const AMBIENT_RMS_MIN = 0.14;
 const AMBIENT_FLOOR_MULT = 3.0;
 
 /**

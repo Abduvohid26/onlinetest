@@ -37,7 +37,7 @@ const chairThud = {
 };
 
 const ambientTv = {
-  rms: 0.12,
+  rms: 0.18, // AMBIENT_RMS_MIN (0.14) dan baland — haqiqiy baland shovqin
   zcr: 0.14,
   humanVoice: false,
   speechRatio: 0.28,

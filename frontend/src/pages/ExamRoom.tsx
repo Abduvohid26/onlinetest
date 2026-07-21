@@ -1283,8 +1283,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
     if (!ambientTrackerRef.current) ambientTrackerRef.current = new AmbientNoiseTracker();
+    // Ovoz (gapirish): grace 700ms — so'zlar orasidagi qisqa pauzani ko'prik qiladi.
     if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(700);
-    if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(700);
+    // Shovqin: grace QISQA (300ms) — bir martalik "taq"lar orasidagi tanaffus ko'prik
+    // qilinmasin, faqat HAQIQATAN uzluksiz shovqin (musiqa/TV) to'planib rasmiy bo'lsin.
+    if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(300);
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
