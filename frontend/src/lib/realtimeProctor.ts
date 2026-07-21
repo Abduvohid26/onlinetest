@@ -45,10 +45,11 @@ export type FaceStatusLive =
  * ikki bosqichli qoida (README.md "Proctoring eskalatsiya qoidasi"):
  *   1) LIVE_SIGNAL_CONFIRM_MS (1.5s) uzluksiz davom etsa — kamera panelida kichik
  *      vizual ogohlantirish chiqadi (hali rasmiy emas, backendga yuborilmaydi).
- *   2) Signal shundan keyin ham davom etib, jami LIVE_SIGNAL_ESCALATE_MS (3s) ga
- *      yetsa — haqiqiy (backendga yuboriladigan) rasmiy ogohlantirishga aylanadi.
+ *   2) Signal shundan keyin ham davom etib, jami LIVE_SIGNAL_ESCALATE_MS (4s) ga
+ *      yetsa — haqiqiy (backendga yuboriladigan) rasmiy ogohlantirishga aylanadi
+ *      (ya'ni kichikdan keyin yana ~2.5s tuzatishga vaqt beriladi).
  * Yuz yo'q (NO_FACE) va ko'p yuz (MULTI_FACE) ham shu qonunga bo'ysunadi — lekin
- * identity xavfsizligi uchun "recheck" darhol ishlaydi (rasmiy violation esa 3s da).
+ * identity xavfsizligi uchun "recheck" darhol ishlaydi (rasmiy violation esa 4s da).
  */
 export type LiveSignalType =
   | 'TALKING'
@@ -61,7 +62,7 @@ export type LiveSignalType =
   | 'NO_FACE'
   | 'MULTI_FACE';
 export const LIVE_SIGNAL_CONFIRM_MS = 1500;
-export const LIVE_SIGNAL_ESCALATE_MS = 3000;
+export const LIVE_SIGNAL_ESCALATE_MS = 4000;
 
 const env = (import.meta as any).env || {};
 const WASM_BASE: string =

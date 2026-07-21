@@ -400,7 +400,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Event/tab-manba qoidabuzarliklari (print-screen, clipboard, devtools, tab) uchun
    *  kichik yorliq — video/audio dan alohida qatorda. */
   const [eventLiveLabel, setEventLiveLabel] = useState<string | null>(null);
-  /** Barcha event/tab-manba qoidabuzarliklarini yagona 1.5s→3s qonuni bilan boshqaradi. */
+  /** Barcha event/tab-manba qoidabuzarliklarini yagona 1.5s→4s qonuni bilan boshqaradi. */
   const eventGateRef = useRef<ViolationGate | null>(null);
   const [identityStatus, setIdentityStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
   const identityStatusTimerRef = useRef<number | null>(null);
@@ -764,7 +764,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   /** Bir martalik hodisa (print-screen, clipboard, devtools) — endi darhol rasmiy
    *  YUBORMAYMIZ. Yagona darvozaga (eventGateRef) belgilaymiz: qonun bo'yicha 1.5s
-   *  kichik yorliq, 3s uzluksiz takrorlansa rasmiy (tick loop hal qiladi). */
+   *  kichik yorliq, 4s uzluksiz takrorlansa rasmiy (tick loop hal qiladi). */
   const markGateEvent = useCallback((type: string) => {
     if (bannedRef.current || !sessionStartedRef.current) return;
     if (!eventGateRef.current) {
@@ -996,7 +996,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
     // Security: Disable right click, copy/paste, and keyboard shortcuts.
     // Qonun bo'yicha: darhol rasmiy YUBORMAYMIZ — darvozaga belgilaymiz (1.5s kichik,
-    // 3s uzluksiz takror → rasmiy). Bir marta tasodifiy bosish jazolanmaydi.
+    // 4s uzluksiz takror → rasmiy). Bir marta tasodifiy bosish jazolanmaydi.
     const handleContextMenu = (e: Event) => {
       e.preventDefault();
       markGateEvent('CLIPBOARD_ATTEMPT');
@@ -1061,7 +1061,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     document.addEventListener('gesturechange', blockGesture);
 
     // DevTools o'lcham-evristikasi: ochiq panel — DAVOMIY holat. Tez (500ms) poll qilib
-    // darvozaga belgilaymiz; panel ochiq turgan har lahzada marklanadi → 3s uzluksiz
+    // darvozaga belgilaymiz; panel ochiq turgan har lahzada marklanadi → 4s uzluksiz
     // bo'lsa qonun bo'yicha rasmiyga o'tadi (bir zumlik o'lcham o'zgarishi jazolanmaydi).
     let devtoolsTick: number | null = null;
     if (enableSizeHeuristicDevtools) {
@@ -1264,7 +1264,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   // Qonun (README.md "Proctoring eskalatsiya qoidasi") bilan bir xil ikki bosqich:
-  // 1.5s uzluksiz — kamera panelida kichik yorliq, 3s — rasmiy ogohlantirish.
+  // 1.5s uzluksiz — kamera panelida kichik yorliq, 4s — rasmiy ogohlantirish.
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
   const ambientTrackerRef = useRef<AmbientNoiseTracker | null>(null);
   const speechContinuousRef = useRef<ContinuousSignalTracker | null>(null);
@@ -1321,7 +1321,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi. Davomiy holat
   // (mikrofon tuzatilmaguncha davom etadi) — qonun bo'yicha uzluksiz kuzatiladi,
-  // har tekshiruvda emas, faqat eskalatsiya bosqichida (3s) va undan keyin resetdan
+  // har tekshiruvda emas, faqat eskalatsiya bosqichida (4s) va undan keyin resetdan
   // so'ng yana to'liq muddatdan keyin qayta yuboriladi (tinimsiz spam bo'lmasin).
   const micDownContinuousRef = useRef<ContinuousSignalTracker | null>(null);
   useEffect(() => {
@@ -1345,7 +1345,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Yagona darvoza tick loop (event/tab-manba qoidabuzarliklari) ---
   // Qonun (README.md): har bir tur uchun 1.5s uzluksiz → kamera panelida kichik yorliq,
-  // 3s → rasmiy (logViolation), so'ng reset (tinimsiz takrorlanmasin).
+  // 4s → rasmiy (logViolation), so'ng reset (tinimsiz takrorlanmasin).
   useEffect(() => {
     if (banned || !sessionStarted) return;
     if (!eventGateRef.current) {
@@ -1612,7 +1612,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         MULTI_FACE: EXAM_L[langRef.current].liveMultiFace,
       }[type];
       // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Signal jami
-      // LIVE_SIGNAL_ESCALATE_MS (3s) ga yetsa, logViolation orqali mavjud rasmiy
+      // LIVE_SIGNAL_ESCALATE_MS (4s) ga yetsa, logViolation orqali mavjud rasmiy
       // ogohlantirish modali o'zi chiqadi (realtimeProctor.ts).
       setLiveSignalLabel(msg);
     },
@@ -1705,7 +1705,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Tab / visibility (masofaviy nazorat) ---
   // Oyna yashiringan holati (document.visibilityState === 'hidden') — DAVOMIY holat,
-  // shu sabab u ham yagona darvoza (eventGateRef) orqali qonunga bo'ysunadi: 3s uzluksiz
+  // shu sabab u ham yagona darvoza (eventGateRef) orqali qonunga bo'ysunadi: 4s uzluksiz
   // boshqa oynada qolsa rasmiy (TAB_SWITCH_HARD). Poll markazlashgan gate tick loopida.
   // Bu yerda faqat pagehide (sahifadan chiqib ketish) — bu terminal hodisa, kutib
   // bo'lmaydi, shu sabab darhol yozib qoldiramiz (eng oxirgi signal).

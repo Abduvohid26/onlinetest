@@ -134,16 +134,16 @@ Login → Dashboard → PreExamCheck (kamera, qoidalar, shaxs, liveness)
 **Asosiy qonun — BARCHA qoidabuzarlik/texnik xato bir xil ishlaydi:**
 
 1. **`LIVE_SIGNAL_CONFIRM_MS` (1.5s)** — signal uzluksiz shuncha vaqt davom etsa, **kamera panelida** (ExamRoom o‘ng panel, video ustida) kichik vizual ogohlantirish (chip) chiqadi. Bu bosqich hali **rasmiy emas** — backendga hech narsa yuborilmaydi, faqat talabaga tezkor signal.
-2. **`LIVE_SIGNAL_ESCALATE_MS` (3s, jami)** — signal shundan keyin ham davom etib, umumiy uzluksiz davomiyligi shu qiymatga yetsa, endi haqiqiy (backendga `logViolation` orqali) **rasmiy ogohlantirishga** aylanadi — `violationWarning` modali ochiladi. So‘ng hisoblagich `reset()` qilinadi (signal davom etsa ham keyingi rasmiy yana to‘liq 3s dan keyin — tinimsiz takrorlanmaydi).
+2. **`LIVE_SIGNAL_ESCALATE_MS` (4s, jami)** — signal shundan keyin ham davom etib, umumiy uzluksiz davomiyligi shu qiymatga yetsa, endi haqiqiy (backendga `logViolation` orqali) **rasmiy ogohlantirishga** aylanadi — `violationWarning` modali ochiladi. So‘ng hisoblagich `reset()` qilinadi (signal davom etsa ham keyingi rasmiy yana to‘liq 4s dan keyin — tinimsiz takrorlanmaydi).
 
 Qisqa uzilish (freym flicker, so‘zlar orasidagi pauza, tugmani qo‘yib yuborish) hisoblagichni buzmasligi uchun grace-oyna bor (odatda 500–1000ms).
 
 **Signal manbalari va ular ushbu qonunni qanday qo‘llaydi:**
 
-- **Video (MediaPipe, `frontend/src/lib/realtimeProctor.ts`)** — yuz yo‘q (`NO_FACE`), ko‘p yuz (`MULTI_FACE`), bosh burilishi/gaze, pozitsiya (uzoq/yaqin/markaz), haddan tashqari qimirlash, qo‘l ko‘tarish, og‘iz harakati. Har biri `trackContinuous` bilan 1.5s/3s. Sariq chip qatori.
+- **Video (MediaPipe, `frontend/src/lib/realtimeProctor.ts`)** — yuz yo‘q (`NO_FACE`), ko‘p yuz (`MULTI_FACE`), bosh burilishi/gaze, pozitsiya (uzoq/yaqin/markaz), haddan tashqari qimirlash, qo‘l ko‘tarish, og‘iz harakati. Har biri `trackContinuous` bilan 1.5s/4s. Sariq chip qatori.
 - **Audio (`frontend/src/lib/voiceActivity.ts` + `ContinuousSignalTracker`)** — gapirish (`MOUTH_MOVEMENT_TALKING`/`WHISPER_OR_CONVERSATION_SUSPECTED`) va tashqi shovqin (`SUSPICIOUS_AUDIO`). Ko‘k chip qatori, farqli matn.
-- **Event/tab (`frontend/src/lib/violationGate.ts` — yagona `ViolationGate`)** — print-screen, clipboard, devtools va tab yashiringan (`TAB_SWITCH_HARD`). Bir martalik keypress `markEvent()` bilan belgilanadi; markazlashgan tick loop 1.5s/3s ni qo‘llaydi — **bir marta tasodifiy bosish rasmiy bo‘lmaydi**, faqat 3s uzluksiz takrorlansa ("davom etsa") rasmiyga o‘tadi. Pushti chip qatori.
-- **Mikrofon o‘chishi (`CAMERA_MIC_ACCESS_FAILED`)** — davomiy holat, `ContinuousSignalTracker` bilan 3s.
+- **Event/tab (`frontend/src/lib/violationGate.ts` — yagona `ViolationGate`)** — print-screen, clipboard, devtools va tab yashiringan (`TAB_SWITCH_HARD`). Bir martalik keypress `markEvent()` bilan belgilanadi; markazlashgan tick loop 1.5s/4s ni qo‘llaydi — **bir marta tasodifiy bosish rasmiy bo‘lmaydi**, faqat 4s uzluksiz takrorlansa ("davom etsa") rasmiyga o‘tadi. Pushti chip qatori.
+- **Mikrofon o‘chishi (`CAMERA_MIC_ACCESS_FAILED`)** — davomiy holat, `ContinuousSignalTracker` bilan 4s.
 
 Uch xil chip (sariq=video, ko‘k=audio, pushti=event/tab) kamera panelida alohida qatorlarda, **farqli matn** bilan chiqadi — masalan "Gapirish aniqlandi" (audio) va "Tashqi shovqin bor" (shovqin) aralashtirilmaydi.
 
@@ -151,13 +151,13 @@ Uch xil chip (sariq=video, ko‘k=audio, pushti=event/tab) kamera panelida alohi
 
 **Qonundan tashqari (haqiqiy mustasnolar — struktura sababli):**
 - `IDENTITY_SUBSTITUTION` — darhol **ban** (ogohlantirish emas, kategoriya boshqacha); `runCheck` 3 marta ketma-ket mos kelmasa.
-- `FULLSCREEN_EXIT_HARD` — ilova darhol qayta-fullscreen gate ochadi (3s davom eta olmaydi).
+- `FULLSCREEN_EXIT_HARD` — ilova darhol qayta-fullscreen gate ochadi (4s davom eta olmaydi).
 - `REMOTE_CONTROL_SUSPECTED` — sahifa mount‘ida bir martalik UA/webdriver tekshiruvi.
 - `VIRTUAL_WEBCAM_SUSPECTED` — kamera ochilishida bir martalik aniqlash.
 - `PROCTOR_FEED_LOST`, `FORBIDDEN_OBJECT_*` — server (Celery) verdikti, ~20–30s server sikli.
 - `TAB_SWITCH_SOFT` — faqat `pagehide` (sahifadan chiqib ketish, terminal hodisa — kutib bo‘lmaydi).
 
-Yangi qoidabuzalik turi qo‘shilganda: davomiy bo‘lishi mumkin bo‘lsa — albatta shu 1.5s/3s qonuniga (video `trackContinuous`, audio/mic `ContinuousSignalTracker`, yoki event/tab `ViolationGate`) ulansin.
+Yangi qoidabuzalik turi qo‘shilganda: davomiy bo‘lishi mumkin bo‘lsa — albatta shu 1.5s/4s qonuniga (video `trackContinuous`, audio/mic `ContinuousSignalTracker`, yoki event/tab `ViolationGate`) ulansin.
 
 ---
 

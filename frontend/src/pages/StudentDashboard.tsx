@@ -119,6 +119,37 @@ function RetakeDots({ used, remaining }: { used: number; remaining: number }) {
   );
 }
 
+/** "Urinish tarixi (N)" tugmasi — bosilganda modal ochadi (kartochkani to'ldirmaydi). */
+function AttemptHistoryButton({
+  items,
+  label,
+  onOpen,
+}: {
+  items: any[];
+  label: string;
+  onOpen: () => void;
+}) {
+  if (!Array.isArray(items) || items.length === 0) return null;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="mt-3 w-full inline-flex items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-left hover:bg-gray-100 hover:border-gray-300 transition-colors"
+    >
+      <span className="inline-flex items-center gap-2 text-[12px] font-medium text-gray-700">
+        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {label}
+        <span className="text-[11px] font-bold text-gray-400 tabular-nums">{items.length}</span>
+      </span>
+      <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+      </svg>
+    </button>
+  );
+}
+
 /* Kichik statistika plitkasi. */
 function StatTile({
   label,
@@ -180,6 +211,8 @@ export function StudentDashboard({
   const [appealDrafts, setAppealDrafts] = useState<Record<number, string>>({});
   const [appealBusyExam, setAppealBusyExam] = useState<number | null>(null);
   const [appealMsgByExam, setAppealMsgByExam] = useState<Record<number, string>>({});
+  /** Urinish tarixi modali — kartochkani to'ldirmasin deb alohida oynada. */
+  const [historyModal, setHistoryModal] = useState<{ title: string; items: any[] } | null>(null);
   const t = translations[lang];
   const L = LOCAL[lang];
   const cancelledRef = useRef(false);
@@ -692,24 +725,11 @@ export function StudentDashboard({
                           );
                         })()}
 
-                        {Array.isArray(e.attempt_history) && e.attempt_history.length > 0 && (
-                          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
-                              {L.attemptHistory}
-                            </p>
-                            <ul className="space-y-1">
-                              {e.attempt_history.slice(-4).map((item: any, idx: number) => (
-                                <li key={`${item.at || idx}-${item.violation_type || idx}`} className="text-[12px] text-gray-700 leading-snug">
-                                  <span className="text-gray-500 tabular-nums">
-                                    {item.at ? new Date(item.at).toLocaleString() : '—'}
-                                  </span>
-                                  {' · '}
-                                  <span className="font-medium">{item.reason || item.violation_type}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
+                        <AttemptHistoryButton
+                          items={e.attempt_history}
+                          label={L.attemptHistory}
+                          onOpen={() => setHistoryModal({ title: e.title, items: e.attempt_history })}
+                        />
 
                         {(isUpcoming && untilStart > 0) || e.has_pin ? (
                           <div className="mt-3.5 flex flex-wrap gap-1.5">
@@ -927,24 +947,15 @@ export function StudentDashboard({
                         )}
 
                         {typeof r.attempts_count === 'number' && r.attempts_count > 1 && (
-                          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-left">
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 mb-1.5">
-                              {L.attemptHistory} · {r.attempts_count}
-                            </p>
-                            {Array.isArray(r.attempt_history) && r.attempt_history.length > 0 && (
-                              <ul className="space-y-1">
-                                {r.attempt_history.slice(-4).map((item: any, idx: number) => (
-                                  <li key={`${item.at || idx}-${item.violation_type || idx}`} className="text-[12px] text-gray-700 leading-snug">
-                                    <span className="text-gray-500 tabular-nums">
-                                      {item.at ? new Date(item.at).toLocaleString() : '—'}
-                                    </span>
-                                    {' · '}
-                                    <span className="font-medium">{item.reason || item.violation_type}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
+                          Array.isArray(r.attempt_history) && r.attempt_history.length > 0 ? (
+                            <AttemptHistoryButton
+                              items={r.attempt_history}
+                              label={`${L.attemptHistory} · ${r.attempts_count}`}
+                              onOpen={() => setHistoryModal({ title: r.title, items: r.attempt_history })}
+                            />
+                          ) : (
+                            <p className="mt-3 text-[12px] text-gray-400">{L.attemptHistory} · {r.attempts_count}</p>
+                          )
                         )}
                       </div>
 
@@ -1056,6 +1067,55 @@ export function StudentDashboard({
             </motion.div>
           )}
         </AnimatePresence>
+      )}
+
+      {/* Urinish tarixi modali */}
+      {historyModal && createPortal(
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm px-4 py-8"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setHistoryModal(null)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            className="w-full max-w-md max-h-[80vh] flex flex-col rounded-xl bg-white shadow-2xl overflow-hidden"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">{L.attemptHistory}</p>
+                <h3 className="text-[15px] font-bold text-gray-900 truncate">{historyModal.title}</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryModal(null)}
+                className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+                aria-label="Close"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <ol className="flex-1 overflow-y-auto overscroll-y-contain divide-y divide-gray-100">
+              {historyModal.items.map((item: any, idx: number) => (
+                <li key={`${item.at || idx}-${item.violation_type || idx}`} className="flex gap-3 px-5 py-3">
+                  <span className="mt-0.5 shrink-0 w-6 h-6 rounded-full bg-amber-50 text-amber-700 text-[11px] font-bold flex items-center justify-center">
+                    {idx + 1}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-medium text-gray-800 leading-snug break-words">{item.reason || item.violation_type}</p>
+                    <p className="text-[11.5px] text-gray-400 tabular-nums mt-0.5">
+                      {item.at ? new Date(item.at).toLocaleString() : '—'}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </motion.div>
+        </div>,
+        document.body,
       )}
     </div>
   );
