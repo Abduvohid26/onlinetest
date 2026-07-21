@@ -5,7 +5,7 @@ import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
 import { LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS } from '../lib/realtimeProctor';
-import { analyzeVoiceFrame, AmbientNoiseTracker, isFaceVisibleForTalk, VoiceActivityTracker } from '../lib/voiceActivity';
+import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1082,6 +1082,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
     // Har bir klik/touch — fullscreen (ESC gate ochiq bo'lsa, faqat gate tugmasi ishlaydi).
     const ensureFullscreenOnGesture = () => {
+      // Safety net: AudioContext "suspended" bo'lsa (brauzer avtoplay siyosati) —
+      // har foydalanuvchi harakatida tiklaymiz. Aks holda mikrofon jimlik beradi va
+      // OVOZ ANIQLANMAYDI (analyser 0 qaytaradi). Bu ovoz-aniqlash muammosining
+      // eng ehtimoliy sababi edi.
+      if (audioContextRef.current?.state === 'suspended') {
+        audioContextRef.current.resume().catch(() => {});
+      }
       if (bannedRef.current) return;
       if (needsFullscreenRef.current) return;
       if (document.fullscreenElement) return;
@@ -1276,6 +1283,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Ovoz manbali kichik yorliq — kamera panelida video signalidan ALOHIDA qatorda
    *  ko'rsatiladi (shovqin va gapirish matni farqlanishi uchun). */
   const [audioLiveLabel, setAudioLiveLabel] = useState<string | null>(null);
+  /** VAQTINCHA DEBUG: audio qiymatlarini ekranda ko'rsatish (ovoz-aniqlash muammosini
+   *  aniqlash uchun; muammo hal bo'lgach olib tashlanadi). */
+  const [audioDbg, setAudioDbg] = useState<string>('');
+  const audioDbgTickRef = useRef(0);
 
   useEffect(() => {
     if (banned) return;
@@ -1295,8 +1306,43 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       const ambientRaw = ambientTrackerRef.current!.push(frame);
       const ambientMs = ambientContinuousRef.current!.push(ambientRaw, now);
-      const speechRaw = isFaceVisibleForTalk(faceStatusRef.current) && voiceTrackerRef.current!.push(frame);
+      // OVOZ DOIM aniqlanadi — yuz holatiga BOG'LANMAYDI. Ilgari isFaceVisibleForTalk
+      // gate'i bor edi: MediaPipe yuzni WAITING/aniqlamagan paytda ovoz umuman
+      // sezilmasdi. Talaba o'zi gapiryaptimi yoki kamerasiz kimdir — bu farq keyin
+      // mouthActiveRef orqali (MOUTH_MOVEMENT_TALKING vs WHISPER) hal qilinadi.
+      const speechRaw = voiceTrackerRef.current!.push(frame);
       const speechMs = speechContinuousRef.current!.push(speechRaw, now);
+
+      // Debug: ekranda audio qiymatlari (devtools kerak emas). Har ~3 tikda yangilanadi.
+      audioDbgTickRef.current += 1;
+      const ctxState = audioContextRef.current?.state ?? 'yo\'q';
+      if (audioDbgTickRef.current % 3 === 0) {
+        setAudioDbg(
+          `rms:${frame.rms.toFixed(3)} ovoz:${frame.humanVoice ? '✓' : '✗'} ` +
+          `sp:${frame.speechRatio.toFixed(2)} h:${frame.harmonicity.toFixed(2)} ` +
+          `t:${(speechMs / 1000).toFixed(1)}s ctx:${ctxState}`,
+        );
+      }
+      // Debug: har ~1s serverga yuboramiz — `docker compose logs app` orqali o'qiladi.
+      if (audioDbgTickRef.current % 5 === 0) {
+        void fetch(apiUrl('/api/student/debug-audio'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...examAuthHeaders(tokenRef.current) },
+          body: JSON.stringify({
+            rms: Number(frame.rms.toFixed(4)),
+            humanVoice: frame.humanVoice,
+            speechRatio: Number(frame.speechRatio.toFixed(3)),
+            harmonicity: Number(frame.harmonicity.toFixed(3)),
+            zcr: Number(frame.zcr.toFixed(3)),
+            lowFreqRatio: Number(frame.lowFreqRatio.toFixed(3)),
+            crestFactor: Number(frame.crestFactor.toFixed(2)),
+            speechMs: Math.round(speechMs),
+            ambientMs: Math.round(ambientMs),
+            ctx: ctxState,
+            faceStatus: faceStatusRef.current,
+          }),
+        }).catch(() => {});
+      }
 
       if (ambientMs >= LIVE_SIGNAL_CONFIRM_MS) {
         setAudioLiveLabel(EXAM_L[langRef.current].liveAmbientNoise);
@@ -2620,6 +2666,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <div className="px-3 py-1.5 bg-rose-50 border-b border-rose-100 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
                     <span className="text-[11px] font-medium text-rose-800 truncate">{eventLiveLabel}</span>
+                  </div>
+                )}
+                {audioDbg && (
+                  <div className="px-3 py-1 bg-slate-800 border-b border-slate-700">
+                    <span className="text-[10px] font-mono text-emerald-300 break-all leading-tight">{audioDbg}</span>
                   </div>
                 )}
                 <div className="p-2 pb-2">

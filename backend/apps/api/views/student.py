@@ -358,6 +358,27 @@ def student_proctor_config(request):
     )
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def student_debug_audio(request):
+    """VAQTINCHA: client audio-aniqlash qiymatlarini server logiga yozadi (diagnostika).
+    `docker compose logs app` orqali o'qiladi. Muammo hal bo'lgach olib tashlanadi."""
+    import sys
+
+    u = request.user
+    d = request.data or {}
+    print(
+        f"[AUDIO-DBG] student={getattr(u, 'id', '?')} "
+        f"rms={d.get('rms')} voice={d.get('humanVoice')} sp={d.get('speechRatio')} "
+        f"h={d.get('harmonicity')} zcr={d.get('zcr')} lowF={d.get('lowFreqRatio')} "
+        f"crest={d.get('crestFactor')} speechMs={d.get('speechMs')} ambMs={d.get('ambientMs')} "
+        f"ctx={d.get('ctx')} face={d.get('faceStatus')}",
+        file=sys.stderr,
+        flush=True,
+    )
+    return Response({"ok": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def student_exams_start(request, pk: int):
     u = request.user
     if not _is_student_user(u):
