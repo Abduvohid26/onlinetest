@@ -770,6 +770,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }, []);
 
   const [qIndex, setQIndex] = useState(0);
+  /** Oxirgi savoldagi "Yakunlash" tugmasi uchun tasdiqlash modali. */
+  const [submitConfirm, setSubmitConfirm] = useState(false);
   const answeredCount = Object.keys(answers).length;
   const totalQuestions = examQuestions.length || Number(exam.bank_question_count) || 0;
   const progress = examQuestions.length > 0 ? (answeredCount / examQuestions.length) * 100 : 0;
@@ -1932,9 +1934,18 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            // TIL MAJBURIY: `auto` tilli imtihonda savollar talabaning UI tilida
+            // beriladi (/start `X-Student-Lang` bilan), lekin submit'da bu sarlavha
+            // yuborilmasdi va server "uz" ga qaytardi — talaba ru/en da yechgan
+            // bo'lsa javoblari boshqa tildagi variantlar bilan solishtirilardi.
+            'X-Student-Lang': langRef.current,
             ...(await nextGuardHeaders('POST', `/api/student/exams/${exam.id}/submit`)),
           },
-          body: JSON.stringify({ answers: ans, flaggedQuestions: fl }),
+          body: JSON.stringify({
+            answers: ans,
+            flaggedQuestions: fl,
+            student_lang: langRef.current,
+          }),
         });
         syncVacIfOk(res);
         const json = await readJsonSafe<ExamResultPayload & { error?: string }>(res);
@@ -2765,15 +2776,32 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   {t.examNavPrev}
                 </AdminBtn>
                 <span className="text-[12px] font-medium text-gray-400 tabular-nums shrink-0">{qIndex + 1} / {totalQuestions}</span>
-                <AdminBtn
-                  variant="blue"
-                  size="md"
-                  disabled={qIndex >= totalQuestions - 1}
-                  onClick={() => setQIndex((i) => Math.min(totalQuestions - 1, i + 1))}
-                  iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
-                >
-                  {t.examNavNext}
-                </AdminBtn>
+                {/* Oxirgi savolda "Keyingi" o'rniga "Yakunlash" — o'chiq (disabled)
+                    tugma turishi talabani boshi berk ko'chaga olib borardi: oldinga
+                    yo'l yo'q, yakunlash tugmasi esa o'ng panelda, ko'zga tashlanmaydi. */}
+                {qIndex >= totalQuestions - 1 ? (
+                  <AdminBtn
+                    variant="blue"
+                    size="md"
+                    loading={submitting}
+                    // Tasdiqlash MAJBURIY: talaba shu tugmani "Keyingi" deb ketma-ket
+                    // bosib kelgan, oxirgi savolda ortiqcha bosish imtihonni
+                    // qaytarib bo'lmaydigan tarzda yakunlab qo'yishi mumkin edi.
+                    onClick={() => setSubmitConfirm(true)}
+                    iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                  >
+                    {submitting ? t.submitting : t.submitExam}
+                  </AdminBtn>
+                ) : (
+                  <AdminBtn
+                    variant="blue"
+                    size="md"
+                    onClick={() => setQIndex((i) => Math.min(totalQuestions - 1, i + 1))}
+                    iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>}
+                  >
+                    {t.examNavNext}
+                  </AdminBtn>
+                )}
               </div>
             </motion.div>
           )}
@@ -2949,6 +2977,60 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         </div>
       </div>
       <Calculator />
+
+      {/* Yakunlashni tasdiqlash — javobsiz savollar sonini ko'rsatadi */}
+      {submitConfirm && createPortal(
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 overflow-y-auto px-4 py-8"
+          role="dialog"
+          aria-modal="true"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.94 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="w-full max-w-md my-auto"
+          >
+            <div className="w-full p-6 rounded-xl border border-gray-200 bg-white shadow-2xl">
+              <h2 className="text-lg font-bold text-gray-900 mb-3">{t.submitConfirmTitle}</h2>
+              <p
+                className={`text-sm font-semibold mb-1.5 ${
+                  answeredCount >= totalQuestions ? 'text-green-700' : 'text-amber-700'
+                }`}
+              >
+                {answeredCount >= totalQuestions
+                  ? t.submitConfirmAllAnswered.replace('{total}', String(totalQuestions))
+                  : t.submitConfirmUnanswered
+                      .replace('{n}', String(totalQuestions - answeredCount))
+                      .replace('{total}', String(totalQuestions))}
+              </p>
+              <p className="text-sm text-gray-600 mb-5">{t.submitConfirmWarning}</p>
+              <div className="flex flex-col-reverse sm:flex-row gap-2">
+                <AdminBtn
+                  variant="ghost"
+                  size="md"
+                  className="sm:flex-1"
+                  onClick={() => setSubmitConfirm(false)}
+                >
+                  {t.submitConfirmNo}
+                </AdminBtn>
+                <AdminBtn
+                  variant="blue"
+                  size="md"
+                  className="sm:flex-1"
+                  loading={submitting}
+                  onClick={() => {
+                    setSubmitConfirm(false);
+                    handleSubmit();
+                  }}
+                >
+                  {t.submitConfirmYes}
+                </AdminBtn>
+              </div>
+            </div>
+          </motion.div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

@@ -267,8 +267,22 @@ function AppContent() {
           navigate('/', { replace: true });
           return;
         }
-        setActiveExam(match);
-        setStudentExamId(match.student_exam_id ?? 0);
+        // Saqlangan SESSIYA ma'lumotlarini (startedAt, sessionKey, sessionChallenge)
+        // yo'qotmaymiz — `/api/student/exams` ro'yxati ularni qaytarmaydi.
+        // Ilgari bu yerda `setActiveExam(match)` qilinardi va imtihon o'rtasida
+        // refresh qilinganda o'sha maydonlar o'chib ketardi; `sessionStarted`
+        // (= startedAt && sessionKey) false bo'lib, "Imtihonni boshlash" oynasi
+        // qayta chiqardi. Yuqoridagi tiklash effekti bilan poyga bo'lgani uchun
+        // muammo goh chiqib, goh chiqmasdi.
+        const saved = readExamFlow();
+        const resumable =
+          saved?.examStatus === 'taking' &&
+          saved.activeExam?.id === routeExamId &&
+          Boolean(match.in_progress)
+            ? saved.activeExam
+            : null;
+        setActiveExam(resumable ? { ...resumable, ...match } : match);
+        setStudentExamId(match.student_exam_id ?? saved?.studentExamId ?? 0);
         if (routePhase === 'check') setExamStatus('checking');
         else if (routePhase === 'room') setExamStatus('taking');
       })

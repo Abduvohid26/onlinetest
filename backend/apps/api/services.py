@@ -115,10 +115,10 @@ def finalize_student_exam_session(
     raw_questions = list(questions)
     raw_answers = answers if isinstance(answers, dict) else {}
     questions = prepare_questions_for_grading(questions, exam, raw_answers)
-    try:
-        norm = validate_exam_answers(questions, raw_answers)
-    except ValueError:
-        norm = {}
+    # Bardoshli rejim: ilgari bitta nomuvofiq javob `norm = {}` ga olib kelardi —
+    # ya'ni talabaning BARCHA javoblari yo'qolib, ball 0 bo'lardi. Endi faqat
+    # o'sha bitta javob tashlab yuboriladi.
+    norm = validate_exam_answers(questions, raw_answers, strict=False)
     score = sum(1 for q in questions if norm.get(str(q["id"])) == q.get("correctAnswer"))
     flagged_json = json.dumps(flagged) if flagged else "[]"
     done_at = completed_at or dj_tz.now()

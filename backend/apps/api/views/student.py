@@ -843,10 +843,10 @@ def student_exams_submit(request, pk: int):
             questions = safe_json_loads(exam.questions_json, [])
         student_lang = resolve_student_exam_language(request, exam)
         questions = prepare_questions_for_grading(questions, exam, answers, student_lang=student_lang)
-        try:
-            norm = validate_exam_answers(questions, answers)
-        except ValueError as ex:
-            return Response({"error": str(ex)}, status=400)
+        # Bardoshli rejim: mos kelmagan javob javobsiz hisoblanadi, lekin imtihonni
+        # yakunlashga to'sqinlik qilmaydi. Ilgari bu yerda 400 qaytarilardi va
+        # talaba imtihonni umuman topshira olmay qolardi.
+        norm = validate_exam_answers(questions, answers, strict=False)
         score = sum(1 for q in questions if norm.get(str(q["id"])) == q.get("correctAnswer"))
         flagged_json = json.dumps(flagged) if flagged else "[]"
         completed_at = now_submit
@@ -1025,10 +1025,9 @@ def student_exam_save_progress(request, pk: int):
         q_list = safe_json_loads(exam.questions_json, [])
     student_lang = resolve_student_exam_language(request, exam)
     q_list = prepare_questions_for_grading(q_list, exam, answers, student_lang=student_lang)
-    try:
-        norm = validate_exam_answers(q_list, answers)
-    except ValueError as ex:
-        return Response({"error": str(ex)}, status=400)
+    # Qoralama avtomatik saqlanadi — bitta nomuvofiq javob tufayli butun saqlash
+    # yiqilmasin (aks holda talabaning qolgan javoblari ham saqlanmay qolardi).
+    norm = validate_exam_answers(q_list, answers, strict=False)
     se.draft_answers_json = json.dumps(norm)
     if isinstance(flagged, list):
         se.draft_flagged_json = json.dumps(flagged)

@@ -56,8 +56,47 @@ def validate_profile_image_b64(value) -> str | None:
     return None
 
 
-def validate_exam_answers(questions: list[dict], answers: dict) -> dict[str, str]:
-    """Savol ID va variantlar bo‘yicha javoblarni tekshiradi; normallashtirilgan dict qaytaradi."""
+def match_exam_option(value: str, options: list[str]) -> str | None:
+    """
+    Javobni variantlardan biriga moslaydi; mos kelmasa None.
+
+    Aynan mos kelishi shart emas: bo‘shliq va registr farqi kechiriladi. Sabab —
+    frontend variantlarni ko‘rsatishdan oldin `.trim()` qiladi, import qilingan
+    savollarda esa variantlar chetida bo‘shliq/yangi qator qolib ketishi mumkin.
+    Bunday farq talabaning javobini "noto‘g‘ri" qilib qo‘ymasligi kerak.
+
+    Qaytariladigan qiymat — DOIM variantning kanonik (savoldagi) ko‘rinishi, chunki
+    baholash `correctAnswer` bilan aynan solishtiradi.
+    """
+    if value in options:
+        return value
+    stripped = value.strip()
+    for o in options:
+        if o.strip() == stripped:
+            return o
+    folded = stripped.casefold()
+    for o in options:
+        if o.strip().casefold() == folded:
+            return o
+    return None
+
+
+def validate_exam_answers(
+    questions: list[dict], answers: dict, *, strict: bool = True
+) -> dict[str, str]:
+    """
+    Savol ID va variantlar bo‘yicha javoblarni tekshiradi; normallashtirilgan dict qaytaradi.
+
+    `strict=True`  — mos kelmagan javobda ValueError (til aniqlashda kerak: qaysi til
+                     variantlari javoblarga mos kelishini shu xato bilan tanlaymiz).
+    `strict=False` — mos kelmagan javob TASHLAB YUBORILADI (javobsiz hisoblanadi),
+                     lekin imtihonni topshirishga TO‘SQINLIK QILMAYDI.
+
+    Nega bardoshli rejim kerak: ilgari submit qat'iy rejimda ishlardi va bitta
+    mos kelmagan javob 400 xato qaytarardi — talaba imtihonni UMUMAN yakunlay
+    olmay qolardi ("Invalid answer for question 1"). Bir savolning texnik
+    nomuvofiqligi butun imtihonni qulflab qo‘yishi mumkin emas.
+    """
     if not isinstance(answers, dict):
         raise ValueError("Invalid answers format")
     q_by_id = {str(q.get("id")): q for q in questions if q.get("id") is not None}
@@ -69,7 +108,13 @@ def validate_exam_answers(questions: list[dict], answers: dict) -> dict[str, str
         q = q_by_id[qid]
         opts = [str(o) for o in (q.get("options") or [])]
         val = "" if v is None else str(v).strip()
-        if val and val not in opts:
-            raise ValueError(f"Invalid answer for question {qid}")
-        out[qid] = val
+        if not val:
+            out[qid] = ""
+            continue
+        match = match_exam_option(val, opts)
+        if match is None:
+            if strict:
+                raise ValueError(f"Invalid answer for question {qid}")
+            continue
+        out[qid] = match
     return out
