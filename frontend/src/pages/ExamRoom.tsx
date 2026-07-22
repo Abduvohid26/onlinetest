@@ -106,6 +106,11 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
 // Identity check: har 3 soniyada (OpenCV SFace lokal, tez ~100ms; throttle 60/min)
 const IDENTITY_CHECK_MS = 90_000;
 
+/** Tab/oynadan shuncha vaqtdan ko'p ketilsa — RASMIY qoidabuzarlik (TAB_SWITCH_HARD).
+ *  Qisqa tasodifiy fokus yo'qolishi (brauzer UI, OS bildirishnomasi) hisoblanmaydi.
+ *  "Kichik ogohlantirish" bosqichi YO'Q — talaba boshqa tabda uni ko'ra olmaydi. */
+const TAB_AWAY_VIOLATION_MS = 1200;
+
 interface ExamRoomProps {
   exam: any;
   studentExamId: number;
@@ -624,6 +629,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const fullscreenRequestedRef = useRef(false);
   const fullscreenEnteredRef = useRef(false);
   const blurIgnoreUntilRef = useRef(0); // timestamp: shu vaqtgacha blur ignore qilinadi
+  /** Talaba tabdan/oynadan ketgan payt (visibilitychange yoki blur). Qaytganda
+   *  (visible/focus) qancha vaqt ketgani o'lchanadi — TAB_SWITCH_HARD uchun. */
+  const awayStartedAtRef = useRef<number | null>(null);
   /** Modal/ogohlantirish fullscreen'dan chiqarishi — buni qoidabuzarlik deb hisoblamaymiz */
   const fullscreenSuppressRef = useRef(false);
   /** Foydalanuvchi ESC bilan ataylab chiqdi */
@@ -706,40 +714,43 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // Eslatma: maxTouchPoints + tor brauzer oynasi (masalan 900px) "mobil" deb noto'g'ri
     // REMOTE_CONTROL yuborardi — Windows sensorli noutbuklar tez-tez ban. Alohida yuborilmaydi.
 
-    const clearBlurTimer = () => {
-      if (blurViolationTimerRef.current !== null) {
-        window.clearTimeout(blurViolationTimerRef.current);
-        blurViolationTimerRef.current = null;
+    // --- Tab almashtirish / alt-tab (boshqa dastur) — HODISA asosida aniqlash ---
+    // MUHIM: brauzer fon tabda setInterval/setTimeout'ni muzlatadi, shu sabab faqat
+    // polling'ga tayanib bo'lmaydi (talaba boshqa tabga o'tib AI ishlatsa sezilmasdi).
+    // Shuning uchun: ketgan vaqtni `visibilitychange`/`blur` da yozamiz, QAYTGANDA
+    // (`visible`/`focus`) qancha vaqt ketganini o'lchaymiz. Hodisalar taymer muzlaganda
+    // ham ishonchli ishlaydi. Qaytishda darhol rasmiy TAB_SWITCH_HARD yoziladi —
+    // "kichik ogohlantirish" bermaymiz, chunki talaba boshqa tabda uni ko'rmaydi.
+    const markAwayStart = () => {
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      if (Date.now() < blurIgnoreUntilRef.current) return; // fullscreen so'rovi paytida emas
+      if (awayStartedAtRef.current == null) awayStartedAtRef.current = Date.now();
+    };
+
+    const markAwayEnd = () => {
+      const startedAt = awayStartedAtRef.current;
+      awayStartedAtRef.current = null;
+      if (startedAt == null) return;
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      if (Date.now() - startedAt >= TAB_AWAY_VIOLATION_MS) {
+        void logViolationRef.current('TAB_SWITCH_HARD');
       }
     };
 
-    // Blur: faqat fullscreen rejimida va fullscreen so'ralayotgan paytda emas
-    const onBlur = () => {
-      if (bannedRef.current || !sessionStartedRef.current) return;
-      const now = Date.now();
-      // Fullscreen so'ralayotgan paytda (2 soniya) blur ignore
-      if (now < blurIgnoreUntilRef.current) return;
-      clearBlurTimer();
-      blurViolationTimerRef.current = window.setTimeout(() => {
-        blurViolationTimerRef.current = null;
-        if (bannedRef.current) return;
-        if (document.hasFocus()) return;
-        // Fullscreen bo'lmagan holatda blur ko'p false-positive beradi (OS popup, browser UI).
-        // Shu sabab blur eventdan HARD violation yubormaymiz.
-        if (!document.fullscreenElement) {
-          return;
-        }
-        // Fullscreen rejimida blur — boshqa dastur focus oldi, lekin biz hali fullscreendamiz
-        // Bu hard block emas — soft violation
-        void logViolationRef.current('TAB_SWITCH_SOFT');
-      }, 900);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') markAwayStart();
+      else markAwayEnd();
     };
+    const onWindowBlur = () => markAwayStart();
+    const onWindowFocus = () => markAwayEnd();
 
-    // Fullscreen o'zgarishi — asosiy handler yuqoridagi useEffect'da (ESC vs modal ajratiladi).
-    window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('blur', onWindowBlur);
+    window.addEventListener('focus', onWindowFocus);
     return () => {
-      clearBlurTimer();
-      window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('blur', onWindowBlur);
+      window.removeEventListener('focus', onWindowFocus);
     };
   }, []);
 
@@ -842,7 +853,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const logViolationRef = useRef<(type: string) => Promise<void>>(async () => {});
   /** DevTools/clipboard/varaq — bir "urinish"da yuboriladigan bir nechta signal; bittasini yuborish. */
   const focusBurstLockUntilRef = useRef(0);
-  const blurViolationTimerRef = useRef<number | null>(null);
   const FOCUS_BURST_TYPES = new Set([
     'DEVTOOLS_OPEN',
     'CLIPBOARD_ATTEMPT',
@@ -1285,7 +1295,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [audioLiveLabel, setAudioLiveLabel] = useState<string | null>(null);
   /** VAQTINCHA DEBUG: audio qiymatlarini ekranda ko'rsatish (ovoz-aniqlash muammosini
    *  aniqlash uchun; muammo hal bo'lgach olib tashlanadi). */
-  const [audioDbg, setAudioDbg] = useState<string>('');
   const audioDbgTickRef = useRef(0);
 
   useEffect(() => {
@@ -1313,17 +1322,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const speechRaw = voiceTrackerRef.current!.push(frame);
       const speechMs = speechContinuousRef.current!.push(speechRaw, now);
 
-      // Debug: ekranda audio qiymatlari (devtools kerak emas). Har ~3 tikda yangilanadi.
       audioDbgTickRef.current += 1;
       const ctxState = audioContextRef.current?.state ?? 'yo\'q';
-      if (audioDbgTickRef.current % 3 === 0) {
-        setAudioDbg(
-          `rms:${frame.rms.toFixed(3)} ovoz:${frame.humanVoice ? '✓' : '✗'} ` +
-          `sp:${frame.speechRatio.toFixed(2)} h:${frame.harmonicity.toFixed(2)} ` +
-          `t:${(speechMs / 1000).toFixed(1)}s ctx:${ctxState}`,
-        );
-      }
-      // Debug: har ~1s serverga yuboramiz — `docker compose logs app` orqali o'qiladi.
+      // Diagnostika: har ~1s serverga yuboriladi (ekranda ko'rinmaydi) —
+      // `docker compose logs app` orqali o'qiladi. Muammo hal bo'lgach olib tashlanadi.
       if (audioDbgTickRef.current % 5 === 0) {
         void fetch(apiUrl('/api/student/debug-audio'), {
           method: 'POST',
@@ -2666,11 +2668,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <div className="px-3 py-1.5 bg-rose-50 border-b border-rose-100 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" />
                     <span className="text-[11px] font-medium text-rose-800 truncate">{eventLiveLabel}</span>
-                  </div>
-                )}
-                {audioDbg && (
-                  <div className="px-3 py-1 bg-slate-800 border-b border-slate-700">
-                    <span className="text-[10px] font-mono text-emerald-300 break-all leading-tight">{audioDbg}</span>
                   </div>
                 )}
                 <div className="p-2 pb-2">

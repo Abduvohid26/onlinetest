@@ -26,8 +26,13 @@ export interface VoiceFrame {
 // (kamerasiz yon tomondan gapirsa) ushlash uchun. Bu SHOVQIN'dan (ambient) alohida —
 // shovqin baland qoladi, ovoz esa sezgirroq.
 const RMS_VOICE = 0.034;
-const ZCR_MIN = 0.022;
-const ZCR_MAX = 0.18;
+// ZCR_MIN ATAYLAB juda past: ovozli nutq (unli tovushlar, f0≈100-200 Hz) 2048 kadrda
+// atigi ~10 marta nolni kesib o'tadi → zcr ≈ 0.005. Ilgari 0.022 edi — bu real inson
+// ovozini BUTUNLAY rad etardi (ovoz aniqlanmasligining asosiy sababi shu edi).
+// Shovqin baribir boshqa mezonlar bilan rad etiladi: oq shovqin zcr≈0.5 (ZCR_MAX),
+// gurillash speechRatio past, "taq" esa impuls (crest) va harmonicity=0.
+const ZCR_MIN = 0.003;
+const ZCR_MAX = 0.2;
 const SPEECH_BAND_RATIO_MIN = 0.48;
 const SPEECH_FLATNESS_MAX = 0.6;
 const LOW_FREQ_RATIO_MAX = 0.55;

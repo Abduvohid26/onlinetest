@@ -119,6 +119,69 @@ const PITCH_DOWN = 0.72;
 // Faqat HADDAN TASHQARI (doimiy) qimirlash uchun (qonun: 1.5s kichik, 3s rasmiy).
 const MOVE_THRESHOLD = 0.085;
 
+// --- Qorachiq (iris) asosidagi ko'z yo'nalishi ---
+// MediaPipe 478 nuqta beradi: 468 = chap iris markazi, 473 = o'ng iris markazi.
+// Bosh to'g'ri turgan holda ham ko'z chetga qarasa (yonidagi qog'oz/telefon) shu aniqlaydi.
+const IRIS_L = 468;
+const IRIS_R = 473;
+// Ko'z burchaklari va qovoqlari (chap: 33/133 burchak, 159/145 tepa/past;
+// o'ng: 362/263 burchak, 386/374 tepa/past).
+const EYE_L = { out: 33, in: 133, top: 159, bot: 145 };
+const EYE_R = { out: 263, in: 362, top: 386, bot: 374 };
+/** Qorachiq ko'z kengligining shuncha ulushiga siljisa — chetga qaragan hisoblanadi. */
+const IRIS_GAZE_X = 0.16;
+/** Pastga qarash (qog'oz/telefon tizzada) — ko'z balandligiga nisbatan. */
+const IRIS_GAZE_DOWN = 0.32;
+/** Ko'z ochiqligi (balandlik/kenglik). Bundan past — ko'z yumuq, iris ishonchsiz. */
+const EYE_OPEN_MIN_RATIO = 0.15;
+
+interface Pt {
+  x: number;
+  y: number;
+}
+
+/**
+ * Qorachiq (iris) asosida ko'z yo'nalishi — SOF funksiya (test qilinadi).
+ *
+ * Bosh to'g'ri turgan holda ham ko'z chetga/pastga qarasa aniqlaydi (yonidagi
+ * qog'oz, telefon, ikkinchi ekran). Qaytaradi: `{ dx, dy }` — qorachiqning ko'z
+ * markazidan siljishi (ko'z o'lchamiga nisbatan; dx>0 → tasvirda o'ngga,
+ * dy>0 → pastga). `null` = ishonchsiz (ko'z yumuq yoki iris nuqtalari yo'q).
+ */
+export function computeIrisGaze(lm: Pt[]): { dx: number; dy: number } | null {
+  // Iris nuqtalari faqat 478-nuqtali modelda bor — bo'lmasa jim o'tkazamiz.
+  if (!lm || lm.length <= IRIS_R) return null;
+
+  const eyeOffset = (
+    iris: Pt | undefined,
+    c1: Pt | undefined,
+    c2: Pt | undefined,
+    top: Pt | undefined,
+    bot: Pt | undefined,
+  ): { dx: number; dy: number } | null => {
+    if (!iris || !c1 || !c2 || !top || !bot) return null;
+    const w = Math.abs(c2.x - c1.x);
+    const h = Math.abs(bot.y - top.y);
+    if (w < 1e-4) return null;
+    // Ko'z yumuq bo'lsa iris pozitsiyasi ishonchsiz — o'tkazib yuboramiz.
+    if (h / w < EYE_OPEN_MIN_RATIO) return null;
+    const cx = (c1.x + c2.x) / 2;
+    const cy = (top.y + bot.y) / 2;
+    return { dx: (iris.x - cx) / w, dy: (iris.y - cy) / h };
+  };
+
+  const l = eyeOffset(lm[IRIS_L], lm[EYE_L.out], lm[EYE_L.in], lm[EYE_L.top], lm[EYE_L.bot]);
+  const r = eyeOffset(lm[IRIS_R], lm[EYE_R.out], lm[EYE_R.in], lm[EYE_R.top], lm[EYE_R.bot]);
+  if (l && r) return { dx: (l.dx + r.dx) / 2, dy: (l.dy + r.dy) / 2 };
+  return l ?? r;
+}
+
+/** Ko'z chetga/pastga qaraganmi (chegaralar bilan). */
+export function isIrisGazeAway(iris: { dx: number; dy: number } | null): boolean {
+  if (iris == null) return false;
+  return Math.abs(iris.dx) >= IRIS_GAZE_X || iris.dy >= IRIS_GAZE_DOWN;
+}
+
 export interface RealtimeProctorCallbacks {
   onViolation: (type: RealtimeViolation) => void;
   /** Yuz almashishi shubhasi (yo'qolib qayta paydo bo'ldi yoki ko'p yuz) —
@@ -360,7 +423,12 @@ export class RealtimeProctor {
     }
 
     if (faceCount >= 1) {
-      const posStatus = this.checkFacePosition(faces[0]);
+      let posStatus = this.checkFacePosition(faces[0]);
+      // Qorachiq (iris) — bosh to'g'ri turgan bo'lsa ham ko'z chetga/pastga qarasa,
+      // badge'da "Kameraga qarang" ko'rsatamiz (aks holda talaba hech qanday
+      // fikr-mulohaza olmasdi: bosh pozitsiyasi "OK" bo'lardi).
+      const iris = this.irisGaze(faces[0]);
+      if (posStatus === 'OK' && isIrisGazeAway(iris)) posStatus = 'GAZE_AWAY';
       this.cb.onFaceStatus?.(posStatus);
 
       // Pozitsiya — kichik→katta eskalatsiya: uzluksiz LIVE_SIGNAL_ESCALATE_MS
@@ -372,7 +440,7 @@ export class RealtimeProctor {
       if (this.liveMs.TOO_CLOSE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TOO_CLOSE');
       if (this.liveMs.OFF_CENTER >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_OFF_CENTER');
 
-      this.analyzeHeadAndMovement(faces[0], faceBlendshapes, handsPresent);
+      this.analyzeHeadAndMovement(faces[0], faceBlendshapes, handsPresent, iris);
     } else {
       // Yuz yo'q — barcha yuzga bog'liq davomiy signallarni so'ndiramiz. MOVEMENT/HAND
       // ham reset qilinmasa, yuz yo'qolganda eskirgan qiymat kamera panelida noto'g'ri
@@ -397,6 +465,10 @@ export class RealtimeProctor {
       .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms >= LIVE_SIGNAL_CONFIRM_MS)
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
+  }
+
+  private irisGaze(lm: FaceLandmark[]): { dx: number; dy: number } | null {
+    return computeIrisGaze(lm);
   }
 
   /** Yuzning kadr ichidagi holati — overlay uchun tez javob. */
@@ -431,6 +503,7 @@ export class RealtimeProctor {
     lm: FaceLandmark[],
     blendshapes?: Array<{ categoryName: string; score: number }>,
     handsPresent = false,
+    iris: { dx: number; dy: number } | null = null,
   ): void {
     // MediaPipe FaceMesh indekslari: burun=1, chap yuz cheti=234, o'ng=454, manglay=10, iyak=152
     const nose = lm[1];
@@ -454,15 +527,24 @@ export class RealtimeProctor {
     const turnMs = this.trackContinuous('turn', absYaw >= YAW_HARD);
     if (turnMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TURNED_AWAY');
 
-    const gazeLActive = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;
-    const gazeRActive = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX < 0;
+    // Qorachiq (iris) — bosh to'g'ri turgan bo'lsa ham ko'z chetga qarasa aniqlanadi.
+    // Bosh-poza signali bilan BIRLASHTIRILADI (yo bosh burilgan, yo ko'z chetda).
+    // Ko'z yumuq / iris yo'q bo'lsa `iris` = null → faqat bosh-poza ishlaydi.
+    const irisLeft = iris != null && iris.dx >= IRIS_GAZE_X;
+    const irisRight = iris != null && iris.dx <= -IRIS_GAZE_X;
+    const irisDown = iris != null && iris.dy >= IRIS_GAZE_DOWN;
+
+    const headGazeL = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;
+    const headGazeR = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX < 0;
+    const gazeLActive = (headGazeL || irisLeft) && absYaw < YAW_HARD;
+    const gazeRActive = (headGazeR || irisRight) && absYaw < YAW_HARD;
     const gazeLMs = this.trackContinuous('gazeL', gazeLActive);
     const gazeRMs = this.trackContinuous('gazeR', gazeRActive);
     if (gazeLMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_LEFT');
     if (gazeRMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_RIGHT');
 
     const gazeUpMs = this.trackContinuous('gazeUp', noseRelY <= PITCH_UP);
-    const gazeDownMs = this.trackContinuous('gazeDown', noseRelY >= PITCH_DOWN);
+    const gazeDownMs = this.trackContinuous('gazeDown', noseRelY >= PITCH_DOWN || irisDown);
     if (gazeUpMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_UP');
     if (gazeDownMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_DOWN');
 

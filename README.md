@@ -156,6 +156,7 @@ Uch xil chip (sariq=video, ko‘k=audio, pushti=event/tab) kamera panelida alohi
 - `VIRTUAL_WEBCAM_SUSPECTED` — kamera ochilishida bir martalik aniqlash.
 - `PROCTOR_FEED_LOST`, `FORBIDDEN_OBJECT_*` — server (Celery) verdikti, ~20–30s server sikli.
 - `TAB_SWITCH_SOFT` — faqat `pagehide` (sahifadan chiqib ketish, terminal hodisa — kutib bo‘lmaydi).
+- **`TAB_SWITCH_HARD` (tab almashtirish / alt-tab)** — HODISA asosida, `visibilitychange` + `blur`/`focus`. Ketgan payt yoziladi, QAYTGANDA qancha vaqt ketgani o‘lchanadi; `TAB_AWAY_VIOLATION_MS` (1.2s) dan ko‘p bo‘lsa darhol rasmiy. Sabab: brauzer fon tabda `setInterval`ni **muzlatadi**, shu sabab faqat polling’ga tayanib bo‘lmaydi (talaba boshqa tabga o‘tib AI ishlatsa sezilmasdi). "Kichik ogohlantirish" bosqichi yo‘q — talaba boshqa tabda uni ko‘ra olmaydi.
 
 Yangi qoidabuzalik turi qo‘shilganda: davomiy bo‘lishi mumkin bo‘lsa — albatta shu 1.5s/4s qonuniga (video `trackContinuous`, audio/mic `ContinuousSignalTracker`, yoki event/tab `ViolationGate`) ulansin.
 
