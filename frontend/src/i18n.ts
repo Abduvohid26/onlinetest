@@ -387,6 +387,7 @@ export const translations = {
     examNavPrev: "← Oldingi",
     examNavNext: "Keyingi →",
     violationWarningTitle: "{n}-ogohlantirish (3 tadan)",
+    violationReasonFallback: "Imtihon qoidasi buzildi",
     violationContinueExam: "Tushundim, davom etaman",
     violationFinalNotice:
       "Bu 3/3 ogohlantirish. Keyingi qoidabuzarlikda qayta topshirish sarflanadi yoki BAN qo'yiladi.",
@@ -1079,6 +1080,7 @@ export const translations = {
     examNavPrev: "← Назад",
     examNavNext: "Далее →",
     violationWarningTitle: "Предупреждение {n} из 3",
+    violationReasonFallback: "Нарушено правило экзамена",
     violationContinueExam: "Понял, продолжить",
     violationFinalNotice:
       "Это предупреждение 3/3. Следующее нарушение — остановка экзамена и BAN (без новых предупреждений).",
@@ -1770,6 +1772,7 @@ export const translations = {
     examNavPrev: "← Previous",
     examNavNext: "Next →",
     violationWarningTitle: "Warning {n} of 3",
+    violationReasonFallback: "Exam rule violated",
     violationContinueExam: "Understood, continue",
     violationFinalNotice:
       "This is warning 3/3. The next violation stops the exam and applies a BAN (no further warnings).",

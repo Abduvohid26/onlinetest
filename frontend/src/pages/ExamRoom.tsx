@@ -7,7 +7,6 @@ import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
 import {
   LIVE_SIGNAL_CONFIRM_MS,
   LIVE_SIGNAL_ESCALATE_MS,
-  TALK_SIGNAL_CONFIRM_MS,
   TALK_SIGNAL_ESCALATE_MS,
 } from '../lib/realtimeProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
@@ -1351,10 +1350,15 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         }).catch(() => {});
       }
 
-      // Gapirish (odam ovozi) — MAXSUS tez qoida: 0.7s kichik, 2s rasmiy.
+      // Gapirish (odam ovozi) — MAXSUS tez qoida: kichik ogohlantirish DARHOL
+      // (aniqlanishi bilanoq), rasmiy 2s. Sabab: tashqaridan gapirib turgan odam
+      // bir necha soniyada javobni aytib ulguradi — kutib bo'lmaydi. Chip faqat
+      // vizual (backendga hech narsa ketmaydi), shu sabab darhol ko'rsatish xavfsiz;
+      // `speechMs > 0` = kamida bitta freymda inson ovozi topildi (tracker grace
+      // 700ms so'zlar orasidagi pauzada chipni o'chirib-yoqmaydi).
       // Shovqin (ambient) esa umumiy qonunda qoladi: 1.5s kichik, 4s rasmiy.
       // Ovoz shovqindan muhimroq, shu sabab chipda birinchi o'rinda turadi.
-      if (speechMs >= TALK_SIGNAL_CONFIRM_MS) {
+      if (speechMs > 0) {
         setAudioLiveLabel(EXAM_L[langRef.current].liveTalking);
       } else if (ambientMs >= LIVE_SIGNAL_CONFIRM_MS) {
         setAudioLiveLabel(EXAM_L[langRef.current].liveAmbientNoise);
@@ -1448,6 +1452,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [identityTerminated, setIdentityTerminated] = useState(false);
 
   // --- Violation logging ---
+  /**
+   * Matn tarjima qilinmagan xom kodmi (`MOUTH_MOVEMENT_TALKING`, `NO_ACTIVE_SESSION`)?
+   * Bunday matn talabaga ko'rsatilmaydi — u faqat ichki identifikator.
+   */
+  const isRawCode = (s: string) => /^[A-Z][A-Z0-9_]{3,}$/.test(s.trim());
+
   const logViolation = async (type: string) => {
     if (bannedRef.current) return;
     if (!sessionStartedRef.current) return;
@@ -1517,16 +1527,18 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }>(res)) || {};
 
       if (!res.ok) {
-        const hint = data.violationReason || data.error || data.code || `HTTP ${res.status}`;
-        showWarningMsg(String(hint), 5000);
+        // Faqat O'QILADIGAN sabab ko'rsatiladi. Xom kod (MOUTH_MOVEMENT_TALKING,
+        // NO_ACTIVE_SESSION...) talabaga hech narsa anglatmaydi — u holda jim
+        // o'tkazamiz: kamera panelidagi kichik chip allaqachon signal bergan.
+        const hint = String(data.violationReason || data.error || '').trim();
+        if (hint && !isRawCode(hint)) showWarningMsg(hint, 5000);
         return;
       }
 
-      // Ixtiyoriy startup grace (PROCTOR_STARTUP_GRACE_SECONDS) — strike hisoblanmaydi,
-      // faqat yengil xabar modali ko'rsatiladi.
+      // Ixtiyoriy startup grace (PROCTOR_STARTUP_GRACE_SECONDS) — strike hisoblanmaydi.
       if (data.startupGrace) {
-        const detail = (data.violationReason || type).trim();
-        showWarningMsg(detail, 5000);
+        const detail = String(data.violationReason || '').trim();
+        if (detail && !isRawCode(detail)) showWarningMsg(detail, 5000);
         return;
       }
 
@@ -1534,7 +1546,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         if (type === 'IDENTITY_SUBSTITUTION') setIdentityTerminated(true);
         setViolationWarning(null);
         setStrikeLevel(maxOfficialWarnings);
-        const reasonText = data.violationReason || type;
+        const reasonText = data.violationReason || t.violationReasonFallback;
         setBanLastReason(reasonText);
         setBanReasonCode(typeof data.banReason === 'string' ? data.banReason : null);
         const warnNum =
@@ -1607,7 +1619,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         typeof data.warningNumber === 'number' && data.warningNumber > 0
           ? data.warningNumber
           : Math.max(1, official);
-      const reasonText = data.violationReason || type;
+      const reasonText = data.violationReason || t.violationReasonFallback;
       setWarningHistory((prev) => {
         if (prev.some((w) => w.number === shownNumber)) return prev;
         return [...prev, { number: shownNumber, reason: reasonText }].sort((a, b) => a.number - b.number);
@@ -1621,8 +1633,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         isFinalWarning: data.isFinalWarning === true,
       });
     } catch {
-      // Tarmoq xatosi — local state
-      showWarningMsg(type, 3000);
+      // Tarmoq xatosi — talabaga xom violation kodini ko'rsatish foydasiz va
+      // chalkash (u "kichik ogohlantirish" deb tushunadi). Jim o'tkazamiz:
+      // signal kamera panelidagi chipda ko'rinib turibdi, rasmiy ogohlantirish
+      // esa faqat server javobidan keyin chiqadi.
     }
   };
 

@@ -144,8 +144,10 @@ Gapirish — eng jiddiy va eng tez foyda beradigan aldash usuli (suflyor, yonida
 
 | Signal | Kichik ogohlantirish | Rasmiy |
 |---|---|---|
-| Og‘iz qimirlashi (video, `MOUTH_MOVEMENT_TALKING`) | **0.7s** (`TALK_SIGNAL_CONFIRM_MS`) | **2s** (`TALK_SIGNAL_ESCALATE_MS`) |
-| Odam ovozi (audio: o‘zi yoki tashqi odam — `WHISPER_OR_CONVERSATION_SUSPECTED`) | **0.7s** | **2s** |
+| Og‘iz qimirlashi (video, `MOUTH_MOVEMENT_TALKING`) | **darhol** — aniqlanishi bilanoq (`TALK_SIGNAL_CONFIRM_MS = 0`) | **2s** (`TALK_SIGNAL_ESCALATE_MS`) |
+| Odam ovozi (audio: o‘zi yoki tashqi odam — `WHISPER_OR_CONVERSATION_SUSPECTED`) | **darhol** — birinchi aniqlangan freymda | **2s** |
+
+Kichik ogohlantirishni darhol ko‘rsatish xavfsiz, chunki u **faqat vizual chip** — backendga hech narsa yuborilmaydi, strike hisoblanmaydi. Rasmiy (backendga ketadigan) ogohlantirish esa baribir 2s uzluksiz davom etishni talab qiladi, ya‘ni tasodifiy yo‘tal/xo‘rsinish jazolanmaydi.
 
 Bu tezlashtirish **faqat shu ikkalasiga** tegishli. Tashqi shovqin (`SUSPICIOUS_AUDIO`) va boshqa barcha turlar umumiy qonunda (1.5s / 4s) qoladi — shovqin aldash emas, sezgirlikni oshirsak soxta signal ko‘payadi.
 

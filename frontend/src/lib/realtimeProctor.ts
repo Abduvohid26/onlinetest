@@ -70,10 +70,10 @@ export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 
 // GAPIRISH uchun MAXSUS (tezroq) qoida — README.md "Gapirish uchun maxsus qoida".
 // Og'iz qimirlashi (video) VA tashqi odam ovozi (audio) ikkalasi ham shu vaqtlarda:
-//   0.7s → kichik ogohlantirish, 2s → rasmiy.
+//   aniqlanishi bilanoq (0ms) → kichik ogohlantirish, 2s → rasmiy.
 // Sabab: gapirish/suflyor eng jiddiy va eng tez tarqaladigan aldash usuli — unga
 // umumiy 1.5s/4s juda sekin. Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI.
-export const TALK_SIGNAL_CONFIRM_MS = 700;
+export const TALK_SIGNAL_CONFIRM_MS = 0;
 export const TALK_SIGNAL_ESCALATE_MS = 2000;
 
 /** Shu signal turi uchun "kichik ogohlantirish" chegarasi (gapirish tezroq). */
@@ -475,7 +475,7 @@ export class RealtimeProctor {
     // badge'ida (fsCfg) ko'rsatiladi — chip ularni takrorlamasin. Gapirish, qimirlash,
     // qo'l ko'tarishning badge'i yo'q, shu sabab ular uchun chip kerak.
     const best = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>)
-      .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms >= confirmMsFor(type))
+      .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms > 0 && ms >= confirmMsFor(type))
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
   }
