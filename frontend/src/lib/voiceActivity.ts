@@ -267,7 +267,12 @@ export class AmbientNoiseTracker {
   private calibrateLeft = 45;
   private prevRms = 0;
 
-  push(frame: VoiceFrame): boolean {
+  /**
+   * @param isSpeech nutq qarori. Berilsa — Silero VAD dan keladi (ishonchliroq),
+   *                 berilmasa freymning o'z DSP bahosi ishlatiladi. Nutq bir vaqtda
+   *                 "shovqin" deb ham yozilmasligi uchun kerak.
+   */
+  push(frame: VoiceFrame, isSpeech?: boolean): boolean {
     if (this.calibrateLeft > 0) {
       this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.9);
       this.calibrateLeft -= 1;
@@ -277,8 +282,9 @@ export class AmbientNoiseTracker {
     this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
     if (spike) return false;
 
+    const speech = isSpeech ?? frame.humanVoice;
     return (
-      !frame.humanVoice &&
+      !speech &&
       frame.rms >= AMBIENT_RMS_MIN &&
       frame.rms > this.noiseFloor * AMBIENT_FLOOR_MULT &&
       (frame.lowFreqRatio > 0.35 || frame.speechRatio < 0.45)

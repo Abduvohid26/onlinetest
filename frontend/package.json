@@ -9,7 +9,9 @@
   },
   "scripts": {
     "preinstall": "node ../scripts/check-node.mjs",
+    "predev": "node scripts/sync-vad-assets.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-vad-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -24,6 +26,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.38.0",
+    "onnxruntime-web": "^1.27.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

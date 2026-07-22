@@ -12,6 +12,7 @@ import {
   liveSignalViolationType,
 } from '../lib/realtimeProctor';
 import { SmallWarningLedger, SMALL_WARNINGS_BEFORE_FORMAL } from '../lib/smallWarningLedger';
+import { SileroVad } from '../lib/sileroVad';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
@@ -862,6 +863,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  /** Silero VAD — odam ovozini maishiy shovqindan ajratuvchi asosiy detektor. */
+  const sileroRef = useRef<SileroVad | null>(null);
   
   const identityCheckBusyRef = useRef(false);
   const logViolationRef = useRef<(type: string) => Promise<void>>(async () => {});
@@ -919,6 +922,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       audioContextRef.current = null;
     }
     analyserRef.current = null;
+    sileroRef.current?.dispose();
+    sileroRef.current = null;
   }, []);
 
   // Imtihon TO'LIQ tugaganda (submit muvaffaqiyatli) — kamera/mikrofondan tashqari
@@ -1271,9 +1276,20 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             tr.addEventListener('ended', onMicLost);
             tr.addEventListener('mute', onMicLost);
           }
+
+          // Silero VAD ni fon rejimida yuklaymiz — imtihon boshlanishini
+          // KUTTIRMAYDI. Tayyor bo'lguncha eski DSP mantig'i ishlab turadi.
+          sileroRef.current?.dispose();
+          const vad = new SileroVad();
+          sileroRef.current = vad;
+          void vad.init(stream).then((ok) => {
+            console.info('[silero-vad]', ok ? 'tayyor' : 'yo\'q — DSP zaxirasi');
+          });
         } else {
           audioContextRef.current = null;
           analyserRef.current = null;
+          sileroRef.current?.dispose();
+          sileroRef.current = null;
         }
 
       } catch (err) {
@@ -1357,13 +1373,24 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const frame = analyzeVoiceFrame(analyserRef.current);
       const now = Date.now();
 
-      const ambientRaw = ambientTrackerRef.current!.push(frame);
+      // ODAM OVOZI: asosiy detektor — Silero VAD (neyron tarmoq). Real audioda
+      // o'lchangan: 100% aniqlash, 0% soxta ijobiy; qo'lda yozilgan DSP esa jim
+      // ovozda 7.5%, soxta ijobiyda 13.7% berardi (docs/VAD_BENCHMARK.md).
+      // Model yuklanmasa — eski DSP zaxira sifatida ishlaydi (imtihon buzilmasin).
+      const silero = sileroRef.current;
+      const speechRaw = silero?.ready
+        ? silero.isSpeaking()
+        : voiceTrackerRef.current!.push(frame);
+
+      // Shovqin (SUSPICIOUS_AUDIO) — baland, LEKIN nutq bo'lmagan tovush. Nutq
+      // qarorini Silero beradi, shu sabab gapirish shovqin deb ikki marta
+      // yozilmaydi.
+      const ambientRaw = ambientTrackerRef.current!.push(frame, speechRaw);
       const ambientMs = ambientContinuousRef.current!.push(ambientRaw, now);
       // OVOZ DOIM aniqlanadi — yuz holatiga BOG'LANMAYDI. Ilgari isFaceVisibleForTalk
       // gate'i bor edi: MediaPipe yuzni WAITING/aniqlamagan paytda ovoz umuman
       // sezilmasdi. Talaba o'zi gapiryaptimi yoki kamerasiz kimdir — bu farq keyin
       // mouthActiveRef orqali (MOUTH_MOVEMENT_TALKING vs WHISPER) hal qilinadi.
-      const speechRaw = voiceTrackerRef.current!.push(frame);
       const speechMs = speechContinuousRef.current!.push(speechRaw, now);
 
       audioDbgTickRef.current += 1;
@@ -1382,6 +1409,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             zcr: Number(frame.zcr.toFixed(3)),
             lowFreqRatio: Number(frame.lowFreqRatio.toFixed(3)),
             crestFactor: Number(frame.crestFactor.toFixed(2)),
+            sileroReady: Boolean(sileroRef.current?.ready),
+            sileroProb: Number((sileroRef.current?.probability ?? 0).toFixed(3)),
             speechMs: Math.round(speechMs),
             ambientMs: Math.round(ambientMs),
             ctx: ctxState,

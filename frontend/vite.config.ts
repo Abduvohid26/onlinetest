@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, 'src'),
       },
+      // onnxruntime-web: .wasm faylini bundle'ga QO'SHMASLIK (aks holda 27MB
+      // asset chiqadi). Bu shart bilan u tashqi fayl sifatida yuklanadi —
+      // biz uni `public/ort/` dan beramiz (`ort.env.wasm.wasmPaths`).
+      conditions: ['onnxruntime-web-use-extern-wasm', 'import', 'module', 'browser', 'default'],
     },
     server: {
       port: 5173,

@@ -45,3 +45,10 @@ e2e/fixtures/
 .idea/
 .vscode/
 *.swp
+tools/vad-benchmark/data/
+tools/vad-benchmark/venv/
+
+# Silero VAD artefaktlari — build paytida hosil bo'ladi (frontend/scripts/sync-vad-assets.mjs)
+frontend/public/ort/
+frontend/public/models/
+frontend/vendor/
