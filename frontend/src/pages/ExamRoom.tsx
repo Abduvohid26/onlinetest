@@ -5,10 +5,13 @@ import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
 import {
+  ALL_LIVE_SIGNAL_VIOLATIONS,
   LIVE_SIGNAL_CONFIRM_MS,
   LIVE_SIGNAL_ESCALATE_MS,
   TALK_SIGNAL_ESCALATE_MS,
+  liveSignalViolationType,
 } from '../lib/realtimeProctor';
+import { SmallWarningLedger, SMALL_WARNINGS_BEFORE_FORMAL } from '../lib/smallWarningLedger';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
@@ -114,6 +117,13 @@ const IDENTITY_CHECK_MS = 90_000;
  *  Qisqa tasodifiy fokus yo'qolishi (brauzer UI, OS bildirishnomasi) hisoblanmaydi.
  *  "Kichik ogohlantirish" bosqichi YO'Q — talaba boshqa tabda uni ko'ra olmaydi. */
 const TAB_AWAY_VIOLATION_MS = 1200;
+
+/**
+ * Audio "gapirish" uchun kichik-ogohlantirish hisobi kaliti. Rasmiy tur talabaning
+ * o'z og'zi qimirlayotganiga qarab o'zgaradi (MOUTH_MOVEMENT_TALKING / WHISPER...),
+ * lekin HISOB bitta bo'lishi kerak — shu sabab kalit doim shu.
+ */
+const SPEECH_LEDGER_KEY = 'WHISPER_OR_CONVERSATION_SUSPECTED';
 
 interface ExamRoomProps {
   exam: any;
@@ -864,6 +874,36 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     'TAB_SWITCH_SOFT',
     'FULLSCREEN_EXIT_HARD',
   ]);
+  /**
+   * "3 kichik ogohlantirish → 4-marta rasmiy" qonuni (README.md).
+   * Kalit = rasmiy violation turi, shu sabab video/audio/event manbalari bitta
+   * hisobga qo'shiladi va turlar aralashib ketmaydi.
+   */
+  const smallWarningLedgerRef = useRef(new SmallWarningLedger());
+
+  /**
+   * Kichik ogohlantirish epizodini qayd etadi. Limit to'lgan bo'lsa — darhol rasmiy.
+   * @returns shu tur bo'yicha nechanchi kichik ogohlantirish (chip yorlig'ida ko'rsatiladi)
+   */
+  const noteSmallWarningRef = useRef((violationType: string): number => {
+    const ledger = smallWarningLedgerRef.current;
+    if (ledger.noteActive(violationType)) {
+      ledger.formalIssued(violationType);
+      void logViolationRef.current(violationType);
+      return 0;
+    }
+    return ledger.count(violationType);
+  });
+
+  /**
+   * Kichik yorliqqa hisobni qo'shadi: "Gapirmang · 2/3". Talaba nechta kichik
+   * ogohlantirish qolganini ko'rib tursin — 3 tadan keyin rasmiy bo'ladi.
+   */
+  const withSmallCount = (msg: string, violationType: string): string => {
+    const n = smallWarningLedgerRef.current.count(violationType);
+    return n > 0 ? `${msg} · ${n}/${SMALL_WARNINGS_BEFORE_FORMAL}` : msg;
+  };
+
   const socketRef = useRef<RealtimeSocket | null>(null);
   const peerConnectionsRef = useRef<{ [id: string]: RTCPeerConnection }>({});
 
@@ -1358,20 +1398,34 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // 700ms so'zlar orasidagi pauzada chipni o'chirib-yoqmaydi).
       // Shovqin (ambient) esa umumiy qonunda qoladi: 1.5s kichik, 4s rasmiy.
       // Ovoz shovqindan muhimroq, shu sabab chipda birinchi o'rinda turadi.
-      if (speechMs > 0) {
-        setAudioLiveLabel(EXAM_L[langRef.current].liveTalking);
-      } else if (ambientMs >= LIVE_SIGNAL_CONFIRM_MS) {
-        setAudioLiveLabel(EXAM_L[langRef.current].liveAmbientNoise);
+      // Kichik ogohlantirish epizodlari sanaladi ("3 kichik → 4-si rasmiy").
+      const speechSmall = speechMs > 0;
+      const ambientSmall = ambientMs >= LIVE_SIGNAL_CONFIRM_MS;
+      if (speechSmall) noteSmallWarningRef.current(SPEECH_LEDGER_KEY);
+      else smallWarningLedgerRef.current.noteCleared(SPEECH_LEDGER_KEY);
+      if (ambientSmall) noteSmallWarningRef.current('SUSPICIOUS_AUDIO');
+      else smallWarningLedgerRef.current.noteCleared('SUSPICIOUS_AUDIO');
+
+      if (speechSmall) {
+        setAudioLiveLabel(
+          withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY),
+        );
+      } else if (ambientSmall) {
+        setAudioLiveLabel(
+          withSmallCount(EXAM_L[langRef.current].liveAmbientNoise, 'SUSPICIOUS_AUDIO'),
+        );
       } else {
         setAudioLiveLabel(null);
       }
 
       if (ambientMs >= LIVE_SIGNAL_ESCALATE_MS) {
         ambientContinuousRef.current!.reset();
+        smallWarningLedgerRef.current.formalIssued('SUSPICIOUS_AUDIO');
         void logViolationRef.current('SUSPICIOUS_AUDIO');
       }
       if (speechMs >= TALK_SIGNAL_ESCALATE_MS) {
         speechContinuousRef.current!.reset();
+        smallWarningLedgerRef.current.formalIssued(SPEECH_LEDGER_KEY);
         // Talabaning o'z og'zi ham qimirlayotgan bo'lsa — o'zi gapiryapti; aks holda
         // atrofda/orqada boshqa odam gapirishi shubhasi.
         void logViolationRef.current(
@@ -1400,7 +1454,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const ms = micDownContinuousRef.current!.push(micDown);
       if (ms >= LIVE_SIGNAL_ESCALATE_MS) {
         micDownContinuousRef.current!.reset();
+        smallWarningLedgerRef.current.formalIssued('CAMERA_MIC_ACCESS_FAILED');
         void logViolationRef.current('CAMERA_MIC_ACCESS_FAILED');
+      } else if (ms >= LIVE_SIGNAL_CONFIRM_MS) {
+        noteSmallWarningRef.current('CAMERA_MIC_ACCESS_FAILED');
+      } else {
+        smallWarningLedgerRef.current.noteCleared('CAMERA_MIC_ACCESS_FAILED');
       }
     }, 2000);
     return () => clearInterval(id);
@@ -1432,9 +1491,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         const ms = gate.push(type, activeState, now);
         if (ms >= LIVE_SIGNAL_ESCALATE_MS) {
           gate.reset(type);
+          smallWarningLedgerRef.current.formalIssued(type);
           void logViolationRef.current(type);
-        } else if (ms >= LIVE_SIGNAL_CONFIRM_MS && (!best || ms > best.ms)) {
-          best = { type, ms };
+          return;
+        }
+        // Kichik ogohlantirish bosqichi — epizod sanaladi ("3 kichik → 4-si rasmiy").
+        if (ms >= LIVE_SIGNAL_CONFIRM_MS) {
+          noteSmallWarningRef.current(type);
+          if (!best || ms > best.ms) best = { type, ms };
+        } else {
+          smallWarningLedgerRef.current.noteCleared(type);
         }
       };
 
@@ -1444,7 +1510,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         document.visibilityState === 'hidden' && now >= blurIgnoreUntilRef.current;
       consider('TAB_SWITCH_HARD', tabHidden);
 
-      setEventLiveLabel(best ? EXAM_L[langRef.current][LABEL[(best as { type: string }).type]] : null);
+      const bestType = best ? (best as { type: string }).type : null;
+      setEventLiveLabel(
+        bestType ? withSmallCount(EXAM_L[langRef.current][LABEL[bestType]], bestType) : null,
+      );
     }, 250);
     return () => clearInterval(id);
   }, [banned, sessionStarted]);
@@ -1661,10 +1730,21 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     streamRevision: proctorStreamRevision,
     disabled: banned,
     onViolation: (type) => {
+      // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
+      smallWarningLedgerRef.current.formalIssued(type);
       void logViolationRef.current(type);
     },
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
     onFaceStatus: setFaceStatus,
+    onSmallWarningStage: (types) => {
+      // Har kadrda: hozir kichik-ogohlantirish bosqichidagi turlarni sanaymiz,
+      // qolganlarini "epizod tugadi" deb yopamiz (keyingi safar yangi epizod).
+      const active = new Set<string>(types.map(liveSignalViolationType));
+      for (const key of ALL_LIVE_SIGNAL_VIOLATIONS) {
+        if (active.has(key)) noteSmallWarningRef.current(key);
+        else smallWarningLedgerRef.current.noteCleared(key);
+      }
+    },
     onLiveSignal: (type) => {
       // Ovoz eskalatsiyasi (audio effekt) uchun — video og'iz harakati hozir
       // faolmi (WHISPER vs MOUTH_MOVEMENT_TALKING ajratishda ishlatiladi).
@@ -1684,10 +1764,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         NO_FACE: EXAM_L[langRef.current].liveNoFace,
         MULTI_FACE: EXAM_L[langRef.current].liveMultiFace,
       }[type];
-      // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Signal jami
-      // LIVE_SIGNAL_ESCALATE_MS (4s) ga yetsa, logViolation orqali mavjud rasmiy
-      // ogohlantirish modali o'zi chiqadi (realtimeProctor.ts).
-      setLiveSignalLabel(msg);
+      // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Rasmiy
+      // ogohlantirish ikki yo'l bilan keladi: (a) signal uzluksiz eskalatsiya
+      // muddatiga yetsa (realtimeProctor.ts), (b) shu tur bo'yicha kichik
+      // ogohlantirishlar 3 tadan oshsa (SmallWarningLedger).
+      setLiveSignalLabel(withSmallCount(msg, liveSignalViolationType(type)));
     },
   });
 

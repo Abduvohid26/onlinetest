@@ -1,151 +1,134 @@
 /**
- * Ovoz aniqlash (analyzeVoiceFrame) — sintetik signallar bilan OFFLINE tekshiruv.
+ * Odam ovozi vs MAISHIY SHOVQIN — offline, takrorlanadigan tekshiruv.
  *
- * Maqsad: "odam ovozi" va "shovqin"ni ajratish mantig'ini jonli mikrofonsiz,
- * takrorlanadigan tarzda sinash. Signallar matematik yasaladi:
- *   - Ovoz  → harmonik yig'indi (f0 + ohanglar) → yuqori harmonicity, nutq-bandida energiya
- *   - Shovqin → tasodifiy/past-chastotali → past harmonicity, tekis spektr
- *   - "Taq"  → bitta impuls → yuqori crest factor
+ * Signallar matematik yasaladi va spektri HAQIQIY FFT bilan hisoblanadi
+ * (`audioFixtures.ts`), Web Audio `getByteFrequencyData` formulasi aynan
+ * takrorlanadi. Shu sabab bu test brauzerdagi holatni ishonchli aks ettiradi.
+ *
+ * Nega bu muhim: ilgari testda spektr binlari qo'lda yozilardi (PCM'dan mustaqil).
+ * Halol FFT'ga o'tilgach darhol ma'lum bo'ldiki, `flatness <= 0.6` mezoni real
+ * ERKAK ovozini (f0≈130 Hz) rad etayotgan ekan — "ovoz aniqlanmayapti"ning sababi.
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeVoiceFrame } from '../src/lib/voiceActivity.ts';
+import * as F from './audioFixtures.ts';
 
-const FFT = 2048;
-const BINS = FFT / 2;
-const SR = 48000;
-const BIN_HZ = SR / FFT; // ~23.4 Hz
+const isVoice = (pcm: Float32Array) => analyzeVoiceFrame(F.analyserFor(pcm)).humanVoice;
 
-/** AnalyserNode mock — sintetik vaqt va chastota ma'lumotlari bilan. */
-function mockAnalyser(pcm: Float32Array, bins: Uint8Array): AnalyserNode {
-  return {
-    fftSize: FFT,
-    frequencyBinCount: BINS,
-    context: { sampleRate: SR },
-    getByteTimeDomainData(arr: Uint8Array) {
-      for (let i = 0; i < arr.length; i++) {
-        arr[i] = Math.max(0, Math.min(255, Math.round(pcm[i] * 128 + 128)));
-      }
-    },
-    getByteFrequencyData(arr: Uint8Array) {
-      arr.set(bins.subarray(0, arr.length));
-    },
-  } as unknown as AnalyserNode;
-}
+/** Xona fon shovqini — real mikrofonda hech qachon toza signal kelmaydi. */
+const room = F.fanHum(1);
 
-function scaleToRms(pcm: Float32Array, targetRms: number): Float32Array {
-  let s = 0;
-  for (const v of pcm) s += v * v;
-  const rms = Math.sqrt(s / pcm.length) || 1;
-  const k = targetRms / rms;
-  for (let i = 0; i < pcm.length; i++) pcm[i] *= k;
-  return pcm;
-}
+describe('odam ovozini ANIQLAYDI', () => {
+  it('erkak ovozi (f0 90–130 Hz)', () => {
+    assert.equal(isVoice(F.voicedSpeech(0.09, 90)), true, 'chuqur erkak ovozi');
+    assert.equal(isVoice(F.voicedSpeech(0.09, 130)), true, "o'rtacha erkak ovozi");
+  });
 
-/** Inson ovozi: f0 + ohanglar (davriy → yuqori autokorrelyatsiya). */
-function voicePcm(targetRms: number, f0 = 130): Float32Array {
-  const pcm = new Float32Array(FFT);
-  for (let i = 0; i < FFT; i++) {
-    const t = i / SR;
-    let v = 0;
-    for (let k = 1; k <= 8; k++) v += Math.sin(2 * Math.PI * f0 * k * t) / k;
-    pcm[i] = v;
-  }
-  return scaleToRms(pcm, targetRms);
-}
+  it('ayol / bola ovozi (f0 210–300 Hz)', () => {
+    assert.equal(isVoice(F.voicedSpeech(0.09, 210)), true);
+    assert.equal(isVoice(F.voicedSpeech(0.09, 300)), true);
+  });
 
-/** Shovqin: tasodifiy. `smooth` (0..0.95) — past chastotaga siljitadi (fan/gurillash). */
-function noisePcm(targetRms: number, smooth = 0): Float32Array {
-  const pcm = new Float32Array(FFT);
-  let prev = 0;
-  let seed = 12345;
-  const rnd = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return (seed / 0x7fffffff) * 2 - 1;
-  };
-  for (let i = 0; i < FFT; i++) {
-    const r = rnd();
-    prev = smooth > 0 ? prev * smooth + r * (1 - smooth) : r;
-    pcm[i] = prev;
-  }
-  return scaleToRms(pcm, targetRms);
-}
+  it("sekin/uzoqdagi ovoz — TASHQI odam kadr tashqarisidan gapirsa ham", () => {
+    assert.equal(isVoice(F.voicedSpeech(0.045, 130)), true, 'sekin ovoz');
+    assert.equal(isVoice(F.voicedSpeech(0.025, 150)), true, 'juda sekin ovoz');
+  });
 
-/** "Taq" — bitta keskin impuls (yuqori crest factor). */
-function tapPcm(targetRms: number): Float32Array {
-  const pcm = new Float32Array(FFT);
-  for (let i = 0; i < 40; i++) pcm[100 + i] = Math.exp(-i / 8);
-  return scaleToRms(pcm, targetRms);
-}
+  it('devor ortidan / boshqa xonadan (bo\'g\'iq) ovoz', () => {
+    assert.equal(isVoice(F.muffledSpeech(0.06, 130)), true);
+  });
 
-/** Spektr binlarini shakl funksiyasidan yasaydi (0..1 → 0..255). */
-function makeBins(shape: (hz: number) => number): Uint8Array {
-  const b = new Uint8Array(BINS);
-  for (let i = 0; i < BINS; i++) {
-    b[i] = Math.max(0, Math.min(255, Math.round(shape(i * BIN_HZ) * 255)));
-  }
-  return b;
-}
+  it('fon shovqini ustidagi ovoz (SNR 15/10/6 dB)', () => {
+    assert.equal(isVoice(F.mix(F.voicedSpeech(0.08, 130), room, 15)), true, 'SNR 15dB');
+    assert.equal(isVoice(F.mix(F.voicedSpeech(0.08, 130), room, 10)), true, 'SNR 10dB');
+    assert.equal(isVoice(F.mix(F.voicedSpeech(0.08, 130), room, 6)), true, 'SNR 6dB');
+  });
 
-/** Ovoz spektri: energiya nutq bandida (180–3600 Hz), ohang cho'qqilari bilan. */
-const voiceBins = makeBins((hz) => {
-  if (hz < 150) return 0.04;
-  if (hz > 4000) return 0.02;
-  const harmonicPeak = 0.5 + 0.45 * Math.abs(Math.cos((hz / 130) * Math.PI));
-  return 0.75 * harmonicPeak;
+  it('bo\'g\'iq + shovqinli (eng og\'ir real holat)', () => {
+    assert.equal(isVoice(F.mix(F.muffledSpeech(0.07, 150), room, 8)), true);
+  });
 });
 
-/** Shovqin spektri: keng polosali, pastga og'ishgan, tekis (flat). */
-const noiseBins = makeBins((hz) => (hz < 180 ? 0.75 : hz < 4000 ? 0.42 : 0.3));
-
-function metrics(pcm: Float32Array, bins: Uint8Array) {
-  return analyzeVoiceFrame(mockAnalyser(pcm, bins));
-}
-
-function show(name: string, f: ReturnType<typeof analyzeVoiceFrame>) {
-  // Sozlash uchun o'lchangan qiymatlarni chiqaramiz (test loglarida ko'rinadi).
-  console.log(
-    `${name.padEnd(22)} rms=${f.rms.toFixed(3)} zcr=${f.zcr.toFixed(3)} ` +
-      `sp=${f.speechRatio.toFixed(2)} low=${f.lowFreqRatio.toFixed(2)} ` +
-      `crest=${f.crestFactor.toFixed(1)} harm=${f.harmonicity.toFixed(2)} ` +
-      `=> voice=${f.humanVoice}`,
-  );
-}
-
-describe('analyzeVoiceFrame — sintetik signallar', () => {
-  it('normal balandlikdagi inson ovozini ANIQLAYDI', () => {
-    const f = metrics(voicePcm(0.09), voiceBins);
-    show('ovoz (normal)', f);
-    assert.equal(f.humanVoice, true, 'normal ovoz aniqlanishi kerak');
+describe('MAISHIY SHOVQINni ovoz deb hisoblaMAYDI', () => {
+  it('ventilyator / konditsioner / kuler gurillashi', () => {
+    assert.equal(isVoice(F.fanHum(0.12)), false, 'oddiy');
+    assert.equal(isVoice(F.fanHum(0.3)), false, 'baland');
   });
 
-  it('sekin/uzoqdagi (tashqi) inson ovozini ham ANIQLAYDI', () => {
-    const f = metrics(voicePcm(0.04), voiceBins);
-    show('ovoz (uzoq/sekin)', f);
-    assert.equal(f.humanVoice, true, 'uzoq/sekin ovoz ham aniqlanishi kerak');
+  it('klaviatura bosilishi', () => {
+    assert.equal(isVoice(F.keyboardTyping(0.12)), false);
   });
 
-  it('jimlikni ovoz deb hisoblamaydi', () => {
-    const f = metrics(voicePcm(0.004), voiceBins);
-    show('jimlik', f);
-    assert.equal(f.humanVoice, false);
+  it('idish-tovoq shaqirlashi', () => {
+    assert.equal(isVoice(F.dishesClatter(0.15)), false);
   });
 
-  it('oq shovqinni (keng polosali) ovoz deb hisoblamaydi', () => {
-    const f = metrics(noisePcm(0.12), noiseBins);
-    show('shovqin (oq)', f);
-    assert.equal(f.humanVoice, false, 'shovqin ovoz deb belgilanmasligi kerak');
+  it('eshik yopilishi / stolga urilish ("taq")', () => {
+    assert.equal(isVoice(F.doorSlam(0.2)), false);
   });
 
-  it('past-chastotali gurillash (fan/konditsioner) ovoz emas', () => {
-    const f = metrics(noisePcm(0.12, 0.9), noiseBins);
-    show('shovqin (gurillash)', f);
-    assert.equal(f.humanVoice, false);
+  it('ko\'cha / transport gurillashi', () => {
+    assert.equal(isVoice(F.trafficRumble(0.15)), false);
   });
 
-  it('"taq" (impuls) ovoz emas', () => {
-    const f = metrics(tapPcm(0.15), noiseBins);
-    show('taq (impuls)', f);
-    assert.equal(f.humanVoice, false);
+  it('oq shovqin (radio shipillashi)', () => {
+    assert.equal(isVoice(F.whiteNoise(0.15)), false);
+  });
+
+  it('qog\'oz shitirlashi / kiyim ishqalanishi', () => {
+    assert.equal(isVoice(F.paperRustle(0.12)), false);
+  });
+
+  it('cholg\'u musiqasi (akkord — nutq emas)', () => {
+    assert.equal(isVoice(F.instrumentalMusic(0.12)), false);
+  });
+
+  it('sof ton / signal (mikrovolnovka "pip", telefon)', () => {
+    // Sof ton MUKAMMAL davriy (periodicity = 1.0) — faqat davriylikka tayansak
+    // ovoz deb belgilanardi. Uni ohanglar soni (harmonicCount) rad etadi.
+    assert.equal(isVoice(F.pureTone(0.12, 1000)), false, '1 kHz');
+    assert.equal(isVoice(F.pureTone(0.12, 300)), false, '300 Hz');
+    assert.equal(isVoice(F.pureTone(0.12, 150)), false, '150 Hz (nutq f0 diapazonida)');
+  });
+
+  it('jimlik', () => {
+    assert.equal(isVoice(F.voicedSpeech(0.003, 130)), false);
+  });
+});
+
+describe('mezonlarning ajratish kuchi (regressiyaga qarshi)', () => {
+  it('davriylik: ovoz ≥ 0.75, har qanday maishiy shovqin ≤ 0.50', () => {
+    const per = (pcm: Float32Array) => analyzeVoiceFrame(F.analyserFor(pcm)).harmonicity;
+    const voices = [
+      F.voicedSpeech(0.09, 130),
+      F.voicedSpeech(0.09, 210),
+      F.mix(F.voicedSpeech(0.08, 130), room, 6),
+    ];
+    const noises = [
+      F.fanHum(0.12),
+      F.keyboardTyping(0.12),
+      F.dishesClatter(0.15),
+      F.doorSlam(0.2),
+      F.trafficRumble(0.15),
+      F.whiteNoise(0.15),
+      F.instrumentalMusic(0.12),
+      F.paperRustle(0.12),
+    ];
+    for (const v of voices) assert.ok(per(v) >= 0.75, `ovoz davriyligi past: ${per(v)}`);
+    for (const nz of noises) assert.ok(per(nz) <= 0.5, `shovqin davriyligi yuqori: ${per(nz)}`);
+  });
+
+  it('ohanglar soni sof tonni nutqdan ajratadi', () => {
+    const hn = (pcm: Float32Array) => analyzeVoiceFrame(F.analyserFor(pcm)).harmonicCount;
+    assert.ok(hn(F.pureTone(0.12, 1000)) <= 2, 'sof tonda ohang kam bo\'lishi kerak');
+    assert.ok(hn(F.voicedSpeech(0.09, 130)) >= 6, 'nutqda ohang ko\'p bo\'lishi kerak');
+  });
+
+  it('shivirlash aniqlanmaydi — bu KUTILGAN (og\'iz harakati ushlaydi)', () => {
+    // Shivirlash ovozsiz (unvoiced): f0 yo'q, davriylik yo'q. Mikrofon orqali uni
+    // shovqindan ajratib bo'lmaydi. Bunday holatni video tomoni — og'iz qimirlashi
+    // (MOUTH_MOVEMENT_TALKING) ushlaydi.
+    assert.equal(isVoice(F.whisper(0.05)), false);
   });
 });

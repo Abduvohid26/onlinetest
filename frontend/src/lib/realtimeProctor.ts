@@ -81,6 +81,31 @@ export function confirmMsFor(type: LiveSignalType): number {
   return type === 'TALKING' ? TALK_SIGNAL_CONFIRM_MS : LIVE_SIGNAL_CONFIRM_MS;
 }
 
+/**
+ * Kichik ogohlantirish (live signal) qaysi RASMIY violation turiga aylanadi.
+ * "3 kichik → 4-si rasmiy" qonunida kerak: limit to'lganda ExamRoom shu turni
+ * darhol backendga yuboradi.
+ */
+const LIVE_SIGNAL_TO_VIOLATION: Record<LiveSignalType, RealtimeViolation> = {
+  TALKING: 'MOUTH_MOVEMENT_TALKING',
+  HEAD_AWAY: 'FACE_TURNED_AWAY',
+  TOO_FAR: 'FACE_TOO_FAR',
+  TOO_CLOSE: 'FACE_TOO_CLOSE',
+  OFF_CENTER: 'FACE_OFF_CENTER',
+  MOVEMENT: 'EXCESSIVE_MOVEMENT',
+  HAND: 'HAND_GESTURE_SUSPECTED',
+  NO_FACE: 'FACE_NOT_VISIBLE',
+  MULTI_FACE: 'MULTIPLE_FACES',
+};
+
+export function liveSignalViolationType(type: LiveSignalType): RealtimeViolation {
+  return LIVE_SIGNAL_TO_VIOLATION[type];
+}
+
+/** Video manbadan kelishi mumkin bo'lgan barcha violation turlari (ledger'ni tozalash uchun). */
+export const ALL_LIVE_SIGNAL_VIOLATIONS: RealtimeViolation[] =
+  Object.values(LIVE_SIGNAL_TO_VIOLATION);
+
 // Kichik chip (kamera panelidagi sariq qator) shu turlar uchun chiqadi. Pozitsiya/gaze
 // (uzoq/yaqin/markaz/burilish) kamera badge'ida ko'rsatiladi — takror bo'lmasin. Lekin
 // yuz yo'q / ko'p yuz — jiddiy, shu sabab ular ham chip bilan aniq ko'rsatiladi.
@@ -205,6 +230,9 @@ export interface RealtimeProctorCallbacks {
   /** Davomiy signal (gapirish/bosh burilishi/pozitsiya) hozir faolmi va necha ms'dan
    *  beri uzluksiz davom etyapti. Faol signal yo'q bo'lsa `type=null` bilan chaqiriladi. */
   onLiveSignal?: (type: LiveSignalType | null, elapsedMs: number) => void;
+  /** Hozir "kichik ogohlantirish" bosqichidagi BARCHA signallar (chipsizlari ham).
+   *  `SmallWarningLedger` shular asosida "3 kichik → 4-si rasmiy" qonunini qo'llaydi. */
+  onSmallWarningStage?: (types: LiveSignalType[]) => void;
   onReady?: (ok: boolean) => void;
   onStatus?: (msg: string) => void;
 }
@@ -474,8 +502,18 @@ export class RealtimeProctor {
     // (NO_FACE, MULTI_FACE, TOO_FAR/CLOSE, OFF_CENTER, HEAD_AWAY) allaqachon kamera
     // badge'ida (fsCfg) ko'rsatiladi — chip ularni takrorlamasin. Gapirish, qimirlash,
     // qo'l ko'tarishning badge'i yo'q, shu sabab ular uchun chip kerak.
-    const best = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>)
-      .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms > 0 && ms >= confirmMsFor(type))
+    const atConfirmStage = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>).filter(
+      ([type, ms]) => ms > 0 && ms >= confirmMsFor(type),
+    );
+
+    // "3 kichik → 4-si rasmiy" qonuni uchun: BARCHA kichik-ogohlantirish bosqichidagi
+    // signallar (chip ko'rinmaydiganlari — pozitsiya/gaze — ham, ular badge'da
+    // ko'rsatiladi va bari bir kichik ogohlantirish hisoblanadi).
+    // Chip'dan OLDIN chaqiriladi — chip yorlig'i yangi hisobni ko'rsata olsin.
+    this.cb.onSmallWarningStage?.(atConfirmStage.map(([type]) => type));
+
+    const best = atConfirmStage
+      .filter(([type]) => CHIP_SIGNAL_TYPES.has(type))
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
   }

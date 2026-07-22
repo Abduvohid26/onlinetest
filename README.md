@@ -138,6 +138,26 @@ Login → Dashboard → PreExamCheck (kamera, qoidalar, shaxs, liveness)
 
 Qisqa uzilish (freym flicker, so‘zlar orasidagi pauza, tugmani qo‘yib yuborish) hisoblagichni buzmasligi uchun grace-oyna bor (odatda 500–1000ms).
 
+#### Kichik ogohlantirishlar SANALADI: 3 tadan keyin 4-si rasmiy
+
+Faqat davomiylik yetarli emas edi: talaba qoidani buzib, chip chiqishi bilan to‘xtatib, keyin yana buzib — rasmiy ogohlantirishga umuman yetmasligi mumkin edi. Shu sabab **har bir kichik ogohlantirish sanaladi**:
+
+| Nechanchi kichik ogohlantirish | Natija |
+|---|---|
+| 1-, 2-, 3-marta | Kichik (kamera panelidagi chip, backendga hech narsa ketmaydi). Chipda hisob ko‘rinadi: `Gapirmang · 2/3` |
+| **4-marta** | **Darhol rasmiy** — chip chiqishi bilanoq `logViolation` ketadi va ogohlantirish modali ochiladi |
+
+- **Epizod** = signalning bitta uzluksiz davomi. Uzluksiz 30 soniya gapirish — bitta kichik ogohlantirish, 30 ta emas. To‘xtab, qaytadan boshlansa — yangi epizod, hisob +1.
+- Hisob **tur bo‘yicha alohida** (kalit = rasmiy violation turi). Bir marta qo‘l ko‘tarish + bir marta gapirish qo‘shilib jazoga aylanmaydi.
+- Rasmiy ogohlantirish berilgach (ikkala yo‘l bilan ham) o‘sha tur hisobi **nolga qaytadi** — talabaga toza start.
+- Bu qoida **BARCHA** manbalarga tegishli: video (MediaPipe), audio (gapirish/shovqin), event/tab (print-screen, clipboard, devtools, tab almashtirish), mikrofon o‘chishi.
+
+Ya‘ni rasmiy ogohlantirish endi **ikki yo‘l** bilan keladi:
+1. Signal uzluksiz eskalatsiya muddatiga yetsa (4s, gapirish uchun 2s), **yoki**
+2. Shu tur bo‘yicha kichik ogohlantirishlar 3 tadan oshsa.
+
+Kod: `frontend/src/lib/smallWarningLedger.ts` (`SmallWarningLedger`, `SMALL_WARNINGS_BEFORE_FORMAL = 3`), ExamRoom’dagi `noteSmallWarningRef` / `withSmallCount`. Test: `frontend/tests/smallWarningLedger.test.ts`.
+
 #### Gapirish uchun MAXSUS qoida (faqat gapirish uchun)
 
 Gapirish — eng jiddiy va eng tez foyda beradigan aldash usuli (suflyor, yonidan aytib turish, ovoz orqali AI bilan ishlash). Bir necha soniyada butun savolga javob aytib ulgurish mumkin, shu sabab unga umumiy 1.5s/4s **juda sekin**. Shuning uchun **faqat gapirish** uchun tezlashtirilgan chegaralar:
@@ -157,6 +177,8 @@ Kod: `TALK_SIGNAL_CONFIRM_MS` / `TALK_SIGNAL_ESCALATE_MS` va `confirmMsFor(type)
 
 - **Video (MediaPipe, `frontend/src/lib/realtimeProctor.ts`)** — yuz yo‘q (`NO_FACE`), ko‘p yuz (`MULTI_FACE`), bosh burilishi/gaze, pozitsiya (uzoq/yaqin/markaz), haddan tashqari qimirlash, qo‘l ko‘tarish, og‘iz harakati. Har biri `trackContinuous` bilan 1.5s/4s. Sariq chip qatori.
 - **Audio (`frontend/src/lib/voiceActivity.ts` + `ContinuousSignalTracker`)** — gapirish (`MOUTH_MOVEMENT_TALKING`/`WHISPER_OR_CONVERSATION_SUSPECTED`) va tashqi shovqin (`SUSPICIOUS_AUDIO`). Ko‘k chip qatori, farqli matn.
+  - **Odam ovozini maishiy shovqindan ajratish** asosan **davriylik** (autokorrelyatsiya cho‘qqisi) bilan qilinadi: nutq ≥ 0.75, ventilyator/klaviatura/idish/eshik/transport/musiqa ≤ 0.50. Sof ton (mikrovolnovka "pip") ham davriy — uni **ohanglar soni** (`harmonicCount ≥ 4`) rad etadi. Chegaralar taxmin emas: `frontend/tests/audioFixtures.ts` haqiqiy FFT bilan Web Audio `getByteFrequencyData` ni aynan emulyatsiya qiladi, `frontend/tests/voiceDetection.test.ts` esa 20+ real signal turida o‘lchaydi. **Yangi chegara qo‘yishdan oldin shu testni ishga tushiring** — "flatness" mezoni aynan shu yo‘l bilan noto‘g‘ri ekani (real erkak ovozini rad etayotgani) aniqlangan.
+  - Shivirlash mikrofonda aniqlanmaydi (ovozsiz tovushda f0 yo‘q) — uni video tomoni, og‘iz qimirlashi ushlaydi.
 - **Event/tab (`frontend/src/lib/violationGate.ts` — yagona `ViolationGate`)** — print-screen, clipboard, devtools va tab yashiringan (`TAB_SWITCH_HARD`). Bir martalik keypress `markEvent()` bilan belgilanadi; markazlashgan tick loop 1.5s/4s ni qo‘llaydi — **bir marta tasodifiy bosish rasmiy bo‘lmaydi**, faqat 4s uzluksiz takrorlansa ("davom etsa") rasmiyga o‘tadi. Pushti chip qatori.
 - **Mikrofon o‘chishi (`CAMERA_MIC_ACCESS_FAILED`)** — davomiy holat, `ContinuousSignalTracker` bilan 4s.
 

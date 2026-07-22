@@ -4,9 +4,13 @@ import {
   AmbientNoiseTracker,
   VoiceActivityTracker,
 } from '../src/lib/voiceActivity.ts';
+import type { VoiceFrame } from '../src/lib/voiceActivity.ts';
 import { ContinuousSignalTracker } from '../src/lib/continuousSignal.ts';
 
-const quiet = {
+/** Freym mezonlarining qolgan (bu testda ahamiyatsiz) maydonlari. */
+const rest = { pitchHz: 0, harmonicCount: 0, activeBandRatio: 0 };
+
+const quiet: VoiceFrame = {
   rms: 0.012,
   zcr: 0.01,
   humanVoice: false,
@@ -14,9 +18,10 @@ const quiet = {
   lowFreqRatio: 0.4,
   crestFactor: 2,
   harmonicity: 0.1,
+  ...rest,
 };
 
-const speech = {
+const speech: VoiceFrame = {
   rms: 0.09,
   zcr: 0.09,
   humanVoice: true,
@@ -24,9 +29,10 @@ const speech = {
   lowFreqRatio: 0.2,
   crestFactor: 3.2,
   harmonicity: 0.45,
+  ...rest,
 };
 
-const chairThud = {
+const chairThud: VoiceFrame = {
   rms: 0.18,
   zcr: 0.28,
   humanVoice: false,
@@ -34,9 +40,10 @@ const chairThud = {
   lowFreqRatio: 0.72,
   crestFactor: 9.5,
   harmonicity: 0.12,
+  ...rest,
 };
 
-const ambientTv = {
+const ambientTv: VoiceFrame = {
   rms: 0.18, // AMBIENT_RMS_MIN (0.14) dan baland — haqiqiy baland shovqin
   zcr: 0.14,
   humanVoice: false,
@@ -44,6 +51,7 @@ const ambientTv = {
   lowFreqRatio: 0.48,
   crestFactor: 4.2,
   harmonicity: 0.18,
+  ...rest,
 };
 
 describe('AmbientNoiseTracker', () => {
@@ -87,6 +95,7 @@ describe('VoiceActivityTracker', () => {
         lowFreqRatio: 0.5,
         crestFactor: 8,
         harmonicity: 0.15,
+        ...rest,
       });
       assert.equal(active, false);
     }

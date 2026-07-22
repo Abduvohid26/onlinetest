@@ -19,79 +19,154 @@ export interface VoiceFrame {
   speechRatio: number;
   lowFreqRatio: number;
   crestFactor: number;
+  /** Davriylik (normallashgan autokorrelyatsiya cho'qqisi, 0..1). */
   harmonicity: number;
+  /** Baholangan asosiy ton f0 (Hz). 0 = topilmadi. */
+  pitchHz: number;
+  /** f0 ning nechta ohangi (harmonikasi) spektrda ko'rinadi. */
+  harmonicCount: number;
+  /** Nutq bandidagi "faol" binlar ulushi — keng polosali shovqinda yuqori. */
+  activeBandRatio: number;
 }
 
-// Ovoz (inson nutqi) chegaralari — biroz sezgirroq: tashqi/uzoq odam ovozini ham
-// (kamerasiz yon tomondan gapirsa) ushlash uchun. Bu SHOVQIN'dan (ambient) alohida —
-// shovqin baland qoladi, ovoz esa sezgirroq.
-const RMS_VOICE = 0.034;
-// ZCR_MIN ATAYLAB juda past: ovozli nutq (unli tovushlar, f0≈100-200 Hz) 2048 kadrda
-// atigi ~10 marta nolni kesib o'tadi → zcr ≈ 0.005. Ilgari 0.022 edi — bu real inson
-// ovozini BUTUNLAY rad etardi (ovoz aniqlanmasligining asosiy sababi shu edi).
-// Shovqin baribir boshqa mezonlar bilan rad etiladi: oq shovqin zcr≈0.5 (ZCR_MAX),
-// gurillash speechRatio past, "taq" esa impuls (crest) va harmonicity=0.
-const ZCR_MIN = 0.003;
-const ZCR_MAX = 0.2;
-const SPEECH_BAND_RATIO_MIN = 0.48;
-const SPEECH_FLATNESS_MAX = 0.6;
+/*
+ * DIZAYN QAYDI — nega mezonlar aynan shunday.
+ *
+ * Ilgari `flatness <= 0.6` mezoni bor edi. U SOXTA edi: `getByteFrequencyData`
+ * qiymatlari **desibel** shkalasida (logarifmik) keladi, chiziqli emas. dB
+ * qiymatlarida spektral tekislik deyarli hamma signal uchun 1 ga yaqin chiqadi —
+ * natijada real erkak ovozi (f0≈130 Hz) HAM rad etilardi. Bu offline test
+ * (`tests/voiceDetection.test.ts` + haqiqiy FFT bilan `tests/audioFixtures.ts`)
+ * orqali aniqlandi.
+ *
+ * Yangi asosiy mezon — DAVRIYLIK (`harmonicity`, autokorrelyatsiya cho'qqisi).
+ * O'lchangan qiymatlar (sintetik, halol FFT bilan):
+ *   odam ovozi ........................ 0.99  (shovqin ustida, SNR 3dB da ham 0.62)
+ *   ventilyator/konditsioner .......... 0.45
+ *   musiqa (akkord) ................... 0.44
+ *   idish-tovoq ....................... 0.35
+ *   transport / klaviatura / eshik .... 0.13–0.17
+ *   oq shovqin / qog'oz ............... 0.07–0.10
+ * Ya'ni 0.60 chegarasi maishiy shovqinni TOZA ajratadi.
+ *
+ * Yagona istisno — SOF TON (mikrovolnovka "pip", telefon signali): u ham mukammal
+ * davriy (1.0). Uni `harmonicCount` rad etadi: sof tonda 1–2 ta ohang, nutqda
+ * (vokal trakt + formantlar) 4–12 ta.
+ */
+const RMS_VOICE = 0.022;
+/** Nutq f0 diapazoni (chuqur erkak ovozidan baland ayol ovozigacha). */
+const PITCH_MIN_HZ = 75;
+const PITCH_MAX_HZ = 350;
+/** Asosiy mezon: davriylik. Maishiy shovqinning eng yuqorisi ~0.45. */
+const PERIODICITY_MIN = 0.6;
+/** Sof ton/signalni rad etish: nutqda ohanglar ko'p. */
+const HARMONIC_COUNT_MIN = 4;
+/** Keng polosali shovqin (klaviatura, transport, oq shovqin) uchun xavfsizlik to'ri. */
+const ACTIVE_BAND_RATIO_MAX = 0.45;
+/** Nutq bandidagi energiya ulushi — shovqin ustidagi ovoz uchun ataylab bo'sh. */
+const SPEECH_BAND_RATIO_MIN = 0.25;
+const ZCR_MAX = 0.35;
 const LOW_FREQ_RATIO_MAX = 0.55;
 const CREST_IMPULSE_MIN = 7.5;
-const HARMONICITY_MIN = 0.26;
 
-function speechBandMetrics(analyser: AnalyserNode): {
+interface SpectrumMetrics {
   speechRatio: number;
-  flatness: number;
   lowFreqRatio: number;
-} {
+  activeBandRatio: number;
+  harmonicCount: number;
+}
+
+/**
+ * Spektr mezonlari. `pitchHz` berilsa, uning ohanglari (f0, 2f0, 3f0...) spektrda
+ * bor-yo'qligi sanaladi — bu nutqni sof tondan ajratadi.
+ */
+function spectrumMetrics(analyser: AnalyserNode, pitchHz: number): SpectrumMetrics {
   const n = analyser.frequencyBinCount;
   const freq = new Uint8Array(n);
   analyser.getByteFrequencyData(freq);
-  const sr = analyser.context.sampleRate;
-  const binHz = sr / analyser.fftSize;
+  const binHz = analyser.context.sampleRate / analyser.fftSize;
 
   let total = 0;
   let speech = 0;
   let low = 0;
-  let geo = 0;
-  let arith = 0;
-  let used = 0;
+  let maxByte = 0;
   for (let i = 2; i < n; i++) {
-    const e = (freq[i] || 0) / 255;
+    const b = freq[i] || 0;
+    if (b > maxByte) maxByte = b;
+    const e = b / 255;
     if (e < 0.008) continue;
     total += e;
-    used += 1;
-    arith += e;
-    geo += Math.log(e + 1e-7);
     const hz = i * binHz;
     if (hz < 180) low += e;
     if (hz >= 180 && hz <= 3600) speech += e;
   }
-  const speechRatio = total > 0 ? speech / total : 0;
-  const lowFreqRatio = total > 0 ? low / total : 0;
-  const flatness = used > 0 && arith > 0 ? Math.exp(geo / used) / (arith / used) : 1;
-  return { speechRatio, flatness, lowFreqRatio };
+
+  // "Faol" bin = cho'qqidan ~12 dB pastgacha. Nutq spektri taroqsimon (ohanglar
+  // orasida chuqur pastliklar) → ulush kichik; keng polosali shovqinda katta.
+  let active = 0;
+  let band = 0;
+  for (let i = 2; i < n; i++) {
+    const hz = i * binHz;
+    if (hz < 180 || hz > 3600) continue;
+    band += 1;
+    if ((freq[i] || 0) >= maxByte - 45) active += 1;
+  }
+
+  let harmonicCount = 0;
+  if (pitchHz >= PITCH_MIN_HZ) {
+    for (let k = 1; k <= 12; k++) {
+      const hz = pitchHz * k;
+      if (hz > 4000) break;
+      const idx = Math.round(hz / binHz);
+      let local = 0;
+      for (let d = -1; d <= 1; d++) local = Math.max(local, freq[idx + d] || 0);
+      if (local >= maxByte - 55) harmonicCount += 1;
+    }
+  }
+
+  return {
+    speechRatio: total > 0 ? speech / total : 0,
+    lowFreqRatio: total > 0 ? low / total : 0,
+    activeBandRatio: band > 0 ? active / band : 0,
+    harmonicCount,
+  };
 }
 
-/** 80–400 Hz oralig'ida harmonik signal bormi (nutq fundamental). */
-function estimateHarmonicity(samples: Float32Array, sampleRate: number): number {
-  const minLag = Math.floor(sampleRate / 400);
-  const maxLag = Math.floor(sampleRate / 80);
-  if (maxLag <= minLag + 2) return 0;
+/**
+ * Autokorrelyatsiya bilan davriylik va f0. Nutqning eng ishonchli belgisi —
+ * tovush to'lqinining o'zini takrorlashi; maishiy shovqinda bunday takror yo'q.
+ */
+function estimatePitch(
+  samples: Float32Array,
+  sampleRate: number,
+): { periodicity: number; pitchHz: number } {
+  const minLag = Math.floor(sampleRate / PITCH_MAX_HZ);
+  const maxLag = Math.floor(sampleRate / PITCH_MIN_HZ);
+  if (maxLag <= minLag + 2 || maxLag >= samples.length - 1) {
+    return { periodicity: 0, pitchHz: 0 };
+  }
 
   let energy = 0;
   for (let i = 0; i < samples.length; i++) energy += samples[i] * samples[i];
-  if (energy < 1e-6) return 0;
+  if (energy < 1e-6) return { periodicity: 0, pitchHz: 0 };
+  const meanPower = energy / samples.length;
 
   let best = 0;
-  for (let lag = minLag; lag <= maxLag && lag < samples.length - 1; lag++) {
+  let bestLag = 0;
+  for (let lag = minLag; lag <= maxLag; lag++) {
     let corr = 0;
     const len = samples.length - lag;
     for (let i = 0; i < len; i++) corr += samples[i] * samples[i + lag];
-    const norm = corr / len;
-    if (norm > best) best = norm;
+    const norm = corr / len / (meanPower + 1e-12);
+    if (norm > best) {
+      best = norm;
+      bestLag = lag;
+    }
   }
-  return Math.min(1, best / (energy / samples.length + 1e-7));
+  return {
+    periodicity: Math.max(0, Math.min(1, best)),
+    pitchHz: bestLag > 0 ? sampleRate / bestLag : 0,
+  };
 }
 
 export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
@@ -116,23 +191,39 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
   const rms = Math.sqrt(sumSq / n);
   const zcr = crossings / n;
   const crestFactor = peak / (rms + 1e-7);
-  const { speechRatio, flatness, lowFreqRatio } = speechBandMetrics(analyser);
-  const harmonicity = estimateHarmonicity(floats, analyser.context.sampleRate);
+
+  const { periodicity, pitchHz } = estimatePitch(floats, analyser.context.sampleRate);
+  const { speechRatio, lowFreqRatio, activeBandRatio, harmonicCount } = spectrumMetrics(
+    analyser,
+    pitchHz,
+  );
 
   const notImpulse =
-    lowFreqRatio <= LOW_FREQ_RATIO_MAX &&
-    !(crestFactor >= CREST_IMPULSE_MIN && rms < 0.2);
+    lowFreqRatio <= LOW_FREQ_RATIO_MAX && !(crestFactor >= CREST_IMPULSE_MIN && rms < 0.2);
 
   const humanVoice =
     rms >= RMS_VOICE &&
-    zcr >= ZCR_MIN &&
-    zcr <= ZCR_MAX &&
+    periodicity >= PERIODICITY_MIN &&
+    pitchHz >= PITCH_MIN_HZ &&
+    pitchHz <= PITCH_MAX_HZ &&
+    harmonicCount >= HARMONIC_COUNT_MIN &&
+    activeBandRatio <= ACTIVE_BAND_RATIO_MAX &&
     speechRatio >= SPEECH_BAND_RATIO_MIN &&
-    flatness <= SPEECH_FLATNESS_MAX &&
-    harmonicity >= HARMONICITY_MIN &&
+    zcr <= ZCR_MAX &&
     notImpulse;
 
-  return { rms, zcr, humanVoice, speechRatio, lowFreqRatio, crestFactor, harmonicity };
+  return {
+    rms,
+    zcr,
+    humanVoice,
+    speechRatio,
+    lowFreqRatio,
+    crestFactor,
+    harmonicity: periodicity,
+    pitchHz,
+    harmonicCount,
+    activeBandRatio,
+  };
 }
 
 /**
