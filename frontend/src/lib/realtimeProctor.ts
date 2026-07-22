@@ -68,6 +68,19 @@ export const LIVE_SIGNAL_ESCALATE_MS = 4000;
 // mantig'i shart emas, darhol ushlash kerak.
 export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 
+// GAPIRISH uchun MAXSUS (tezroq) qoida — README.md "Gapirish uchun maxsus qoida".
+// Og'iz qimirlashi (video) VA tashqi odam ovozi (audio) ikkalasi ham shu vaqtlarda:
+//   0.7s → kichik ogohlantirish, 2s → rasmiy.
+// Sabab: gapirish/suflyor eng jiddiy va eng tez tarqaladigan aldash usuli — unga
+// umumiy 1.5s/4s juda sekin. Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI.
+export const TALK_SIGNAL_CONFIRM_MS = 700;
+export const TALK_SIGNAL_ESCALATE_MS = 2000;
+
+/** Shu signal turi uchun "kichik ogohlantirish" chegarasi (gapirish tezroq). */
+export function confirmMsFor(type: LiveSignalType): number {
+  return type === 'TALKING' ? TALK_SIGNAL_CONFIRM_MS : LIVE_SIGNAL_CONFIRM_MS;
+}
+
 // Kichik chip (kamera panelidagi sariq qator) shu turlar uchun chiqadi. Pozitsiya/gaze
 // (uzoq/yaqin/markaz/burilish) kamera badge'ida ko'rsatiladi — takror bo'lmasin. Lekin
 // yuz yo'q / ko'p yuz — jiddiy, shu sabab ular ham chip bilan aniq ko'rsatiladi.
@@ -462,7 +475,7 @@ export class RealtimeProctor {
     // badge'ida (fsCfg) ko'rsatiladi — chip ularni takrorlamasin. Gapirish, qimirlash,
     // qo'l ko'tarishning badge'i yo'q, shu sabab ular uchun chip kerak.
     const best = (Object.entries(this.liveMs) as Array<[LiveSignalType, number]>)
-      .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms >= LIVE_SIGNAL_CONFIRM_MS)
+      .filter(([type, ms]) => CHIP_SIGNAL_TYPES.has(type) && ms >= confirmMsFor(type))
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
   }
@@ -634,7 +647,7 @@ export class RealtimeProctor {
     // Gapirish — kichik→katta eskalatsiya. Grace qisqa (350ms): to'xtaganда darhol
     // bo'shasin — shunda kichik ogohlantirishda to'xtagan talaba rasmiy olmaydi.
     const talkMs = this.trackContinuous('mouth', talking2, 350);
-    if (talkMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('MOUTH_MOVEMENT_TALKING');
+    if (talkMs >= TALK_SIGNAL_ESCALATE_MS) this.emit('MOUTH_MOVEMENT_TALKING');
     this.liveMs.TALKING = talkMs;
   }
 }

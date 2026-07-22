@@ -4,7 +4,12 @@ import { AdminBtn, AdminAlert } from './admin/ui';
 import { useServerProctoring } from '../lib/useServerProctoring';
 import { useRealtimeProctoring } from '../lib/useRealtimeProctoring';
 import type { FaceStatusLive, LiveSignalType } from '../lib/realtimeProctor';
-import { LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS } from '../lib/realtimeProctor';
+import {
+  LIVE_SIGNAL_CONFIRM_MS,
+  LIVE_SIGNAL_ESCALATE_MS,
+  TALK_SIGNAL_CONFIRM_MS,
+  TALK_SIGNAL_ESCALATE_MS,
+} from '../lib/realtimeProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
@@ -1346,10 +1351,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         }).catch(() => {});
       }
 
-      if (ambientMs >= LIVE_SIGNAL_CONFIRM_MS) {
-        setAudioLiveLabel(EXAM_L[langRef.current].liveAmbientNoise);
-      } else if (speechMs >= LIVE_SIGNAL_CONFIRM_MS) {
+      // Gapirish (odam ovozi) — MAXSUS tez qoida: 0.7s kichik, 2s rasmiy.
+      // Shovqin (ambient) esa umumiy qonunda qoladi: 1.5s kichik, 4s rasmiy.
+      // Ovoz shovqindan muhimroq, shu sabab chipda birinchi o'rinda turadi.
+      if (speechMs >= TALK_SIGNAL_CONFIRM_MS) {
         setAudioLiveLabel(EXAM_L[langRef.current].liveTalking);
+      } else if (ambientMs >= LIVE_SIGNAL_CONFIRM_MS) {
+        setAudioLiveLabel(EXAM_L[langRef.current].liveAmbientNoise);
       } else {
         setAudioLiveLabel(null);
       }
@@ -1358,7 +1366,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         ambientContinuousRef.current!.reset();
         void logViolationRef.current('SUSPICIOUS_AUDIO');
       }
-      if (speechMs >= LIVE_SIGNAL_ESCALATE_MS) {
+      if (speechMs >= TALK_SIGNAL_ESCALATE_MS) {
         speechContinuousRef.current!.reset();
         // Talabaning o'z og'zi ham qimirlayotgan bo'lsa — o'zi gapiryapti; aks holda
         // atrofda/orqada boshqa odam gapirishi shubhasi.

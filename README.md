@@ -138,6 +138,19 @@ Login → Dashboard → PreExamCheck (kamera, qoidalar, shaxs, liveness)
 
 Qisqa uzilish (freym flicker, so‘zlar orasidagi pauza, tugmani qo‘yib yuborish) hisoblagichni buzmasligi uchun grace-oyna bor (odatda 500–1000ms).
 
+#### Gapirish uchun MAXSUS qoida (faqat gapirish uchun)
+
+Gapirish — eng jiddiy va eng tez foyda beradigan aldash usuli (suflyor, yonidan aytib turish, ovoz orqali AI bilan ishlash). Bir necha soniyada butun savolga javob aytib ulgurish mumkin, shu sabab unga umumiy 1.5s/4s **juda sekin**. Shuning uchun **faqat gapirish** uchun tezlashtirilgan chegaralar:
+
+| Signal | Kichik ogohlantirish | Rasmiy |
+|---|---|---|
+| Og‘iz qimirlashi (video, `MOUTH_MOVEMENT_TALKING`) | **0.7s** (`TALK_SIGNAL_CONFIRM_MS`) | **2s** (`TALK_SIGNAL_ESCALATE_MS`) |
+| Odam ovozi (audio: o‘zi yoki tashqi odam — `WHISPER_OR_CONVERSATION_SUSPECTED`) | **0.7s** | **2s** |
+
+Bu tezlashtirish **faqat shu ikkalasiga** tegishli. Tashqi shovqin (`SUSPICIOUS_AUDIO`) va boshqa barcha turlar umumiy qonunda (1.5s / 4s) qoladi — shovqin aldash emas, sezgirlikni oshirsak soxta signal ko‘payadi.
+
+Kod: `TALK_SIGNAL_CONFIRM_MS` / `TALK_SIGNAL_ESCALATE_MS` va `confirmMsFor(type)` — `frontend/src/lib/realtimeProctor.ts`; audio tomoni `frontend/src/pages/ExamRoom.tsx` audio loop’ida. Chip navbatida gapirish shovqindan **ustun** ko‘rsatiladi.
+
 **Signal manbalari va ular ushbu qonunni qanday qo‘llaydi:**
 
 - **Video (MediaPipe, `frontend/src/lib/realtimeProctor.ts`)** — yuz yo‘q (`NO_FACE`), ko‘p yuz (`MULTI_FACE`), bosh burilishi/gaze, pozitsiya (uzoq/yaqin/markaz), haddan tashqari qimirlash, qo‘l ko‘tarish, og‘iz harakati. Har biri `trackContinuous` bilan 1.5s/4s. Sariq chip qatori.
