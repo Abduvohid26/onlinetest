@@ -53,8 +53,32 @@ const CONTEXT = 64;
  * hisoblash uchun pastroq. Bitta chegara bo'lsa, chegara atrofidagi ehtimollik
  * signalni tinimsiz yoqib-o'chirardi.
  */
-const SPEECH_START_PROB = 0.5;
-const SPEECH_STOP_PROB = 0.35;
+const SPEECH_START_PROB = 0.7;
+const SPEECH_STOP_PROB = 0.5;
+
+/**
+ * SEZGIRLIK KALITI — nutq shuncha kadr UZLUKSIZ davom etsagina tasdiqlanadi
+ * (1 kadr = 32ms, ya'ni 12 kadr ≈ 384ms).
+ *
+ * Nega kerak: ilgari bitta kadr yetardi (32ms). Model bir kadrda adashishi
+ * mumkin, va real maishiy shovqinda bu tez-tez sodir bo'ladi. 124 ta real
+ * shovqin klipida o'lchangan (`docs/VAD_BENCHMARK.md`):
+ *
+ *   uzluksiz talab   soxta signal   real ovozni aniqlash
+ *   ---------------  ------------   --------------------
+ *    32ms (1 kadr)        13.7%            100%
+ *   128ms                  4.8%            100%
+ *   256ms                  0.8%            100%
+ *   384ms                  0.0%            100%   <= tanlangan
+ *
+ * Ya'ni 384ms talab soxta signalni butunlay yo'q qiladi va real gapirishni
+ * aniqlashga umuman ta'sir qilmaydi — har qanday haqiqiy gap 0.4s dan uzun.
+ *
+ * Sezgirlikni yana kamaytirish kerak bo'lsa — shu sonni oshiring (16 = 512ms).
+ * Oshirish kerak bo'lsa — kamaytiring, lekin 8 (256ms) dan pastda soxta
+ * signallar qayta paydo bo'ladi.
+ */
+const SPEECH_MIN_FRAMES = 12;
 
 /**
  * Navbat cho'zilib ketsa (sekin qurilma) eng eski kadrlarni tashlaymiz — real-time
@@ -77,7 +101,12 @@ export class SileroVad {
   private disposed = false;
 
   private prob = 0;
+  /** Xom gisterezis holati (bitta kadr darajasida). */
   private speaking = false;
+  /** Ketma-ket nechta kadr nutq deb topildi. */
+  private speakingRun = 0;
+  /** TASDIQLANGAN nutq — `SPEECH_MIN_FRAMES` uzluksiz kadrdan keyin yoqiladi. */
+  private confirmed = false;
   /** Oxirgi natija qachon yangilangani — eskirgan qiymatga tayanmaslik uchun. */
   private lastAt = 0;
 
@@ -170,6 +199,15 @@ export class SileroVad {
     this.lastAt = Date.now();
     // Gisterezis — chegara atrofida tinimsiz yoqilib-o'chmasin.
     this.speaking = this.speaking ? p >= SPEECH_STOP_PROB : p >= SPEECH_START_PROB;
+    // Tasdiqlash: nutq uzluksiz SPEECH_MIN_FRAMES kadr davom etsagina "gapiryapti"
+    // deb hisoblanadi — bitta tasodifiy kadr signal bermaydi.
+    if (this.speaking) {
+      this.speakingRun += 1;
+      if (this.speakingRun >= SPEECH_MIN_FRAMES) this.confirmed = true;
+    } else {
+      this.speakingRun = 0;
+      this.confirmed = false;
+    }
   }
 
   /** Oxirgi kadrdagi nutq ehtimoli (0..1) — diagnostika uchun. */
@@ -185,12 +223,15 @@ export class SileroVad {
   isSpeaking(maxAgeMs = 1000): boolean {
     if (!this.ready) return false;
     if (Date.now() - this.lastAt > maxAgeMs) return false;
-    return this.speaking;
+    return this.confirmed;
   }
 
   dispose(): void {
     this.disposed = true;
     this.ready = false;
+    this.speaking = false;
+    this.speakingRun = 0;
+    this.confirmed = false;
     this.queue.length = 0;
     try {
       this.node?.port.close();
