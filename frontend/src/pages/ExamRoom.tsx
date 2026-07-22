@@ -1804,6 +1804,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // --- Periodic identity match (Gemini serverda) ---
   // 90 soniyada bir marta; faqat yuz aniqlanganida.
   const identityFailCountRef = useRef(0);
+  /** Tarmoq xatosidan keyin bir martalik qayta urinish belgisi (cheksiz sikl bo'lmasin). */
+  const retriedRef = useRef(false);
   // Real-time engine person-swap shubhasida darhol identity tekshiruvini ishga tushiradi.
   const triggerIdentityCheckRef = useRef<() => void>(() => {});
 
@@ -1871,10 +1873,24 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           setIdStatus('ok');
         }
       } catch {
+        // Tarmoq uzilishi (net::ERR_NETWORK_CHANGED — Wi-Fi almashdi, VPN, IP
+        // yangilandi). Bu TALABANING aybi emas: qoidabuzarlik yozilmaydi va
+        // identityFailCount ham oshmaydi. Lekin keyingi tekshiruvgacha
+        // IDENTITY_CHECK_MS (90s) proctoring bo'shlig'i qolmasin — bir marta
+        // tez qayta urinamiz.
         setIdStatus('idle');
+        if (!retriedRef.current) {
+          retriedRef.current = true;
+          identityCheckBusyRef.current = false;
+          window.setTimeout(() => {
+            if (!bannedRef.current && sessionStartedRef.current) void runCheck();
+          }, 4000);
+          return;
+        }
       } finally {
         identityCheckBusyRef.current = false;
       }
+      retriedRef.current = false;
     };
 
     triggerIdentityCheckRef.current = () => { void runCheck(); };

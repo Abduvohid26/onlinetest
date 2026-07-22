@@ -132,14 +132,24 @@ export class FacePositionChecker {
   start(): void {
     if (this.running || !this.landmarker) return;
     this.running = true;
-    const loop = () => {
+    // Og'ir MediaPipe inference'i rAF ichida BAJARILMAYDI — u joriy kadrni ushlab
+    // qoladi va Chrome "[Violation] 'requestAnimationFrame' handler took <N>ms"
+    // deb ogohlantiradi (ko'rinadigan qotish). rAF faqat "sahifa ko'rinyapti"
+    // darvozasi; tahlil kadr chizilgandan keyin alohida makrotaskda ishlaydi.
+    const analyse = () => {
       if (!this.running) return;
       this.evaluate();
+      schedule();
+    };
+    const schedule = () => {
       this.timer = window.setTimeout(() => {
-        this.rafId = window.requestAnimationFrame(loop);
+        this.rafId = window.requestAnimationFrame(() => {
+          if (!this.running) return;
+          this.timer = window.setTimeout(analyse, 0);
+        });
       }, DETECT_INTERVAL_MS);
     };
-    this.rafId = window.requestAnimationFrame(loop);
+    schedule();
   }
 
   stop(): void {
@@ -254,14 +264,24 @@ export class YawChallengeTracker {
   start(): void {
     if (this.running || !this.landmarker) return;
     this.running = true;
-    const loop = () => {
+    // Og'ir MediaPipe inference'i rAF ichida BAJARILMAYDI — u joriy kadrni ushlab
+    // qoladi va Chrome "[Violation] 'requestAnimationFrame' handler took <N>ms"
+    // deb ogohlantiradi (ko'rinadigan qotish). rAF faqat "sahifa ko'rinyapti"
+    // darvozasi; tahlil kadr chizilgandan keyin alohida makrotaskda ishlaydi.
+    const analyse = () => {
       if (!this.running) return;
       this.tick();
+      schedule();
+    };
+    const schedule = () => {
       this.timer = window.setTimeout(() => {
-        this.rafId = window.requestAnimationFrame(loop);
+        this.rafId = window.requestAnimationFrame(() => {
+          if (!this.running) return;
+          this.timer = window.setTimeout(analyse, 0);
+        });
       }, YAW_DETECT_INTERVAL_MS);
     };
-    this.rafId = window.requestAnimationFrame(loop);
+    schedule();
   }
 
   private tick(): void {

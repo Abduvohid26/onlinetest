@@ -332,14 +332,32 @@ export class RealtimeProctor {
   start(): void {
     if (this.running || !this.faceLandmarker) return;
     this.running = true;
-    const loop = () => {
+
+    // MUHIM: og'ir MediaPipe inference'i requestAnimationFrame ichida BAJARILMAYDI.
+    // Ilgari shunday edi va Chrome ochiq-oydin shikoyat qilardi:
+    //   [Violation] 'requestAnimationFrame' handler took <N>ms
+    // rAF ishlovchisi joriy kadrni ushlab turadi — brauzer u tugamaguncha ekranga
+    // hech narsa chiza olmaydi, natijada ko'rinadigan qotishlar bo'ladi.
+    //
+    // Endi rAF faqat "sahifa ko'rinyapti va chizilyapti" darvozasi sifatida
+    // ishlatiladi (fon tabda rAF chaqirilmaydi — bekorga CPU yemaymiz), tahlil esa
+    // kadr chizilgandan KEYIN, alohida makrotaskda ishlaydi.
+    const analyse = () => {
       if (!this.running) return;
       this.detectOnce();
+      schedule();
+    };
+
+    const schedule = () => {
       this.timer = window.setTimeout(() => {
-        this.rafId = window.requestAnimationFrame(loop);
+        this.rafId = window.requestAnimationFrame(() => {
+          if (!this.running) return;
+          this.timer = window.setTimeout(analyse, 0);
+        });
       }, DETECT_INTERVAL_MS);
     };
-    this.rafId = window.requestAnimationFrame(loop);
+
+    schedule();
   }
 
   stop(): void {
