@@ -526,13 +526,16 @@ def build_certificate_pdf(
         return h - 50
 
     _draw_page_frame(c, w, h)
-    _draw_qr(c, verify_url, w, h, texts)
+    # MUHIM: header AVVAL chiziladi. Ilgari QR header'dan oldin chizilardi va
+    # header'ning to'ldirilgan foni QR ustidan bosib, uni ko'rinmas qilardi
+    # (faqat "QR tekshiruv" yozuvi qolardi). Endi QR header ustiga chiziladi.
     _draw_header(c, w, h,
                  title=texts.t("cert_title"),
                  subtitle=texts.t("cert_subtitle"),
                  hint="",
                  texts=texts,
                  accent="cert")
+    _draw_qr(c, verify_url, w, h, texts)
 
     pct = round((score / total) * 100) if total else 0
     threshold = pass_threshold if pass_threshold is not None else PASS_PERCENT_THRESHOLD
@@ -644,7 +647,16 @@ def build_certificate_pdf(
         why_right = str(r.get("whyCorrectIsRight") or "").strip()
         options = r.get("options") or []
 
-        q_lines = _wrap_text(c, f"{idx}. {text}", FONT_REGULAR, 9, w - 130) or [f"{idx}."]
+        # MUHIM: savolning 1-qatori BOLD 10pt da chiziladi (pastdagi q_lines[0]),
+        # qolganlari REGULAR 9pt da. Ilgari o'rash REGULAR 9pt ga hisoblanardi —
+        # bold kattaroq bo'lgani uchun 1-qator kartadan CHIQIB ketardi. Endi eng
+        # keng holat (BOLD 10) bilan o'raymiz; qolgan qatorlar undan tor, bemalol
+        # sig'adi. O'ng chetdagi ✓/✗ belgisi bilan urilmasin uchun kengroq zahira.
+        MAX_Q_LINES = 6
+        q_lines = _wrap_text(c, f"{idx}. {text}", FONT_BOLD, 10, w - 150) or [f"{idx}."]
+        if len(q_lines) > MAX_Q_LINES:
+            q_lines = q_lines[:MAX_Q_LINES]
+            q_lines[-1] = q_lines[-1].rstrip()[:80] + "…"
         detail_blocks: list[tuple[str, str]] = []
         if student_ans:
             detail_blocks.append((texts.t("your_answer"), student_ans))
@@ -662,7 +674,7 @@ def build_certificate_pdf(
             block_lines += 1 + len(_wrap_text(c, body, FONT_REGULAR, 8, w - 120)[:6])
         if options:
             block_lines += 1 + min(len(options), 8)
-        card_h = 16 + len(q_lines[:4]) * 12 + block_lines * 11 + 12
+        card_h = 16 + len(q_lines) * 12 + block_lines * 11 + 12
 
         if y - card_h < 70:
             y = new_page()
@@ -677,7 +689,7 @@ def build_certificate_pdf(
         c.roundRect(42, card_top - card_h, w - 84, card_h, 8, stroke=1, fill=1)
 
         cy = card_top - 14
-        for li, line in enumerate(q_lines[:4]):
+        for li, line in enumerate(q_lines):
             c.setFont(FONT_REGULAR if li else FONT_BOLD, 9 if li else 10)
             c.setFillColor(C_SLATE)
             c.drawString(52, cy, line)
