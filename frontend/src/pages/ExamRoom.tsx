@@ -2615,79 +2615,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     )}{warningMsgModal}</>;
   }
 
-  // --- Kichik ogohlantirish (3 tadan) — RASMIY modal bilan bir xil dizayn va
-  // bloklovchi xulq: talaba "Tushundim" bosmaguncha orqada imtihonni davom
-  // ettira olmaydi (early return — pastdagi savol/kamera UI umuman render
-  // bo'lmaydi, xuddi rasmiy ogohlantirish/ban kabi). ---
-  if (smallWarn && !violationWarning && !banned && !hardBlocked) {
-    const warnTitle = t.violationWarningTitle.replace('{n}', String(smallWarn.count));
-    const remaining = Math.max(0, SMALL_WARNINGS_BEFORE_FORMAL - smallWarn.count);
-    const bannerText = t.smallWarnRemainingBanner.replace('{n}', String(remaining));
-
-    return <>{createPortal(
-      <div
-        className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 overflow-y-auto overscroll-y-contain px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="small-warn-title"
-      >
-        <motion.div
-          initial={{ opacity: 0, scale: 0.96, y: 16 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-          className="w-full max-w-lg max-h-[min(90dvh,calc(100dvh-2rem))] flex flex-col min-h-0 rounded-lg sm:rounded-xl border-2 border-orange-400 bg-orange-50 shadow-2xl"
-        >
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-5 sm:p-7">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-5 bg-orange-100">
-              <svg className="w-7 h-7 sm:w-9 sm:h-9 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                  d="M12 9v3m0 3h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-              </svg>
-            </div>
-
-            <h2 id="small-warn-title" className="text-lg sm:text-xl font-bold text-center mb-2 leading-snug text-orange-700">
-              {warnTitle}
-            </h2>
-
-            <div className="rounded-lg px-3 py-2.5 mb-4 text-center text-sm font-semibold leading-snug bg-orange-100 text-orange-900 border border-orange-300">
-              ⚠ {bannerText}
-            </div>
-
-            <div className="bg-white rounded-xl sm:rounded-lg px-4 py-3 sm:px-5 sm:py-4 mb-4 text-center border border-gray-200">
-              <p className="text-[10px] sm:text-xs text-gray-500 mb-1 uppercase tracking-wide font-medium">{t.violationReasonLabel}</p>
-              <p className="text-sm sm:text-base font-semibold text-gray-800 break-words">{smallWarn.text}</p>
-            </div>
-
-            <div className="mb-4">
-              <WarningStepRow
-                warningCount={smallWarn.count}
-                maxWarnings={SMALL_WARNINGS_BEFORE_FORMAL}
-                banReached={false}
-                finalLabel={t.violationStepFormal}
-                t={t}
-              />
-            </div>
-
-            <ViolationHistoryList history={smallWarn.history} label={t.banWarningHistoryLabel} />
-
-            <p className="text-[11px] sm:text-xs text-gray-500 text-center mb-4 sm:mb-5 leading-relaxed">{t.violationFooterHonest}</p>
-          </div>
-
-          <div className="shrink-0 border-t border-black/5 p-4 sm:p-5 pt-3 sm:pt-4 bg-white rounded-b-2xl sm:rounded-b-3xl">
-            <button
-              type="button"
-              onClick={dismissSmallWarn}
-              className="w-full py-3 sm:py-3.5 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base transition-all active:scale-[0.98] text-white bg-orange-500 hover:bg-orange-600"
-            >
-              {t.violationContinueExam}
-            </button>
-          </div>
-        </motion.div>
-      </div>,
-      document.body,
-    )}</>;
-  }
-
   // --- Yuz holati overlay konfiguratsiyasi ---
   const FACE_STATUS_CFG: Record<FaceStatusLive, { label: string; border: string; bg: string; text: string; icon: string }> = {
     OK:             { label: EXAM_L[lang].faceOk,       border: 'border-green-400',  bg: 'bg-green-500/90',  text: 'text-white', icon: '✓' },
@@ -3181,6 +3108,77 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         </div>
       </div>
       <Calculator />
+
+      {/* Kichik ogohlantirish (3 tadan) — rasmiy modal bilan bir xil ko'rinish,
+          lekin QO'SHIMCHA qatlam sifatida (early return EMAS!). MUHIM: bu modal
+          tez-tez (har gapirish/harakat episodida) chiqadi — agar early return
+          qilsak, pastdagi <video> elementi unmount/remount bo'lib, real-time
+          MediaPipe nazorat dvigateli eski (endi ekrandan chiqib ketgan) video
+          elementini tahlil qilishda davom etib, "ko'r" bo'lib qolardi (aynan
+          shu xato bir marta qilingan va tuzatilgan). Video/kamera/WebSocket
+          har doim mount holida qoladi — modal faqat ustidan bosib turadi. */}
+      {smallWarn && !violationWarning && !banned && !hardBlocked && createPortal(
+        <div
+          className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 overflow-y-auto overscroll-y-contain px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="small-warn-title"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            className="w-full max-w-lg max-h-[min(90dvh,calc(100dvh-2rem))] flex flex-col min-h-0 rounded-lg sm:rounded-xl border-2 border-orange-400 bg-orange-50 shadow-2xl"
+          >
+            <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-5 sm:p-7">
+              <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-5 bg-orange-100">
+                <svg className="w-7 h-7 sm:w-9 sm:h-9 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                    d="M12 9v3m0 3h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                </svg>
+              </div>
+
+              <h2 id="small-warn-title" className="text-lg sm:text-xl font-bold text-center mb-2 leading-snug text-orange-700">
+                {t.violationWarningTitle.replace('{n}', String(smallWarn.count))}
+              </h2>
+
+              <div className="rounded-lg px-3 py-2.5 mb-4 text-center text-sm font-semibold leading-snug bg-orange-100 text-orange-900 border border-orange-300">
+                ⚠ {t.smallWarnRemainingBanner.replace('{n}', String(Math.max(0, SMALL_WARNINGS_BEFORE_FORMAL - smallWarn.count)))}
+              </div>
+
+              <div className="bg-white rounded-xl sm:rounded-lg px-4 py-3 sm:px-5 sm:py-4 mb-4 text-center border border-gray-200">
+                <p className="text-[10px] sm:text-xs text-gray-500 mb-1 uppercase tracking-wide font-medium">{t.violationReasonLabel}</p>
+                <p className="text-sm sm:text-base font-semibold text-gray-800 break-words">{smallWarn.text}</p>
+              </div>
+
+              <div className="mb-4">
+                <WarningStepRow
+                  warningCount={smallWarn.count}
+                  maxWarnings={SMALL_WARNINGS_BEFORE_FORMAL}
+                  banReached={false}
+                  finalLabel={t.violationStepFormal}
+                  t={t}
+                />
+              </div>
+
+              <ViolationHistoryList history={smallWarn.history} label={t.banWarningHistoryLabel} />
+
+              <p className="text-[11px] sm:text-xs text-gray-500 text-center mb-4 sm:mb-5 leading-relaxed">{t.violationFooterHonest}</p>
+            </div>
+
+            <div className="shrink-0 border-t border-black/5 p-4 sm:p-5 pt-3 sm:pt-4 bg-white rounded-b-2xl sm:rounded-b-3xl">
+              <button
+                type="button"
+                onClick={dismissSmallWarn}
+                className="w-full py-3 sm:py-3.5 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base transition-all active:scale-[0.98] text-white bg-orange-500 hover:bg-orange-600"
+              >
+                {t.violationContinueExam}
+              </button>
+            </div>
+          </motion.div>
+        </div>,
+        document.body,
+      )}
 
       {/* Yakunlashni tasdiqlash — javobsiz savollar sonini ko'rsatadi */}
       {submitConfirm && createPortal(
