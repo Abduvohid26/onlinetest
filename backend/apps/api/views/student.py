@@ -709,7 +709,19 @@ def student_exams_start(request, pk: int):
                     full_questions = upgraded
                     se.session_questions_json = json.dumps(full_questions)
                     se.save(update_fields=["session_questions_json"])
+        elif safe_json_loads(exam.questions_json, []):
+            # Yaratishda oldindan olib kelib 3 tilga tarjima qilingan FIKSIRLANGAN
+            # savollar to'plami (barcha talaba uchun bir xil, admin tanlovi bo'yicha
+            # — tezlik uchun). Talaba kirganda iMentor'ga qayta murojaat qilinmaydi,
+            # AI chaqiruvi ham kerak emas — darhol boshlanadi.
+            full_questions = safe_json_loads(exam.questions_json, [])
+            if is_auto_exam:
+                full_questions = fill_missing_exam_translations(full_questions)
+            se.session_questions_json = json.dumps(full_questions)
+            se.save(update_fields=["session_questions_json"])
         else:
+            # Eski (ushbu o'zgarishdan oldin yaratilgan) imtihonlar — questions_json
+            # bo'sh, shu sabab avvalgidek har talaba uchun jonli olib kelinadi.
             from apps.api.imentor_service import fetch_random_imentor_questions
 
             codes = safe_json_loads(getattr(exam, "imentor_subject_codes", None) or "[]", [])

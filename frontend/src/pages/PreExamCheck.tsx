@@ -7,7 +7,6 @@ import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { FacePositionChecker, SmileChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
-import { InstituteLogo } from '../components/InstituteLogo';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
 
@@ -747,6 +746,10 @@ export function PreExamCheck({
               {t.preExamTitle}
             </h1>
             <p className="text-[13px] text-gray-500 mt-0.5 truncate">{exam.title}</p>
+            <p className="text-[12px] text-gray-400 mt-0.5 truncate">
+              {user.name}
+              {user.group_name ? ` · ${user.group_name}` : ''}
+            </p>
           </div>
           {/* Stepper */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto">
@@ -787,26 +790,9 @@ export function PreExamCheck({
         {/* ── Body (mobilda bitta scroll, desktopda ikki ustun) ── */}
         <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
-          {/* Logo (chap ustun) — qoidalar faqat Boshlash modali orqali, bu yerda
-              faqat brend/imtihon nomi, kichik "qoida" matni olib tashlandi. */}
-          <div className="flex min-h-0 lg:h-full">
-            <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-gray-200 bg-white px-6 py-10 sm:py-12 lg:py-16">
-              <InstituteLogo
-                size="xl"
-                className="!h-40 !w-40 sm:!h-52 sm:!w-52 lg:!h-56 lg:!w-56 shadow-lg ring-2 ring-indigo-100"
-              />
-              <p className="mt-5 text-center text-sm sm:text-base font-semibold text-gray-900 leading-snug max-w-[300px]">
-                {t.appBrandTitle}
-              </p>
-              <p className="mt-2 text-center text-[12px] sm:text-[13px] text-gray-500 truncate max-w-full px-2">
-                {exam.title}
-              </p>
-            </div>
-          </div>
-
-          {/* Camera + identity */}
-          <section className="flex flex-col gap-3 min-h-0 lg:min-h-0 lg:overflow-hidden">
+            <div className="w-full max-w-2xl mx-auto lg:h-full lg:min-h-0">
+          {/* Kamera + shaxs — logo olib tashlandi, kamera markazda, kenglik to'ldiradi. */}
+          <section className="flex flex-col gap-3 min-h-0 lg:min-h-0 lg:overflow-hidden lg:h-full">
             <div className="shrink-0">
               <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">
                 <video

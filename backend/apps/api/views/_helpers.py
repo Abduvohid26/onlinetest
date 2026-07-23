@@ -665,6 +665,28 @@ def _split_large_text(text: str, chunk_size: int = 95_000, max_chunks: int = 8) 
         chunks.append(t[i:].strip())
     return [c for c in chunks if c]
 
+def _exam_languages_ready(e: Exam) -> int | None:
+    """
+    Auto-til imtihonlar uchun: saqlangan savollarning nechtasi UZ/RU/EN uchalasida
+    ham to'liq (0..3). Aniq bitta tilli imtihonlarda tushuncha qo'llanilmaydi — None.
+    Ro'yxatda "3/3 til tayyor" kabi belgi ko'rsatish uchun ishlatiladi.
+    """
+    if (e.language or "").lower() != "auto":
+        return None
+    qs = safe_json_loads(e.questions_json, [])
+    if not qs:
+        return 0
+
+    def _has(q: dict, lang: str) -> bool:
+        if lang == "en":
+            return bool((q.get("text_en") or q.get("text") or "").strip())
+        if lang == "ru":
+            return bool((q.get("text_ru") or "").strip())
+        return bool((q.get("text_uz") or q.get("text") or "").strip())
+
+    return sum(1 for lg in ("uz", "ru", "en") if all(_has(q, lg) for q in qs))
+
+
 def _exam_row_dict(e: Exam, teacher_name: str | None = None):
     return {
         "id": e.id,
@@ -685,6 +707,7 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "technical_retakes_allowed": int(getattr(e, "technical_retakes_allowed", 3) or 3),
         "identity_retakes_allowed": int(getattr(e, "identity_retakes_allowed", 1) or 1),
         "proctor_profile": str(getattr(e, "proctor_profile", "") or "standard"),
+        "languages_ready": _exam_languages_ready(e),
     }
 
 def _bank_pool_check(cat_ids: list, need_bank: int) -> tuple[bool, int]:
@@ -732,7 +755,11 @@ def _admin_exams_create_impl(request):
         ok, err, _total = validate_imentor_subjects(raw_list)
         if not ok:
             return Response({"error": err}, status=400)
-        from apps.api.imentor_service import normalize_exam_question_count, resolve_imentor_subject_codes
+        from apps.api.imentor_service import (
+            fetch_random_imentor_questions,
+            normalize_exam_question_count,
+            resolve_imentor_subject_codes,
+        )
 
         try:
             codes = resolve_imentor_subject_codes(raw_list)
@@ -744,6 +771,22 @@ def _admin_exams_create_impl(request):
                 return Response({"error": str(ex)}, status=400)
             return Response({"error": "Noto'g'ri savollar soni"}, status=400)
         imentor_codes_json = json.dumps(codes)
+
+        # Savollar YARATISHDA olib kelinadi va (auto til bo'lsa) 3 tilga tarjima
+        # qilinadi — barcha talaba bir xil (fiksirlangan) to'plamni ko'radi.
+        # Sabab: ilgari bu ish har talaba BIRINCHI marta kirganda sodir bo'lardi —
+        # ya'ni yuzlab talaba AI javobini kutib turardi. Endi buni admin bir marta,
+        # imtihon yaratishda kutadi (bu yerda javob biroz sekinroq bo'lishi mumkin).
+        try:
+            questions, _meta = fetch_random_imentor_questions(
+                codes, max_questions=bank_count, add_translations=(lang == "auto"),
+            )
+        except Exception as ex:
+            from apps.api.imentor_client import IMentorApiError
+
+            if isinstance(ex, IMentorApiError):
+                return Response({"error": str(ex)}, status=400)
+            return Response({"error": "iMentor test yuklanmadi"}, status=502)
     elif mode == "bank_mixed":
         raw_cat_ids = d.get("bank_category_ids")
         if isinstance(raw_cat_ids, list):

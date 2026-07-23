@@ -246,6 +246,21 @@ export function AdminExamsTab({
                             </span>
                           )}
                           <span className="text-[11px] bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium uppercase">{e.language}</span>
+                          {e.language === 'auto' && e.languages_ready != null && (
+                            <span
+                              className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+                                e.languages_ready >= 3
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : e.languages_ready > 0
+                                    ? 'bg-amber-100 text-amber-700'
+                                    : 'bg-red-100 text-red-700'
+                              }`}
+                            >
+                              {e.languages_ready > 0
+                                ? t.examLangReadyLabel.replace('{n}', String(e.languages_ready))
+                                : t.examLangPendingLabel}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
