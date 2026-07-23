@@ -390,13 +390,13 @@ export const translations = {
     violationWarningTitle: "{n}-ogohlantirish (3 tadan)",
     violationReasonFallback: "Imtihon qoidasi buzildi",
     violationContinueExam: "Tushundim, davom etaman",
-    smallWarnTitle: "Eslatma",
-    smallWarnHint: "Qoidaga rioya qiling — takrorlansa rasmiy ogohlantirish beriladi.",
     violationFinalNotice:
       "Bu 3/3 ogohlantirish. Keyingi qoidabuzarlikda qayta topshirish sarflanadi yoki BAN qo'yiladi.",
     violationRemainingBanner: "Yana {n} ta ogohlantirish qoldi",
     violationFinalBanner: "3 ta ogohlantirish! Keyingi qoidabuzarlik = qayta topshirish yoki BAN",
     violationStepBan: "BAN",
+    violationStepFormal: "RASMIY",
+    smallWarnRemainingBanner: "Yana {n} ta kichik ogohlantirish qoldi — keyingisi rasmiy bo‘ladi",
     violationProgressTitle: "Ogohlantirish bosqichlari",
     banProgressTitle: "Nima bo‘ldi?",
     banStepsExplainer:
@@ -1109,13 +1109,13 @@ export const translations = {
     violationWarningTitle: "Предупреждение {n} из 3",
     violationReasonFallback: "Нарушено правило экзамена",
     violationContinueExam: "Понял, продолжить",
-    smallWarnTitle: "Напоминание",
-    smallWarnHint: "Соблюдайте правило — при повторении будет официальное предупреждение.",
     violationFinalNotice:
       "Это предупреждение 3/3. Следующее нарушение — остановка экзамена и BAN (без новых предупреждений).",
     violationRemainingBanner: "Осталось предупреждений: {n} — BAN ещё нет",
     violationFinalBanner: "3 предупреждения! Следующее нарушение = BAN",
     violationStepBan: "BAN",
+    violationStepFormal: "ОФИЦИАЛЬНО",
+    smallWarnRemainingBanner: "Осталось {n} мелких предупреждений — следующее станет официальным",
     violationProgressTitle: "Этапы предупреждений",
     banProgressTitle: "Что произошло",
     banStepsExplainer:
@@ -1827,13 +1827,13 @@ export const translations = {
     violationWarningTitle: "Warning {n} of 3",
     violationReasonFallback: "Exam rule violated",
     violationContinueExam: "Understood, continue",
-    smallWarnTitle: "Reminder",
-    smallWarnHint: "Follow the rule — if it repeats, a formal warning will be issued.",
     violationFinalNotice:
       "This is warning 3/3. The next violation stops the exam and applies a BAN (no further warnings).",
     violationRemainingBanner: "{n} warning(s) left — not banned yet",
     violationFinalBanner: "3 warnings given! Next violation = BAN",
     violationStepBan: "BAN",
+    violationStepFormal: "FORMAL",
+    smallWarnRemainingBanner: "{n} small warning(s) left — the next one becomes formal",
     violationProgressTitle: "Warning steps",
     banProgressTitle: "What happened",
     banStepsExplainer:

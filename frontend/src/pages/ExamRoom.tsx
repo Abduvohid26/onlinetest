@@ -267,12 +267,16 @@ function WarningStepRow({
   maxWarnings,
   banReached,
   isFinalPending,
+  finalLabel,
   t,
 }: {
   warningCount: number;
   maxWarnings: number;
   banReached: boolean;
   isFinalPending?: boolean;
+  /** Oxirgi bosqich yorlig'i — default "BAN". Kichik ogohlantirish modalida "RASMIY"
+   *  ishlatiladi, chunki 3 kichikdan keyingisi to'g'ridan-to'g'ri BAN emas. */
+  finalLabel?: string;
   t: (typeof translations)['uz'];
 }) {
   const steps = Array.from({ length: Math.max(1, maxWarnings) }, (_, i) => i + 1);
@@ -308,7 +312,7 @@ function WarningStepRow({
                 : 'bg-gray-50 text-gray-400 border-dashed border-gray-300'
           }`}
         >
-          {t.violationStepBan}
+          {finalLabel ?? t.violationStepBan}
         </div>
       </div>
     </div>
@@ -433,17 +437,25 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [eventLiveLabel, setEventLiveLabel] = useState<string | null>(null);
 
   // --- Kichik ogohlantirish MODALI ---
-  // Chip (jonli holat) o'z holicha qoladi; ustiga talaba tasdiqlashi uchun kichik
-  // modal chiqadi. Modal OCHIQ turganda nazorat "muzlaydi": o'sha vaqtda qilingan
-  // qoidabuzarliklar hisoblanmaydi (strike/sanoq/rasmiy — hech biri). Talaba
-  // "Tushundim" bossa yoki SMALL_WARN_AUTOCLOSE_MS o'tsa — davom etadi.
-  const [smallWarn, setSmallWarn] = useState<{ text: string } | null>(null);
+  // Chip (jonli holat) o'z holicha qoladi; ustiga talaba tasdiqlashi uchun TO'LIQ
+  // BLOKLOVCHI modal chiqadi (rasmiy ogohlantirish bilan bir xil dizayn/xulq —
+  // orqada imtihonni davom ettirib bo'lmaydi, faqat "Tushundim" bosgandan keyin).
+  // Modal OCHIQ turganda nazorat "muzlaydi": o'sha vaqtda qilingan qoidabuzarliklar
+  // hisoblanmaydi (strike/sanoq/rasmiy — hech biri). Talaba "Tushundim" bossa yoki
+  // SMALL_WARN_AUTOCLOSE_MS o'tsa — davom etadi.
+  const [smallWarn, setSmallWarn] = useState<{
+    text: string;
+    count: number;
+    history: WarningHistoryItem[];
+  } | null>(null);
   /** Nazorat muzlaganmi (modal ochiqmi) — loop/callbacklar bir zumda o'qishi uchun ref. */
   const smallWarnOpenRef = useRef(false);
   /** Oxirgi ko'rsatilgan signal kaliti — o'sha signal grace ichida qayta ochmasin. */
   const smallWarnKeyRef = useRef<string | null>(null);
   const smallWarnGraceRef = useRef(0);
   const smallWarnAutoCloseRef = useRef<number | null>(null);
+  /** Har bir qoidabuzarlik TURI bo'yicha kichik ogohlantirishlar tarixi (modalda ko'rsatish uchun). */
+  const smallWarnHistoryRef = useRef<Map<string, WarningHistoryItem[]>>(new Map());
 
   const dismissSmallWarn = useCallback(() => {
     if (smallWarnAutoCloseRef.current !== null) {
@@ -461,14 +473,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     setSmallWarn(null);
   }, []);
 
-  /** Kichik ogohlantirish modalini ochadi (bitta modal + grace bilan spam oldini oladi). */
+  /**
+   * Kichik ogohlantirish modalini ochadi (bitta modal + grace bilan spam oldini oladi).
+   * @param graceKey shovqin manbasi + tur bo'yicha kalit (masalan `v:TALKING`) — spam nazorati uchun.
+   * @param violationType rasmiy violation turi (SmallWarningLedger kaliti bilan bir xil) — hisob/tarix shu bo'yicha.
+   */
   const showSmallWarn = useCallback(
-    (key: string, text: string) => {
+    (graceKey: string, violationType: string, text: string) => {
       if (smallWarnOpenRef.current) return; // bitta modal — biri ochiq bo'lsa yangisi kutadi
-      if (key === smallWarnKeyRef.current && Date.now() < smallWarnGraceRef.current) return;
-      smallWarnKeyRef.current = key;
+      if (graceKey === smallWarnKeyRef.current && Date.now() < smallWarnGraceRef.current) return;
+      smallWarnKeyRef.current = graceKey;
       smallWarnOpenRef.current = true;
-      setSmallWarn({ text });
+      const count = smallWarningLedgerRef.current.count(violationType);
+      const hist = smallWarnHistoryRef.current.get(violationType) || [];
+      const nextHist = [...hist, { number: count, reason: text }];
+      smallWarnHistoryRef.current.set(violationType, nextHist);
+      setSmallWarn({ text, count, history: nextHist });
       // Suiiste'molga qarshi: talaba bosmasa ham o'zi yopiladi (nazorat davom etsin).
       smallWarnAutoCloseRef.current = window.setTimeout(dismissSmallWarn, SMALL_WARN_AUTOCLOSE_MS);
     },
@@ -953,6 +973,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
    */
   const smallWarningLedgerRef = useRef(new SmallWarningLedger());
 
+  /** Rasmiy ogohlantirish berilgach — shu tur bo'yicha kichik-modal tarixi ham tozalanadi. */
+  const formalIssuedAndClearHistory = (violationType: string) => {
+    smallWarningLedgerRef.current.formalIssued(violationType);
+    smallWarnHistoryRef.current.delete(violationType);
+  };
+
   /**
    * Kichik ogohlantirish epizodini qayd etadi. Limit to'lgan bo'lsa — darhol rasmiy.
    * @returns shu tur bo'yicha nechanchi kichik ogohlantirish (chip yorlig'ida ko'rsatiladi)
@@ -960,7 +986,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const noteSmallWarningRef = useRef((violationType: string): number => {
     const ledger = smallWarningLedgerRef.current;
     if (ledger.noteActive(violationType)) {
-      ledger.formalIssued(violationType);
+      formalIssuedAndClearHistory(violationType);
       void logViolationRef.current(violationType);
       return 0;
     }
@@ -1517,26 +1543,26 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (speechSmall) {
         const label = withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY);
         setAudioLiveLabel(label);
-        showSmallWarnRef.current('a:speech', label);
+        showSmallWarnRef.current('a:speech', SPEECH_LEDGER_KEY, label);
       } else if (ambientSmall) {
         const label = withSmallCount(
           EXAM_L[langRef.current].liveAmbientNoise,
           'SUSPICIOUS_AUDIO',
         );
         setAudioLiveLabel(label);
-        showSmallWarnRef.current('a:ambient', label);
+        showSmallWarnRef.current('a:ambient', 'SUSPICIOUS_AUDIO', label);
       } else {
         setAudioLiveLabel(null);
       }
 
       if (ambientMs >= LIVE_SIGNAL_ESCALATE_MS) {
         ambientContinuousRef.current!.reset();
-        smallWarningLedgerRef.current.formalIssued('SUSPICIOUS_AUDIO');
+        formalIssuedAndClearHistory('SUSPICIOUS_AUDIO');
         void logViolationRef.current('SUSPICIOUS_AUDIO');
       }
       if (speechMs >= TALK_SIGNAL_ESCALATE_MS) {
         speechContinuousRef.current!.reset();
-        smallWarningLedgerRef.current.formalIssued(SPEECH_LEDGER_KEY);
+        formalIssuedAndClearHistory(SPEECH_LEDGER_KEY);
         // Talabaning o'z og'zi ham qimirlayotgan bo'lsa — o'zi gapiryapti; aks holda
         // atrofda/orqada boshqa odam gapirishi shubhasi.
         void logViolationRef.current(
@@ -1565,7 +1591,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const ms = micDownContinuousRef.current!.push(micDown);
       if (ms >= LIVE_SIGNAL_ESCALATE_MS) {
         micDownContinuousRef.current!.reset();
-        smallWarningLedgerRef.current.formalIssued('CAMERA_MIC_ACCESS_FAILED');
+        formalIssuedAndClearHistory('CAMERA_MIC_ACCESS_FAILED');
         void logViolationRef.current('CAMERA_MIC_ACCESS_FAILED');
       } else if (ms >= LIVE_SIGNAL_CONFIRM_MS) {
         noteSmallWarningRef.current('CAMERA_MIC_ACCESS_FAILED');
@@ -1604,7 +1630,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         const ms = gate.push(type, activeState, now);
         if (ms >= LIVE_SIGNAL_ESCALATE_MS) {
           gate.reset(type);
-          smallWarningLedgerRef.current.formalIssued(type);
+          formalIssuedAndClearHistory(type);
           void logViolationRef.current(type);
           return;
         }
@@ -1627,7 +1653,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (bestType) {
         const label = withSmallCount(EXAM_L[langRef.current][LABEL[bestType]], bestType);
         setEventLiveLabel(label);
-        showSmallWarnRef.current(`e:${bestType}`, label);
+        showSmallWarnRef.current(`e:${bestType}`, bestType, label);
       } else {
         setEventLiveLabel(null);
       }
@@ -1854,7 +1880,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     disabled: banned,
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
-      smallWarningLedgerRef.current.formalIssued(type);
+      formalIssuedAndClearHistory(type);
       void logViolationRef.current(type);
     },
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
@@ -1895,10 +1921,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // ikki yo'l bilan keladi: (a) signal uzluksiz eskalatsiya muddatiga yetsa
       // (realtimeProctor.ts), (b) shu tur bo'yicha kichik ogohlantirishlar 3 tadan
       // oshsa (SmallWarningLedger).
-      const label = withSmallCount(msg, liveSignalViolationType(type));
+      const violationType = liveSignalViolationType(type);
+      const label = withSmallCount(msg, violationType);
       setLiveSignalLabel(label);
       // Chip ustiga — talaba tasdiqlashi uchun kichik modal.
-      showSmallWarnRef.current(`v:${type}`, label);
+      showSmallWarnRef.current(`v:${type}`, violationType, label);
     },
   });
 
@@ -2588,6 +2615,79 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     )}{warningMsgModal}</>;
   }
 
+  // --- Kichik ogohlantirish (3 tadan) — RASMIY modal bilan bir xil dizayn va
+  // bloklovchi xulq: talaba "Tushundim" bosmaguncha orqada imtihonni davom
+  // ettira olmaydi (early return — pastdagi savol/kamera UI umuman render
+  // bo'lmaydi, xuddi rasmiy ogohlantirish/ban kabi). ---
+  if (smallWarn && !violationWarning && !banned && !hardBlocked) {
+    const warnTitle = t.violationWarningTitle.replace('{n}', String(smallWarn.count));
+    const remaining = Math.max(0, SMALL_WARNINGS_BEFORE_FORMAL - smallWarn.count);
+    const bannerText = t.smallWarnRemainingBanner.replace('{n}', String(remaining));
+
+    return <>{createPortal(
+      <div
+        className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/60 overflow-y-auto overscroll-y-contain px-4 py-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="small-warn-title"
+      >
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96, y: 16 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+          className="w-full max-w-lg max-h-[min(90dvh,calc(100dvh-2rem))] flex flex-col min-h-0 rounded-lg sm:rounded-xl border-2 border-orange-400 bg-orange-50 shadow-2xl"
+        >
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain p-5 sm:p-7">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center mx-auto mb-4 sm:mb-5 bg-orange-100">
+              <svg className="w-7 h-7 sm:w-9 sm:h-9 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
+                  d="M12 9v3m0 3h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+              </svg>
+            </div>
+
+            <h2 id="small-warn-title" className="text-lg sm:text-xl font-bold text-center mb-2 leading-snug text-orange-700">
+              {warnTitle}
+            </h2>
+
+            <div className="rounded-lg px-3 py-2.5 mb-4 text-center text-sm font-semibold leading-snug bg-orange-100 text-orange-900 border border-orange-300">
+              ⚠ {bannerText}
+            </div>
+
+            <div className="bg-white rounded-xl sm:rounded-lg px-4 py-3 sm:px-5 sm:py-4 mb-4 text-center border border-gray-200">
+              <p className="text-[10px] sm:text-xs text-gray-500 mb-1 uppercase tracking-wide font-medium">{t.violationReasonLabel}</p>
+              <p className="text-sm sm:text-base font-semibold text-gray-800 break-words">{smallWarn.text}</p>
+            </div>
+
+            <div className="mb-4">
+              <WarningStepRow
+                warningCount={smallWarn.count}
+                maxWarnings={SMALL_WARNINGS_BEFORE_FORMAL}
+                banReached={false}
+                finalLabel={t.violationStepFormal}
+                t={t}
+              />
+            </div>
+
+            <ViolationHistoryList history={smallWarn.history} label={t.banWarningHistoryLabel} />
+
+            <p className="text-[11px] sm:text-xs text-gray-500 text-center mb-4 sm:mb-5 leading-relaxed">{t.violationFooterHonest}</p>
+          </div>
+
+          <div className="shrink-0 border-t border-black/5 p-4 sm:p-5 pt-3 sm:pt-4 bg-white rounded-b-2xl sm:rounded-b-3xl">
+            <button
+              type="button"
+              onClick={dismissSmallWarn}
+              className="w-full py-3 sm:py-3.5 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base transition-all active:scale-[0.98] text-white bg-orange-500 hover:bg-orange-600"
+            >
+              {t.violationContinueExam}
+            </button>
+          </div>
+        </motion.div>
+      </div>,
+      document.body,
+    )}</>;
+  }
+
   // --- Yuz holati overlay konfiguratsiyasi ---
   const FACE_STATUS_CFG: Record<FaceStatusLive, { label: string; border: string; bg: string; text: string; icon: string }> = {
     OK:             { label: EXAM_L[lang].faceOk,       border: 'border-green-400',  bg: 'bg-green-500/90',  text: 'text-white', icon: '✓' },
@@ -3081,49 +3181,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         </div>
       </div>
       <Calculator />
-
-      {/* Kichik ogohlantirish modali — chip ustida, talaba tasdiqlashi uchun.
-          Rasmiy/ban modallari ustunroq (ular ochiq bo'lsa buni ko'rsatmaymiz). */}
-      {smallWarn && !violationWarning && !banned && !hardBlocked && createPortal(
-        <div
-          className="fixed inset-0 z-[10035] flex items-center justify-center px-4 pointer-events-none"
-          role="alertdialog"
-          aria-modal="false"
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            className="pointer-events-auto w-full max-w-sm rounded-xl border border-amber-300 bg-amber-50 shadow-2xl p-4"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 shrink-0 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div className="min-w-0">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700">
-                  {t.smallWarnTitle}
-                </p>
-                <p className="text-sm font-semibold text-amber-900 mt-0.5 break-words">
-                  {smallWarn.text}
-                </p>
-                <p className="text-[12px] text-amber-800/80 mt-1 leading-snug">{t.smallWarnHint}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={dismissSmallWarn}
-              className="mt-3 w-full rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold py-2 transition-colors"
-            >
-              {t.violationContinueExam}
-            </button>
-          </motion.div>
-        </div>,
-        document.body,
-      )}
 
       {/* Yakunlashni tasdiqlash — javobsiz savollar sonini ko'rsatadi */}
       {submitConfirm && createPortal(
