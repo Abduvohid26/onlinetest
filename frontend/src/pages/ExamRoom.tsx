@@ -119,6 +119,17 @@ const IDENTITY_CHECK_MS = 90_000;
  *  "Kichik ogohlantirish" bosqichi YO'Q — talaba boshqa tabda uni ko'ra olmaydi. */
 const TAB_AWAY_VIOLATION_MS = 1200;
 
+/** Kichik ogohlantirish modali yopilgach — o'sha signal shuncha vaqt qayta ochmaydi. */
+const SMALL_WARN_GRACE_MS = 3000;
+/** Talaba "Tushundim" bosmasa ham modal shuncha vaqtdan keyin o'zi yopiladi.
+ *  Bu MAJBURIY xavfsizlik chegarasi: aks holda talaba modalni ochiq qoldirib,
+ *  nazorat muzlab turganda bemalol ko'chirishi mumkin bo'lardi. */
+const SMALL_WARN_AUTOCLOSE_MS = 6000;
+/** Rasmiy ogohlantirish modali ham cheksiz ochiq qolmasin — 10s da avto-yopiladi.
+ *  Modal ochiqligida nazorat muzlaydi (warningModalShowingRef), shu sabab talaba
+ *  uni ochiq qoldirib ko'chira olmasligi uchun majburiy chegara. */
+const FORMAL_WARN_AUTOCLOSE_MS = 10000;
+
 /**
  * Audio "gapirish" uchun kichik-ogohlantirish hisobi kaliti. Rasmiy tur talabaning
  * o'z og'zi qimirlayotganiga qarab o'zgaradi (MOUTH_MOVEMENT_TALKING / WHISPER...),
@@ -420,6 +431,62 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Event/tab-manba qoidabuzarliklari (print-screen, clipboard, devtools, tab) uchun
    *  kichik yorliq — video/audio dan alohida qatorda. */
   const [eventLiveLabel, setEventLiveLabel] = useState<string | null>(null);
+
+  // --- Kichik ogohlantirish MODALI ---
+  // Chip (jonli holat) o'z holicha qoladi; ustiga talaba tasdiqlashi uchun kichik
+  // modal chiqadi. Modal OCHIQ turganda nazorat "muzlaydi": o'sha vaqtda qilingan
+  // qoidabuzarliklar hisoblanmaydi (strike/sanoq/rasmiy — hech biri). Talaba
+  // "Tushundim" bossa yoki SMALL_WARN_AUTOCLOSE_MS o'tsa — davom etadi.
+  const [smallWarn, setSmallWarn] = useState<{ text: string } | null>(null);
+  /** Nazorat muzlaganmi (modal ochiqmi) — loop/callbacklar bir zumda o'qishi uchun ref. */
+  const smallWarnOpenRef = useRef(false);
+  /** Oxirgi ko'rsatilgan signal kaliti — o'sha signal grace ichida qayta ochmasin. */
+  const smallWarnKeyRef = useRef<string | null>(null);
+  const smallWarnGraceRef = useRef(0);
+  const smallWarnAutoCloseRef = useRef<number | null>(null);
+
+  const dismissSmallWarn = useCallback(() => {
+    if (smallWarnAutoCloseRef.current !== null) {
+      clearTimeout(smallWarnAutoCloseRef.current);
+      smallWarnAutoCloseRef.current = null;
+    }
+    smallWarnOpenRef.current = false;
+    smallWarnGraceRef.current = Date.now() + SMALL_WARN_GRACE_MS;
+    // Muzlatilgan vaqtda to'plangan davomiylik dismissdan keyin darrov rasmiyga
+    // aylanmasligi uchun audio trackerlarni yangidan boshlaymiz (video engine va
+    // event gate grace-oynasi bilan o'zi tiklanadi).
+    speechContinuousRef.current?.reset();
+    ambientContinuousRef.current?.reset();
+    micDownContinuousRef.current?.reset();
+    setSmallWarn(null);
+  }, []);
+
+  /** Kichik ogohlantirish modalini ochadi (bitta modal + grace bilan spam oldini oladi). */
+  const showSmallWarn = useCallback(
+    (key: string, text: string) => {
+      if (smallWarnOpenRef.current) return; // bitta modal — biri ochiq bo'lsa yangisi kutadi
+      if (key === smallWarnKeyRef.current && Date.now() < smallWarnGraceRef.current) return;
+      smallWarnKeyRef.current = key;
+      smallWarnOpenRef.current = true;
+      setSmallWarn({ text });
+      // Suiiste'molga qarshi: talaba bosmasa ham o'zi yopiladi (nazorat davom etsin).
+      smallWarnAutoCloseRef.current = window.setTimeout(dismissSmallWarn, SMALL_WARN_AUTOCLOSE_MS);
+    },
+    [dismissSmallWarn],
+  );
+  /** Loop/callbacklar eng yangi funksiyani ishlatishi uchun ref. */
+  const showSmallWarnRef = useRef(showSmallWarn);
+  showSmallWarnRef.current = showSmallWarn;
+
+  // Rasmiy ogohlantirish yoki ban chiqsa — kichik modalni yopamiz (ular ustunroq
+  // va o'zi bloklaydi; kichik modal ostida qolib ketmasin, muzlash ham tugasin).
+  useEffect(() => {
+    if ((violationWarning || banned) && smallWarnOpenRef.current) dismissSmallWarn();
+  }, [violationWarning, banned, dismissSmallWarn]);
+  // Unmount'da avto-yopilish taymerini tozalash.
+  useEffect(() => () => {
+    if (smallWarnAutoCloseRef.current !== null) clearTimeout(smallWarnAutoCloseRef.current);
+  }, []);
   /** Barcha event/tab-manba qoidabuzarliklarini yagona 1.5s→4s qonuni bilan boshqaradi. */
   const eventGateRef = useRef<ViolationGate | null>(null);
   const [identityStatus, setIdentityStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
@@ -980,6 +1047,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     void requestExamFullscreen();
   }, [recoverCameraPreview]);
 
+  // Rasmiy ogohlantirish modali ochilsa — 10s da avto-yopiladi (talaba bosmasa ham).
+  // Aks holda modal ochiq turganda nazorat muzlab, talaba bemalol ko'chirishi mumkin.
+  useEffect(() => {
+    if (!violationWarning || banned || hardBlocked) return;
+    const id = window.setTimeout(() => resumeAfterViolationAck(), FORMAL_WARN_AUTOCLOSE_MS);
+    return () => clearTimeout(id);
+  }, [violationWarning, banned, hardBlocked, resumeAfterViolationAck]);
+
   const continueAfterUnblock = useCallback(() => {
     setUnblockReady(false);
     setBanned(false);
@@ -1372,6 +1447,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(300);
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
+      // Modal ochiq — nazorat muzlagan: audio hisobini butunlay to'xtatamiz.
+      if (smallWarnOpenRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
       const now = Date.now();
 
@@ -1438,13 +1515,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       else smallWarningLedgerRef.current.noteCleared('SUSPICIOUS_AUDIO');
 
       if (speechSmall) {
-        setAudioLiveLabel(
-          withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY),
-        );
+        const label = withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY);
+        setAudioLiveLabel(label);
+        showSmallWarnRef.current('a:speech', label);
       } else if (ambientSmall) {
-        setAudioLiveLabel(
-          withSmallCount(EXAM_L[langRef.current].liveAmbientNoise, 'SUSPICIOUS_AUDIO'),
+        const label = withSmallCount(
+          EXAM_L[langRef.current].liveAmbientNoise,
+          'SUSPICIOUS_AUDIO',
         );
+        setAudioLiveLabel(label);
+        showSmallWarnRef.current('a:ambient', label);
       } else {
         setAudioLiveLabel(null);
       }
@@ -1515,6 +1595,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     };
     const id = window.setInterval(() => {
       if (bannedRef.current || !sessionStartedRef.current) return;
+      // Modal ochiq — nazorat muzlagan: event/tab hisobini to'xtatamiz.
+      if (smallWarnOpenRef.current) return;
       const now = Date.now();
       let best: { type: string; ms: number } | null = null;
 
@@ -1542,9 +1624,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       consider('TAB_SWITCH_HARD', tabHidden);
 
       const bestType = best ? (best as { type: string }).type : null;
-      setEventLiveLabel(
-        bestType ? withSmallCount(EXAM_L[langRef.current][LABEL[bestType]], bestType) : null,
-      );
+      if (bestType) {
+        const label = withSmallCount(EXAM_L[langRef.current][LABEL[bestType]], bestType);
+        setEventLiveLabel(label);
+        showSmallWarnRef.current(`e:${bestType}`, label);
+      } else {
+        setEventLiveLabel(null);
+      }
     }, 250);
     return () => clearInterval(id);
   }, [banned, sessionStarted]);
@@ -1564,6 +1650,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
     // Server: strict VAC da faqat IDENTITY_SUBSTITUTION darhol ban; qolganlari ogohlantirish ketma-ketligi.
     const INSTANT_BAN_TYPES = new Set(['IDENTITY_SUBSTITUTION']);
+
+    // Kichik ogohlantirish modali ochiq — nazorat MUZLAGAN: talaba "Tushundim"
+    // bosguncha (yoki avto-yopilishgacha) qilingan qoidabuzarliklar yutiladi
+    // (strike/rasmiy hisoblanmaydi). Yagona istisno — yuz almashtirish (identity):
+    // bu jiddiy xavfsizlik hodisasi, muzlatib bo'lmaydi.
+    if (smallWarnOpenRef.current && !INSTANT_BAN_TYPES.has(type)) return;
 
     // Modal ochiqligida yangi violationlar (IDENTITY_SUBSTITUTION dan tashqari) bloklansn —
     // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.
@@ -1768,6 +1860,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
     onFaceStatus: setFaceStatus,
     onSmallWarningStage: (types) => {
+      // Modal ochiq — nazorat muzlagan: bu kadrda hech narsa sanamaymiz.
+      if (smallWarnOpenRef.current) return;
       // Har kadrda: hozir kichik-ogohlantirish bosqichidagi turlarni sanaymiz,
       // qolganlarini "epizod tugadi" deb yopamiz (keyingi safar yangi epizod).
       const active = new Set<string>(types.map(liveSignalViolationType));
@@ -1780,6 +1874,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // Ovoz eskalatsiyasi (audio effekt) uchun — video og'iz harakati hozir
       // faolmi (WHISPER vs MOUTH_MOVEMENT_TALKING ajratishda ishlatiladi).
       mouthActiveRef.current = type === 'TALKING';
+      // Modal ochiq — nazorat muzlagan: chip va modalni yangilamaymiz.
+      if (smallWarnOpenRef.current) return;
       if (!type) {
         setLiveSignalLabel(null);
         return;
@@ -1795,11 +1891,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         NO_FACE: EXAM_L[langRef.current].liveNoFace,
         MULTI_FACE: EXAM_L[langRef.current].liveMultiFace,
       }[type];
-      // FAQAT kamera panelidagi kichik yorliq — bloklovchi modal YO'Q. Rasmiy
-      // ogohlantirish ikki yo'l bilan keladi: (a) signal uzluksiz eskalatsiya
-      // muddatiga yetsa (realtimeProctor.ts), (b) shu tur bo'yicha kichik
-      // ogohlantirishlar 3 tadan oshsa (SmallWarningLedger).
-      setLiveSignalLabel(withSmallCount(msg, liveSignalViolationType(type)));
+      // Kamera panelidagi kichik yorliq (chip) — jonli holat. Rasmiy ogohlantirish
+      // ikki yo'l bilan keladi: (a) signal uzluksiz eskalatsiya muddatiga yetsa
+      // (realtimeProctor.ts), (b) shu tur bo'yicha kichik ogohlantirishlar 3 tadan
+      // oshsa (SmallWarningLedger).
+      const label = withSmallCount(msg, liveSignalViolationType(type));
+      setLiveSignalLabel(label);
+      // Chip ustiga — talaba tasdiqlashi uchun kichik modal.
+      showSmallWarnRef.current(`v:${type}`, label);
     },
   });
 
@@ -2977,6 +3076,49 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         </div>
       </div>
       <Calculator />
+
+      {/* Kichik ogohlantirish modali — chip ustida, talaba tasdiqlashi uchun.
+          Rasmiy/ban modallari ustunroq (ular ochiq bo'lsa buni ko'rsatmaymiz). */}
+      {smallWarn && !violationWarning && !banned && !hardBlocked && createPortal(
+        <div
+          className="fixed inset-x-0 bottom-0 z-[10035] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none"
+          role="alertdialog"
+          aria-modal="false"
+        >
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 24 }}
+            className="pointer-events-auto w-full max-w-sm rounded-xl border border-amber-300 bg-amber-50 shadow-2xl p-4"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 shrink-0 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-amber-700">
+                  {t.smallWarnTitle}
+                </p>
+                <p className="text-sm font-semibold text-amber-900 mt-0.5 break-words">
+                  {smallWarn.text}
+                </p>
+                <p className="text-[12px] text-amber-800/80 mt-1 leading-snug">{t.smallWarnHint}</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={dismissSmallWarn}
+              className="mt-3 w-full rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold py-2 transition-colors"
+            >
+              {t.violationContinueExam}
+            </button>
+          </motion.div>
+        </div>,
+        document.body,
+      )}
 
       {/* Yakunlashni tasdiqlash — javobsiz savollar sonini ko'rsatadi */}
       {submitConfirm && createPortal(

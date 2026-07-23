@@ -7,6 +7,7 @@ import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { FacePositionChecker, SmileChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
+import { InstituteLogo } from '../components/InstituteLogo';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
 
@@ -787,8 +788,22 @@ export function PreExamCheck({
         <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
-          {/* Rules card */}
-          <section className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 max-h-[min(52dvh,520px)] lg:max-h-none lg:h-full">
+          {/* Logo + qoidalar (chap ustun) */}
+          <div className="flex flex-col gap-4 min-h-0 lg:h-full">
+            <div className="shrink-0 flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white px-6 py-8 sm:py-10">
+              <InstituteLogo
+                size="xl"
+                className="!h-28 !w-28 sm:!h-36 sm:!w-36 lg:!h-40 lg:!w-40 shadow-lg ring-2 ring-indigo-100"
+              />
+              <p className="mt-4 text-center text-sm sm:text-[15px] font-semibold text-gray-900 leading-snug max-w-[280px]">
+                {t.appBrandTitle}
+              </p>
+              <p className="mt-1.5 text-center text-[12px] text-gray-500 truncate max-w-full px-2">
+                {exam.title}
+              </p>
+            </div>
+
+          <section className="flex flex-col flex-1 rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 max-h-[min(52dvh,520px)] lg:max-h-none">
             <header className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <span className="w-8 h-8 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
@@ -813,6 +828,7 @@ export function PreExamCheck({
               ))}
             </div>
           </section>
+          </div>
 
           {/* Camera + identity — scroll faqat ichki status qatorida, butun ustun emas */}
           <section className="flex flex-col gap-3 min-h-0 lg:min-h-0 lg:overflow-hidden">
