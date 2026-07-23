@@ -45,11 +45,11 @@ services:
       DATABASE_URL: postgres://onlinetest:${POSTGRES_PASSWORD:-dev-postgres-password}@db:5432/onlinetest
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-docker-dev-jwt-secret-min-24-chars}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
-      # IMENTOR_* faqat backend/.env (env_file) dan — environment da qayta yozmang:
-      # ${IMENTOR_API_KEY:-} bo'sh bo'lib .env dagi kalitni container ichida o'chiradi.
+      # OPENAI_* va IMENTOR_* faqat backend/.env (env_file) dan — environment da
+      # qayta yozmang: ${OPENAI_API_KEY:-} bo'sh bo'lib .env dagi haqiqiy kalitni
+      # container ichida o'chirib yuboradi (`environment:` `env_file:` dan ustun
+      # turadi). Aynan shu xato ilgari IMENTOR_API_KEY bilan topilgan edi —
+      # OPENAI_API_KEY ham xuddi shu sababdan bo'sh bo'lib qolgan edi.
 
   # Celery worker
   worker:
@@ -71,9 +71,7 @@ services:
       DATABASE_URL: postgres://onlinetest:${POSTGRES_PASSWORD:-dev-postgres-password}@db:5432/onlinetest
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:-docker-dev-jwt-secret-min-24-chars}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-      OPENAI_VISION_MODEL: ${OPENAI_VISION_MODEL:-gpt-4o}
+      # OPENAI_* faqat backend/.env (env_file) dan — sabab yuqoridagi `app` servisidagi izohda.
       CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
 
   # Celery beat — davriy tasklarni (proctor.sweep_stale_sessions) rejalashtiradi.
