@@ -326,6 +326,7 @@ export function StudentDashboard({
         completed_at: j.completed_at,
         exam_title: j.exam_title,
         student_name: j.student_name,
+        student_group: j.student_group,
       });
     } finally {
       setDetailLoading(false);

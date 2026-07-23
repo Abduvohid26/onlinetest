@@ -876,8 +876,12 @@ def student_exams_submit(request, pk: int):
         percentage = round((score / total) * 100) if total else 0
         from apps.api.certificate_pdf import PASS_PERCENT_THRESHOLD
 
-        summary_lang = detect_grading_language(exam, answers, student_lang=student_lang)
-        ai_summary_json = json.dumps(build_exam_ai_summary(questions, norm, summary_lang))
+        # TEZKOR shablon darhol saqlanadi — haqiqiy AI tushuntirish (OpenAI chaqiruvi,
+        # bir necha soniya) endi "Yakunlash" bosilganda emas, talaba natijani birinchi
+        # marta ochganda hisoblanadi (`_upgrade_ai_summary_if_needed`, student_results.py).
+        # Sabab: submit darhol javob berishi kerak — AI kutish talabani osilib qolgan
+        # tugma oldida ushlab turmasin.
+        ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
         se.status = "Completed"
         se.score = score
         se.answers_json = json.dumps(norm)

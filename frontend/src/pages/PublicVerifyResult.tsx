@@ -58,6 +58,7 @@ export function PublicVerifyResult() {
           completed_at?: string;
           exam_title?: string;
           student_name?: string;
+          student_group?: string;
         }>(res);
         if (!res.ok) {
           if (!cancelled) setErr(json?.error || tr.verifyResultNotFoundTitle);
@@ -80,6 +81,7 @@ export function PublicVerifyResult() {
             completed_at: json.completed_at ?? '',
             exam_title: json.exam_title ?? '',
             student_name: json.student_name ?? '',
+            student_group: json.student_group ?? '',
           });
         }
       } catch {

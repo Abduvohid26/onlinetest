@@ -124,8 +124,11 @@ def finalize_student_exam_session(
     done_at = completed_at or dj_tz.now()
     result_public_id = next_result_public_id()
     verify_secret = secrets.token_hex(32)
-    summary_lang = detect_grading_language(exam, raw_answers, raw_questions=raw_questions)
-    ai_summary_json = json.dumps(build_exam_ai_summary(questions, norm, summary_lang))
+    # Tezkor shablon — haqiqiy AI tushuntirish natija birinchi ochilganda hisoblanadi
+    # (`_upgrade_ai_summary_if_needed`, student_results.py). Bu funksiya avto-yakunlash
+    # (vaqt tugaganda) uchun ham ishlatiladi — talaba kutib turmasa ham, izchillik uchun
+    # bir xil "tezkor keyin yangilash" qoidasi.
+    ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
     se.status = "Completed"
     se.score = score
     se.answers_json = json.dumps(norm)

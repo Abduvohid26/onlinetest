@@ -99,6 +99,7 @@ def public_verify_result(request, result_id: str):
             "completed_at": completed_iso,
             "exam_title": se.exam.title,
             "student_name": se.student.name,
+            "student_group": se.student.group.name if se.student.group_id else "",
             "questions": per_q,
             "pdf_url": pdf_rel,
         }
@@ -162,6 +163,7 @@ def public_verify_certificate_pdf(request, result_id: str):
     pdf = build_certificate_pdf(
         result_id=result_id,
         student_name=se.student.name,
+        student_group=se.student.group.name if se.student.group_id else "",
         exam_title=se.exam.title,
         completed_at=completed_iso,
         score=se.score,

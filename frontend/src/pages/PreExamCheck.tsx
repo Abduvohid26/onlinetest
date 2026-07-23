@@ -788,21 +788,19 @@ export function PreExamCheck({
         <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
-          {/* Logo (chap ustun) — qoidalar faqat Boshlash modali orqali */}
+          {/* Logo (chap ustun) — qoidalar faqat Boshlash modali orqali, bu yerda
+              faqat brend/imtihon nomi, kichik "qoida" matni olib tashlandi. */}
           <div className="flex min-h-0 lg:h-full">
             <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-gray-200 bg-white px-6 py-10 sm:py-12 lg:py-16">
               <InstituteLogo
                 size="xl"
-                className="!h-32 !w-32 sm:!h-40 sm:!w-40 lg:!h-44 lg:!w-44 shadow-lg ring-2 ring-indigo-100"
+                className="!h-40 !w-40 sm:!h-52 sm:!w-52 lg:!h-56 lg:!w-56 shadow-lg ring-2 ring-indigo-100"
               />
               <p className="mt-5 text-center text-sm sm:text-base font-semibold text-gray-900 leading-snug max-w-[300px]">
                 {t.appBrandTitle}
               </p>
               <p className="mt-2 text-center text-[12px] sm:text-[13px] text-gray-500 truncate max-w-full px-2">
                 {exam.title}
-              </p>
-              <p className="mt-4 text-center text-[12px] text-gray-400 max-w-[260px] leading-relaxed">
-                {t.preExamRulesModalHint}
               </p>
             </div>
           </div>

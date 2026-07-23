@@ -500,6 +500,7 @@ def build_certificate_pdf(
     *,
     result_id: str,
     student_name: str,
+    student_group: str = "",
     exam_title: str,
     completed_at: str,
     score: int,
@@ -551,6 +552,10 @@ def build_certificate_pdf(
     fields = [
         (texts.t("result_id"),        result_id),
         (texts.t("student"),           student_name),
+    ]
+    if student_group:
+        fields.append((texts.t("group"), student_group))
+    fields += [
         (texts.t("exam"),              exam_title),
         (texts.t("completed_at"), completed_at[:19].replace("T", " ")),
         (texts.t("integrity_code"),   integrity_code),

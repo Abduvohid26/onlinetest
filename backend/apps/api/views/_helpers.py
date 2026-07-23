@@ -918,6 +918,7 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang
         "completed_at": completed_iso,
         "exam_title": exam.title,
         "student_name": se.student.name,
+        "student_group": se.student.group.name if se.student.group_id else "",
         "questions": per_q,
     }
 

@@ -34,6 +34,7 @@ export type ExamResultPayload = {
   completed_at?: string;
   exam_title?: string;
   student_name?: string;
+  student_group?: string;
 };
 
 type Props = {
@@ -119,7 +120,12 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                   <p className="text-slate-600 mt-1.5 font-semibold text-sm sm:text-base break-words">{data.exam_title}</p>
                 )}
                 {data.student_name && (
-                  <p className="text-xs sm:text-sm text-slate-500 mt-1">{t.userFullName}: <span className="font-medium text-slate-700">{data.student_name}</span></p>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-1">
+                    {t.userFullName}: <span className="font-medium text-slate-700">{data.student_name}</span>
+                    {data.student_group && (
+                      <span className="text-slate-400"> · {data.student_group}</span>
+                    )}
+                  </p>
                 )}
               </div>
             </div>

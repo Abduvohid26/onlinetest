@@ -2076,6 +2076,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           completed_at: json.completed_at,
           exam_title: exam.title,
           student_name: user.name || user.id,
+          student_group: user.group_name || '',
         };
         onFinish(payload);
       } catch (err) {
@@ -2651,6 +2652,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-[1.125rem] grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-5 min-h-[4.25rem]">
           <div className="min-w-0 sm:justify-self-start">
             <h1 className="text-base sm:text-lg font-bold tracking-tight text-gray-900 truncate leading-tight">{exam.title}</h1>
+            <p className="text-[11px] sm:text-xs text-gray-400 truncate mt-0.5">
+              {user.name}
+              {user.group_name ? ` · ${user.group_name}` : ''}
+            </p>
             {sessionStarted && (
               <div className="flex items-center gap-2 mt-1.5">
                 <div className="hidden sm:block flex-1 h-2 bg-gray-200 rounded-full overflow-hidden max-w-[220px]">

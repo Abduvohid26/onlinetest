@@ -496,8 +496,6 @@ export const translations = {
     preExamVacRulesTitle: "Intizom va VAC / proktorlik qoidalari (majburiy o‘qish)",
     preExamVacRulesIntro:
       "Quyidagi bandlarni birma-bir o‘qing. So‘ng ro‘yxat oxirigacha aylantiring va rozilik belgisini qo‘ying. Bu qoidalar imtihon davomida avtomatik nazorat (kamera, ovoz, brauzer) bilan tekshiriladi.",
-    preExamVacRulesIntroPreview:
-      "Imtihon qoidalari. To‘liq tasdiqlash «Boshlash» bosilganda modal oynada so‘raladi.",
     preExamVacRulesIntroModal:
       "Imtihonni boshlashdan oldin barcha qoidalarni diqqat bilan o‘qing. Pastga aylantiring va «O‘qib chiqdim» tugmasini bosing.",
     preExamRulesModalHint: "Qoidalarga rozilik — imtihonni boshlash uchun majburiy.",
@@ -1216,8 +1214,6 @@ export const translations = {
     preExamVacRulesTitle: "Правила дисциплины и VAC / прокторинга (обязательно прочитать)",
     preExamVacRulesIntro:
       "Прочитайте каждый пункт. Прокрутите список до конца и отметьте согласие. Во время экзамена действует автоматический контроль (камера, звук, браузер).",
-    preExamVacRulesIntroPreview:
-      "Правила экзамена. Полное подтверждение — при нажатии «Начать» в модальном окне.",
     preExamVacRulesIntroModal:
       "Перед началом внимательно прочитайте все правила. Прокрутите вниз и нажмите «Прочитал(а)».",
     preExamRulesModalHint: "Согласие с правилами обязательно для начала экзамена.",
@@ -1936,8 +1932,6 @@ export const translations = {
     preExamVacRulesTitle: "Discipline & VAC / proctoring rules (required reading)",
     preExamVacRulesIntro:
       "Read every item below, scroll the list to the end, then check the agreement box. Automated checks (camera, audio, browser) apply during the exam.",
-    preExamVacRulesIntroPreview:
-      "Exam rules. Full confirmation is requested in a modal when you click Start.",
     preExamVacRulesIntroModal:
       "Before starting, read all rules carefully. Scroll to the bottom and click «I have read it».",
     preExamRulesModalHint: "Agreeing to the rules is required to start the exam.",

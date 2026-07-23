@@ -7,6 +7,39 @@ from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.proctor_attempt_history import build_attempt_history
 
 
+def _upgrade_ai_summary_if_needed(se, request) -> None:
+    """
+    Submit paytida TEZKOR shablon (`build_fallback_ai_summary`) saqlanadi — haqiqiy
+    AI tushuntirish (`build_exam_ai_summary`) esa shu yerda, natija birinchi marta
+    SO'RALGANDA (natija sahifasi yoki PDF) hisoblanadi. Sabab: AI chaqiruvi
+    talabani "Yakunlash" tugmasi oldida kutdirmasin — imtihonni topshirish darhol
+    bo'lishi kerak, tushuntirish sifat/tezlik almashinuvi natija ko'rish tomonga
+    ko'chiriladi.
+    """
+    ai_stored = safe_json_loads(se.ai_summary_json, {})
+    if not needs_ai_summary_upgrade(ai_stored):
+        return
+    try:
+        if se.session_questions_json:
+            raw_questions = safe_json_loads(se.session_questions_json, [])
+        else:
+            raw_questions = safe_json_loads(se.exam.questions_json, [])
+        answers = norm_answers(safe_json_loads(se.answers_json, {}))
+        student_lang = resolve_student_exam_language(request, se.exam)
+        questions = prepare_questions_for_grading(
+            raw_questions, se.exam, answers, student_lang=student_lang
+        )
+        summary_lang = detect_grading_language(
+            se.exam, answers, student_lang=student_lang, raw_questions=raw_questions
+        )
+        upgraded = build_exam_ai_summary(questions, answers, summary_lang)
+        if upgraded.get("items"):
+            se.ai_summary_json = json.dumps(upgraded)
+            se.save(update_fields=["ai_summary_json"])
+    except Exception:
+        logger.warning("AI summary upgrade failed for exam_id=%s", se.exam_id, exc_info=True)
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def student_ban_appeals(request):
@@ -165,28 +198,8 @@ def student_result_details(request, exam_id: int):
         b = _result_details_bundle(se, request)
     if not b:
         return Response({"error": "Certificate not available for this attempt"}, status=404)
-    ai_stored = safe_json_loads(se.ai_summary_json, {})
-    if needs_ai_summary_upgrade(ai_stored):
-        try:
-            if se.session_questions_json:
-                raw_questions = safe_json_loads(se.session_questions_json, [])
-            else:
-                raw_questions = safe_json_loads(se.exam.questions_json, [])
-            answers = norm_answers(safe_json_loads(se.answers_json, {}))
-            student_lang = resolve_student_exam_language(request, se.exam)
-            questions = prepare_questions_for_grading(
-                raw_questions, se.exam, answers, student_lang=student_lang
-            )
-            summary_lang = detect_grading_language(
-                se.exam, answers, student_lang=student_lang, raw_questions=raw_questions
-            )
-            upgraded = build_exam_ai_summary(questions, answers, summary_lang)
-            if upgraded.get("items"):
-                se.ai_summary_json = json.dumps(upgraded)
-                se.save(update_fields=["ai_summary_json"])
-                b = _result_details_bundle(se, request) or b
-        except Exception:
-            logger.warning("AI summary upgrade failed for exam_id=%s", exam_id, exc_info=True)
+    _upgrade_ai_summary_if_needed(se, request)
+    b = _result_details_bundle(se, request) or b
     return Response(b)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
@@ -204,10 +217,13 @@ def student_certificate_pdf(request, exam_id: int):
     b = _result_details_bundle(se, request, lang=lang)
     if not b:
         return HttpResponse("Not found", status=404)
+    _upgrade_ai_summary_if_needed(se, request)
+    b = _result_details_bundle(se, request, lang=lang) or b
     rows = result_questions_to_pdf_rows(b["questions"])
     pdf = build_certificate_pdf(
         result_id=b["result_public_id"],
         student_name=b["student_name"],
+        student_group=b.get("student_group", ""),
         exam_title=b["exam_title"],
         completed_at=b["completed_at"],
         score=b["score"],
