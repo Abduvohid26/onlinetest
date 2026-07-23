@@ -111,3 +111,64 @@ soatlik va 6000+ tilli ma'lumotda o'rgatilgan modelga topshirish bo'ldi.
 **Asosiy saboq:** sintetik test yashil bo'lsa ham real ma'lumotda o'lchamaguncha
 hech narsa ma'lum emas. Sintetik test 25/25 ko'rsatgan kod real audioda 13.7%
 soxta ijobiy berardi.
+
+---
+
+# Sezgirlikni sozlash (2026-07-22, ikkinchi bosqich)
+
+Silero o'rnatilgandan keyin ovoz **haddan tashqari sezgir** bo'lib qoldi: maishiy
+shovqinga ham kichik ogohlantirish chiqaverardi.
+
+## Sabab
+
+Model o'zi aybdor emas edi — **chegara** aybdor. Kichik chip talab qilardi:
+bitta 32ms kadr ehtimolligi ≥ 0.5. Neyron tarmoq ham bitta kadrda adashishi
+mumkin, va real shovqinda bu tez-tez sodir bo'ladi.
+
+Diqqat: birinchi benchmarkda 0% soxta ijobiy chiqqan edi, chunki u klip bo'yicha
+**16 kadr** (≈0.5s) nutq talab qilardi. Ishlab chiqarish kodi esa **1 kadr**da
+signal berardi — ya'ni o'lchangan sozlama bilan ishlagan sozlama boshqa edi.
+Shuning uchun endi `verify_chain.py` bor: u to'liq ishlab chiqarish zanjirini
+aynan takrorlaydi.
+
+## Uzluksizlik talabining ta'siri (124 real shovqin klipi)
+
+| Uzluksiz talab | Soxta signal | Real ovozni aniqlash |
+|---|---:|---:|
+| 32ms (1 kadr) | 13.7% | 100% |
+| 128ms | 4.8% | 100% |
+| 256ms | 0.8% | 100% |
+| **384ms** | **0.0%** | **100%** |
+
+384ms soxta signalni butunlay yo'q qiladi va real gapirishni aniqlashga **umuman
+ta'sir qilmaydi** — har qanday haqiqiy gap 0.4s dan uzun.
+
+## To'liq zanjir: eski vs yangi
+
+`verify_chain.py` natijasi (Silero → gisterezis → min-kadr → tracker → chip/rasmiy):
+
+| Holat | ESKI chip | ESKI rasmiy | YANGI chip | YANGI rasmiy |
+|---|---:|---:|---:|---:|
+| Ovoz, normal | 100.0% | 88.8% | 100.0% | 66.2% |
+| Ovoz, uzoq | 100.0% | 88.8% | 100.0% | 65.0% |
+| Ovoz, juda jim | 100.0% | 88.8% | 100.0% | 63.7% |
+| Ovoz + shovqin | 100.0% | 86.2% | 100.0% | 48.8% |
+| **MAISHIY SHOVQIN** | **9.7%** | 0.0% | **0.0%** | **0.0%** |
+
+**Natija:** maishiy shovqindagi soxta ogohlantirish 9.7% → **0%**; real gapirishni
+aniqlash chip darajasida **100% bo'lib qoldi**; rasmiy ogohlantirish esa 5 soniyalik
+klipda 88.8% → 66.2%, ya'ni oldingi darajaning **~75%** i (66.2 / 88.8 = 74.5%).
+
+## Sozlamalar
+
+`frontend/src/lib/sileroVad.ts`:
+
+```ts
+const SPEECH_START_PROB = 0.7;   // ilgari 0.5
+const SPEECH_STOP_PROB  = 0.5;   // ilgari 0.35
+const SPEECH_MIN_FRAMES = 12;    // ilgari yo'q edi (1 kadr = 32ms)
+```
+
+Yana kamaytirish kerak bo'lsa `SPEECH_MIN_FRAMES` ni oshiring (16 = 512ms).
+Oshirish kerak bo'lsa kamaytiring, lekin **8 (256ms) dan pastda soxta signallar
+qayta paydo bo'ladi**. O'zgartirgandan keyin `verify_chain.py` ni qayta chopting.

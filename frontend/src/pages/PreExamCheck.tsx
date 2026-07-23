@@ -1,20 +1,20 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import { translations, Language, formatPreExamMediaAccessFailure } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
-import { FacePositionChecker, YawChallengeTracker, type FacePositionStatus, challengeYawMatches, challengeYawCentered } from '../lib/facePositionCheck';
+import { FacePositionChecker, SmileChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
 
 /* Sahifa ichidagi qisqa matnlar (uz/ru/en) — katta i18n fayliga tegmasdan. */
 const PRE_L: Record<Language, Record<string, string>> = {
-  uz: { stepCamera: 'Kamera', stepRules: 'Qoidalar', stepIdentity: 'Shaxs', stepLiveness: 'Jonlilik', important: 'Muhim', rulesTitle: 'Imtihon qoidalari' },
-  ru: { stepCamera: 'Камера', stepRules: 'Правила', stepIdentity: 'Личность', stepLiveness: 'Живость', important: 'Важно', rulesTitle: 'Правила экзамена' },
-  en: { stepCamera: 'Camera', stepRules: 'Rules', stepIdentity: 'Identity', stepLiveness: 'Liveness', important: 'Important', rulesTitle: 'Exam rules' },
+  uz: { stepCamera: 'Kamera', stepIdentity: 'Shaxs', stepLiveness: 'Jonlilik', important: 'Muhim', rulesTitle: 'Imtihon qoidalari' },
+  ru: { stepCamera: 'Камера', stepIdentity: 'Личность', stepLiveness: 'Живость', important: 'Важно', rulesTitle: 'Правила экзамена' },
+  en: { stepCamera: 'Camera', stepIdentity: 'Identity', stepLiveness: 'Liveness', important: 'Important', rulesTitle: 'Exam rules' },
 };
 import {
   attachDefaultMicrophone,
@@ -29,9 +29,8 @@ const PASSIVE_LIVE_THRESHOLD = 400;
 const LIVENESS_W = 80;
 const LIVENESS_H = 60;
 
-// Active liveness challenge (bosh burish) — passiv piksel-farq tekshiruvidan keyin,
-// video-replay/statik-foto spoofing'ga qarshi qo'shimcha qatlam sifatida ishlaydi.
-const CHALLENGE_CENTER_STREAK_NEEDED = 4; // markazda barqaror bo'lishi kerak bo'lgan freym soni
+// Active liveness challenge (tabassum) — passiv piksel-farq tekshiruvidan keyin.
+const SMILE_STREAK_NEEDED = 4; // tabassum barqaror bo'lishi kerak bo'lgan freym soni
 const CHALLENGE_TIMEOUT_MS = 12000;
 
 /** Kadr yoritilishi/piksel yig'indisi o'zgarishi — foydalanuvchi harakat yoki tabiiy harakat */
@@ -84,9 +83,11 @@ export function PreExamCheck({
   const needsPin = Boolean(exam?.has_pin) || Boolean(exam?.pin);
   const [cameraReady, setCameraReady] = useState(false);
   const [micReady, setMicReady] = useState(false);
-  const [agreed, setAgreed] = useState(false);
   const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [pinChecking, setPinChecking] = useState(false);
   const [error, setError] = useState('');
+  const [identityError, setIdentityError] = useState('');
   const [starting, setStarting] = useState(false);
   /** Kamera bor, mikrofon ochilmagan — qizil xato emas, ogohlantirish */
   const [mediaHint, setMediaHint] = useState('');
@@ -97,20 +98,20 @@ export function PreExamCheck({
   const [livenessChecking, setLivenessChecking] = useState(false);
   const [livenessRetryKey, setLivenessRetryKey] = useState(0);
   const [livenessFailed, setLivenessFailed] = useState(false);
-  /** Passiv piksel-farq tekshiruvi o'tdi — active challenge (bosh burish) boshlanadi. */
+  /** Passiv piksel-farq tekshiruvi o'tdi — active challenge (tabassum) boshlanadi. */
   const [passiveMotionOk, setPassiveMotionOk] = useState(false);
-  const [challengeDirection, setChallengeDirection] = useState<'left' | 'right' | null>(null);
   const [challengeStatus, setChallengeStatus] = useState<
-    'idle' | 'waiting_turn' | 'waiting_center' | 'passed' | 'failed'
+    'idle' | 'waiting_smile' | 'passed' | 'failed'
   >('idle');
   const [challengeRetryKey, setChallengeRetryKey] = useState(0);
-  const challengeCenterStreakRef = useRef(0);
+  const smileStreakRef = useRef(0);
   /** Pre-exam yuz pozitsiyasi gate (kameraga yaqin + markaz + to'g'ri qaragan). */
   const [positionStatus, setPositionStatus] = useState<FacePositionStatus>('WAITING');
   const [positionOk, setPositionOk] = useState(false);
-  /** VAC qoidalari ro'yxati oxirigacha aylantirilgani (katta ekranda ham majburiy). */
-  const [vacRulesScrolledEnd, setVacRulesScrolledEnd] = useState(false);
-  const vacRulesBoxRef = useRef<HTMLDivElement>(null);
+  /** Boshlash bosilganda ochiladigan qoidalar modali. */
+  const [showRulesModal, setShowRulesModal] = useState(false);
+  const [modalRulesScrolledEnd, setModalRulesScrolledEnd] = useState(false);
+  const modalRulesBoxRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   /** Identity snapshot (JPEG) — faqat verifyIdentity */
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -124,20 +125,16 @@ export function PreExamCheck({
     tRef.current = t;
   }, [t]);
 
-  useLayoutEffect(() => {
-    setVacRulesScrolledEnd(false);
-    setAgreed(false);
-  }, [lang]);
-
   useEffect(() => {
-    const el = vacRulesBoxRef.current;
+    if (!showRulesModal) return;
+    const el = modalRulesBoxRef.current;
     if (!el) return;
+    setModalRulesScrolledEnd(false);
     const measure = () => {
       const end =
         el.scrollHeight <= el.clientHeight + 12 ||
         el.scrollTop + el.clientHeight >= el.scrollHeight - 12;
-      // Bir marta oxirigacha o'qilgach, tepaga qaytganda ham checkbox ishlashi uchun latch.
-      if (end) setVacRulesScrolledEnd(true);
+      if (end) setModalRulesScrolledEnd(true);
     };
     measure();
     el.addEventListener('scroll', measure, { passive: true });
@@ -146,7 +143,7 @@ export function PreExamCheck({
       el.removeEventListener('scroll', measure);
       window.removeEventListener('resize', measure);
     };
-  }, [lang]);
+  }, [showRulesModal, lang]);
 
   /**
    * Kamera kadridan piksel yig'indisini hisoblaydi.
@@ -414,7 +411,7 @@ export function PreExamCheck({
     const run = async () => {
       setLivenessChecking(true);
       setLivenessFailed(false);
-      setError('');
+      setIdentityError('');
       await new Promise((r) => setTimeout(r, 450));
       for (let round = 0; round < 3; round++) {
         if (cancelled) return;
@@ -424,7 +421,7 @@ export function PreExamCheck({
             setPassiveMotionOk(true);
             setLivenessChecking(false);
             setLivenessFailed(false);
-            setError('');
+            setIdentityError('');
           }
           return;
         }
@@ -433,7 +430,7 @@ export function PreExamCheck({
       if (!cancelled) {
         setLivenessChecking(false);
         setLivenessFailed(true);
-        setError(tRef.current.preExamLivenessFail);
+        setIdentityError(tRef.current.preExamLivenessFail);
       }
     };
     void run();
@@ -443,8 +440,7 @@ export function PreExamCheck({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verified, cameraReady, passiveMotionOk, livenessRetryKey]);
 
-  /** Passiv tekshiruv o'tgandan keyin — active challenge: tasodifiy yo'nalishga
-   *  burilish so'raladi, so'ng markazga qaytish tasdiqlanadi. */
+  /** Passiv tekshiruv o'tgandan keyin — active challenge: kameraga qarab tabassum. */
   useEffect(() => {
     if (!verified || !passiveMotionOk || livenessPassed || !cameraReady) return;
     const video = videoRef.current;
@@ -452,34 +448,19 @@ export function PreExamCheck({
 
     let cancelled = false;
     let timeoutId: number | null = null;
-    const direction: 'left' | 'right' = Math.random() < 0.5 ? 'left' : 'right';
-    setChallengeDirection(direction);
-    setChallengeStatus('waiting_turn');
-    challengeCenterStreakRef.current = 0;
+    setChallengeStatus('waiting_smile');
+    smileStreakRef.current = 0;
 
-    const tracker = new YawChallengeTracker(video, (yaw) => {
+    const tracker = new SmileChallengeTracker(video, (smiling) => {
       if (cancelled) return;
-      setChallengeStatus((prev) => {
-        if (prev === 'waiting_turn') {
-          if (yaw !== null && challengeYawMatches(direction, yaw)) {
-            challengeCenterStreakRef.current = 0;
-            return 'waiting_center';
-          }
-          return prev;
+      if (smiling) {
+        smileStreakRef.current += 1;
+        if (smileStreakRef.current >= SMILE_STREAK_NEEDED) {
+          setChallengeStatus('passed');
         }
-        if (prev === 'waiting_center') {
-          if (yaw !== null && challengeYawCentered(yaw)) {
-            challengeCenterStreakRef.current += 1;
-            if (challengeCenterStreakRef.current >= CHALLENGE_CENTER_STREAK_NEEDED) {
-              return 'passed';
-            }
-          } else {
-            challengeCenterStreakRef.current = 0;
-          }
-          return prev;
-        }
-        return prev;
-      });
+      } else {
+        smileStreakRef.current = 0;
+      }
     });
 
     void tracker.init().then((ok) => {
@@ -493,8 +474,7 @@ export function PreExamCheck({
           setChallengeStatus((s) => (s === 'passed' ? s : 'failed'));
         }, CHALLENGE_TIMEOUT_MS);
       } else {
-        // Model yuklanmadi (CDN bloklangan/eski qurilma) — challenge skip,
-        // imtihon bloklanmasin (passiv tekshiruv allaqachon o'tgan).
+        // Model yuklanmadi — challenge skip, passiv tekshiruv allaqachon o'tgan.
         setChallengeStatus('passed');
       }
     });
@@ -523,6 +503,7 @@ export function PreExamCheck({
   const verifyIdentity = async () => {
     if (!videoRef.current || !canvasRef.current || !user.profile_image) return;
     setVerifying(true);
+    setIdentityError('');
     setError('');
     try {
       const video = videoRef.current;
@@ -556,7 +537,7 @@ export function PreExamCheck({
         }>(response)) || {};
       if (response.status === 503) {
         const code = data?.code || '';
-        setError(
+        setIdentityError(
           code === 'GEMINI_UNAVAILABLE' || code === 'FACE_ENGINE_UNAVAILABLE'
             ? t.identityVerifyServiceDown
             : code === 'GEMINI_MODEL_INVALID'
@@ -575,7 +556,7 @@ export function PreExamCheck({
           code === 'DEVICE_FINGERPRINT_REQUIRED' ||
           code === 'VAC_HMAC_SESSION_MISSING' ||
           code.startsWith('VAC_');
-        setError(
+        setIdentityError(
           code === 'STUDENT_ONLY'
             ? t.identityVerify403StudentOnly
             : code === 'EXAM_NOT_ASSIGNED'
@@ -587,28 +568,28 @@ export function PreExamCheck({
         return;
       }
       if (!response.ok) {
-        setError(t.identityVerifyError);
+        setIdentityError(t.identityVerifyError);
         return;
       }
       if (data.match === true) {
         setVerified(true);
-        setError('');
+        setIdentityError('');
       } else {
         const code = data?.code || '';
-        setError(
+        setIdentityError(
           code === 'FACE_NOT_DETECTED' ? t.identityVerifyFaceNotDetected : t.identityVerifyFailed,
         );
       }
     } catch {
-      setError(t.identityVerifyError);
+      setIdentityError(t.identityVerifyError);
     } finally {
       setVerifying(false);
     }
   };
 
   const handleEnter = async () => {
-    if (needsPin && !pin) {
-      setError(t.enterPin);
+    if (needsPin && !pin.trim()) {
+      setPinError(t.enterPin);
       return;
     }
     setError('');
@@ -625,6 +606,7 @@ export function PreExamCheck({
       });
       const data = await readJsonSafe<{
         error?: string;
+        code?: string;
         exam?: any;
         studentExamId?: number;
         startedAt?: string;
@@ -634,7 +616,13 @@ export function PreExamCheck({
         deviceToken?: string;
       }>(res);
       if (!res.ok || !data?.exam || data.studentExamId == null) {
-        setError(data?.error || t.preExamStartError);
+        const msg = data?.error || t.preExamStartError;
+        if (needsPin && (msg === 'Invalid PIN' || data?.code === 'INVALID_PIN')) {
+          setShowRulesModal(false);
+          setPinError(t.invalidPin);
+        } else {
+          setError(msg);
+        }
         return;
       }
       if (data.deviceToken) {
@@ -658,6 +646,60 @@ export function PreExamCheck({
     }
   };
 
+  async function openRulesModal() {
+    if (needsPin && !pin.trim()) {
+      setPinError(t.enterPin);
+      return;
+    }
+    setError('');
+    setPinError('');
+
+    if (needsPin) {
+      setPinChecking(true);
+      try {
+        const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/verify-pin`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...examAuthHeaders(token),
+          },
+          body: JSON.stringify({ pin }),
+        });
+        const data = await readJsonSafe<{ ok?: boolean; error?: string; code?: string }>(res);
+        if (!res.ok || !data?.ok) {
+          setPinError(
+            data?.code === 'INVALID_PIN' || data?.error === 'Invalid PIN'
+              ? t.invalidPin
+              : data?.error || t.preExamStartError
+          );
+          return;
+        }
+      } catch {
+        setPinError(t.preExamNetworkError);
+        return;
+      } finally {
+        setPinChecking(false);
+      }
+    }
+
+    setModalRulesScrolledEnd(false);
+    setShowRulesModal(true);
+  }
+
+  const vacRulesList = (
+    <>
+      <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntroModal}</p>
+      {t.preExamVacRulesItems.split('|||RULE|||').map((line, i) => (
+        <div key={i} className="flex gap-2.5">
+          <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 font-bold text-[11px] tabular-nums mt-0.5">
+            {i + 1}
+          </span>
+          <p className="min-w-0 flex-1">{line.trim()}</p>
+        </div>
+      ))}
+    </>
+  );
+
   const positionLabel = (
     {
       WAITING: t.preExamPositionWaiting,
@@ -671,11 +713,9 @@ export function PreExamCheck({
     } as Record<FacePositionStatus, string>
   )[positionStatus];
 
-  // Progress qadamlari (localized label + bajarilgan holati).
-  const rulesDone = vacRulesScrolledEnd && agreed;
+  // Progress qadamlari — qoidalar oxirgi "Boshlash" modali orqali tasdiqlanadi.
   const steps = [
     { label: PRE_L[lang].stepCamera, done: cameraReady },
-    { label: PRE_L[lang].stepRules, done: rulesDone },
     { label: PRE_L[lang].stepIdentity, done: verified },
     { label: PRE_L[lang].stepLiveness, done: livenessPassed },
   ];
@@ -684,8 +724,6 @@ export function PreExamCheck({
   const blocked: string[] = [];
   if (!cameraReady) blocked.push(t.preExamBlockedCamera);
   if (!micReady) blocked.push(t.preExamBlockedMic);
-  if (!vacRulesScrolledEnd) blocked.push(t.preExamBlockedRules);
-  if (!agreed) blocked.push(t.preExamBlockedAgree);
   if (needsPin && !pin) blocked.push(t.preExamBlockedPin);
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
@@ -739,16 +777,16 @@ export function PreExamCheck({
         </div>
 
         {(error || mediaHint) && (
-          <div className="space-y-2">
-            {error && <AdminAlert type="error">{error}</AdminAlert>}
-            {mediaHint && !error && <AdminAlert type="warning">{mediaHint}</AdminAlert>}
+          <div className="shrink-0 space-y-2 max-h-[min(28dvh,140px)] overflow-y-auto overscroll-y-contain">
+            {error && <AdminAlert type="error" compact>{error}</AdminAlert>}
+            {mediaHint && !error && <AdminAlert type="warning" compact>{mediaHint}</AdminAlert>}
           </div>
         )}
 
         {/* ── Body (mobilda bitta scroll, desktopda ikki ustun) ── */}
         <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
           {/* Rules card */}
           <section className="flex flex-col rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 max-h-[min(52dvh,520px)] lg:max-h-none lg:h-full">
             <header className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
@@ -763,11 +801,10 @@ export function PreExamCheck({
               </span>
             </header>
             <div
-              ref={vacRulesBoxRef}
               data-testid="vac-rules-box"
               className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-3 text-[13px] text-gray-700 leading-relaxed space-y-3 touch-pan-y"
             >
-              <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntro}</p>
+              <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntroPreview}</p>
               {t.preExamVacRulesItems.split('|||RULE|||').map((line, i) => (
                 <div key={i} className="flex gap-2.5">
                   <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 font-bold text-[11px] tabular-nums mt-0.5">{i + 1}</span>
@@ -775,15 +812,10 @@ export function PreExamCheck({
                 </div>
               ))}
             </div>
-            {!vacRulesScrolledEnd && (
-              <p className="shrink-0 px-3 py-2 text-center text-[11px] font-medium text-gray-500 bg-gray-50 border-t border-gray-100">
-                ↓ {t.preExamVacRulesScrollHint}
-              </p>
-            )}
           </section>
 
-          {/* Camera + identity */}
-          <section className="flex flex-col gap-3 min-h-0 lg:overflow-y-auto lg:overscroll-y-contain">
+          {/* Camera + identity — scroll faqat ichki status qatorida, butun ustun emas */}
+          <section className="flex flex-col gap-3 min-h-0 lg:min-h-0 lg:overflow-hidden">
             <div className="shrink-0">
               <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">
                 <video
@@ -827,8 +859,8 @@ export function PreExamCheck({
             )}
 
             {user.profile_image ? (
-              <div className={`p-4 border rounded-xl space-y-3 transition-colors ${verified ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200 bg-white'}`}>
-                <div className="flex items-center gap-3">
+              <div className={`flex flex-col min-h-0 p-4 border rounded-xl space-y-3 transition-colors ${verified ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200 bg-white'}`}>
+                <div className="flex items-center gap-3 shrink-0">
                   <div className="relative shrink-0">
                     <img
                       src={user.profile_image}
@@ -848,8 +880,14 @@ export function PreExamCheck({
                   </div>
                 </div>
 
+                {identityError && (
+                  <AdminAlert type="error" compact>
+                    {identityError}
+                  </AdminAlert>
+                )}
+
                 {!verified && !isRetakeResolved && (
-                  <div className={`rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors ${positionOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+                  <div className={`shrink-0 rounded-lg px-3 py-2 border flex items-center gap-2 transition-colors ${positionOk ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
                     <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${positionOk ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
                     <p className={`text-[12.5px] font-medium leading-snug ${positionOk ? 'text-emerald-700' : 'text-amber-700'}`}>{positionLabel}</p>
                   </div>
@@ -861,13 +899,13 @@ export function PreExamCheck({
                   variant={verified ? 'emerald' : 'blue'}
                   size="md"
                   loading={verifying}
-                  className="w-full"
+                  className="w-full shrink-0"
                 >
                   {verified ? t.identityVerified : t.identityVerifyBtn}
                 </AdminBtn>
 
                 {(verified || livenessChecking || livenessPassed || livenessFailed || challengeStatus !== 'idle') && (
-                  <div className="text-[12.5px] text-gray-600">
+                  <div className="min-h-0 max-h-[min(22dvh,168px)] overflow-y-auto overscroll-y-contain text-[12.5px] text-gray-600 pr-0.5">
                     {verified && !passiveMotionOk && !livenessChecking && !livenessFailed && (
                       <p>{t.preExamLivenessSelfHint}</p>
                     )}
@@ -884,21 +922,17 @@ export function PreExamCheck({
                         className="w-full mt-1"
                         onClick={() => {
                           setLivenessFailed(false);
-                          setError('');
+                          setIdentityError('');
                           setLivenessRetryKey((k) => k + 1);
                         }}
                       >
                         {t.preExamLivenessRetryBtn}
                       </AdminBtn>
                     )}
-                    {(challengeStatus === 'waiting_turn' || challengeStatus === 'waiting_center') && (
+                    {challengeStatus === 'waiting_smile' && (
                       <p className="font-semibold text-indigo-700 flex items-center gap-1.5">
                         <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                        {challengeStatus === 'waiting_turn'
-                          ? challengeDirection === 'left'
-                            ? t.preExamChallengeTurnLeft
-                            : t.preExamChallengeTurnRight
-                          : t.preExamChallengeReturnCenter}
+                        {t.preExamChallengeSmile}
                       </p>
                     )}
                     {challengeStatus === 'failed' && (
@@ -908,7 +942,7 @@ export function PreExamCheck({
                         className="w-full mt-1"
                         onClick={() => {
                           setChallengeStatus('idle');
-                          setError('');
+                          setIdentityError('');
                           setChallengeRetryKey((k) => k + 1);
                         }}
                       >
@@ -945,30 +979,30 @@ export function PreExamCheck({
                   <span className="block text-[11.5px] text-gray-500 leading-tight mt-0.5">{t.preExamPinHint}</span>
                 </label>
               </div>
-              <AdminInput
-                id="exam-pin"
-                type="password"
-                inputMode="numeric"
-                value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                placeholder="••••••"
-                className="text-center text-lg tracking-[0.4em] font-semibold h-11 sm:ml-auto sm:max-w-[220px]"
-                autoComplete="off"
-              />
+              <div className="sm:ml-auto sm:max-w-[280px] w-full space-y-2">
+                <AdminInput
+                  id="exam-pin"
+                  type="password"
+                  inputMode="numeric"
+                  value={pin}
+                  onChange={(e) => {
+                    setPin(e.target.value);
+                    if (pinError) setPinError('');
+                  }}
+                  placeholder="••••••"
+                  className={`text-center text-lg tracking-[0.4em] font-semibold h-11 ${pinError ? 'border-red-300 focus:border-red-500' : ''}`}
+                  autoComplete="off"
+                />
+                {pinError && (
+                  <p className="text-[12px] font-medium text-red-600" role="alert">
+                    {pinError}
+                  </p>
+                )}
+              </div>
             </div>
           )}
 
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <label className="flex items-start gap-2.5 cursor-pointer flex-1 min-w-0">
-              <input
-                type="checkbox"
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-                disabled={!vacRulesScrolledEnd}
-                className="w-4 h-4 mt-0.5 accent-indigo-600 rounded border-gray-300 shrink-0 disabled:opacity-40"
-              />
-              <span className="font-medium text-gray-700 text-[12.5px] sm:text-[13px] leading-snug">{t.preExamAgreeAllRules}</span>
-            </label>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
             <div className="flex gap-2 w-full sm:w-auto shrink-0">
               <AdminBtn variant="ghost" size="lg" onClick={onCancel} className="flex-1 sm:flex-none">
                 {t.cancel}
@@ -976,12 +1010,16 @@ export function PreExamCheck({
               <AdminBtn
                 variant="blue"
                 size="lg"
-                onClick={() => void handleEnter()}
-                disabled={!canStart || starting}
-                loading={starting}
+                onClick={() => void openRulesModal()}
+                disabled={!canStart || starting || pinChecking}
+                loading={pinChecking || (starting && showRulesModal)}
                 className="flex-1 sm:flex-none sm:px-8"
               >
-                {starting ? t.preExamStarting : t.preExamEnterExam}
+                {pinChecking
+                  ? t.preExamPinChecking
+                  : starting && showRulesModal
+                    ? t.preExamStarting
+                    : t.preExamEnterExam}
               </AdminBtn>
             </div>
           </div>
@@ -1000,6 +1038,57 @@ export function PreExamCheck({
         </div>
         </div>
       </div>
+
+      {showRulesModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pre-exam-rules-modal-title"
+        >
+          <div className="flex w-full max-w-lg max-h-[min(88dvh,640px)] flex-col rounded-2xl border border-gray-200 bg-white shadow-xl overflow-hidden">
+            <header className="shrink-0 px-5 py-4 border-b border-gray-100">
+              <h2 id="pre-exam-rules-modal-title" className="font-display text-lg text-gray-900">
+                {t.preExamVacRulesTitle}
+              </h2>
+              <p className="mt-1 text-[12.5px] text-gray-500">{t.preExamRulesModalHint}</p>
+            </header>
+            <div
+              ref={modalRulesBoxRef}
+              data-testid="vac-rules-modal-box"
+              className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-5 py-4 text-[13px] text-gray-700 leading-relaxed space-y-3"
+            >
+              {vacRulesList}
+            </div>
+            {!modalRulesScrolledEnd && (
+              <p className="shrink-0 px-5 py-2 text-center text-[11px] font-medium text-gray-500 bg-gray-50 border-t border-gray-100">
+                ↓ {t.preExamVacRulesScrollHint}
+              </p>
+            )}
+            <div className="shrink-0 flex gap-2 border-t border-gray-100 p-4">
+              <AdminBtn
+                variant="ghost"
+                size="lg"
+                className="flex-1"
+                disabled={starting}
+                onClick={() => setShowRulesModal(false)}
+              >
+                {t.cancel}
+              </AdminBtn>
+              <AdminBtn
+                variant="blue"
+                size="lg"
+                className="flex-1"
+                disabled={!modalRulesScrolledEnd || starting}
+                loading={starting}
+                onClick={() => void handleEnter()}
+              >
+                {starting ? t.preExamStarting : t.preExamRulesModalConfirm}
+              </AdminBtn>
+            </div>
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

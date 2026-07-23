@@ -379,6 +379,26 @@ def student_debug_audio(request):
 
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
+def student_exams_verify_pin(request, pk: int):
+    """Imtihon boshlashdan oldin PIN tekshiruvi — qoidalar modali ochilishidan avval."""
+    u = request.user
+    if not _is_student_user(u):
+        return Response({"error": "Forbidden"}, status=403)
+    pin = (request.data or {}).get("pin")
+    exam = Exam.objects.filter(pk=pk).first()
+    if not exam:
+        return Response({"error": "Exam not found"}, status=404)
+    if not ExamGroup.objects.filter(exam_id=pk, group_id=u.group_id).exists():
+        return Response({"error": "Exam not assigned to your group"}, status=403)
+    if not exam.pin:
+        return Response({"ok": True, "pinRequired": False})
+    if exam.pin != pin:
+        return Response({"error": "Invalid PIN", "code": "INVALID_PIN"}, status=403)
+    return Response({"ok": True, "pinRequired": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
 def student_exams_start(request, pk: int):
     u = request.user
     if not _is_student_user(u):

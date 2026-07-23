@@ -80,6 +80,37 @@ export function challengeYawCentered(
   return Math.abs(yaw) <= maxAbs;
 }
 
+/** Og'iz kengligi / yuz kengligi — tabassumda oshadi. */
+export function computeSmileRatio(lm: any[]): number | null {
+  const faceL = lm[234];
+  const faceR = lm[454];
+  const mouthL = lm[61];
+  const mouthR = lm[291];
+  const upperLip = lm[13];
+  if (!faceL || !faceR || !mouthL || !mouthR || !upperLip) return null;
+
+  const faceWidth = faceR.x - faceL.x;
+  if (Math.abs(faceWidth) <= 1e-6) return null;
+
+  const mouthWidth = mouthR.x - mouthL.x;
+  const widthRatio = mouthWidth / faceWidth;
+
+  // Tabassumda og'iz burchaklari yuqoriga ko'tariladi (y kamayadi).
+  const cornerAvgY = (mouthL.y + mouthR.y) / 2;
+  const cornerLift = upperLip.y - cornerAvgY;
+
+  return widthRatio + cornerLift * 0.55;
+}
+
+/** Active liveness challenge — tabassum chegarasi. */
+export const SMILE_RATIO_MIN = 0.46;
+
+export function isSmiling(lm: any[], minRatio = SMILE_RATIO_MIN): boolean {
+  const ratio = computeSmileRatio(lm);
+  if (ratio === null) return false;
+  return ratio >= minRatio;
+}
+
 async function createFaceLandmarker(numFaces = 1): Promise<any | null> {
   const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
   const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
@@ -300,6 +331,99 @@ export class YawChallengeTracker {
       this.onYaw(computeYaw(faces[0]));
     } catch {
       this.onYaw(null);
+    }
+  }
+
+  stop(): void {
+    this.running = false;
+    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    if (this.timer !== null) clearTimeout(this.timer);
+    this.rafId = null;
+    this.timer = null;
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.stop();
+    try {
+      this.landmarker?.close?.();
+    } catch {
+      /* ignore */
+    }
+    this.landmarker = null;
+  }
+}
+
+export type SmileUpdate = (smiling: boolean) => void;
+
+const SMILE_DETECT_INTERVAL_MS = 120;
+
+/**
+ * Active liveness challenge — tabassum aniqlash (MediaPipe og'iz landmarklari).
+ * YawChallengeTracker o'rniga: talaba kameraga qarab jilmayganda tasdiqlanadi.
+ */
+export class SmileChallengeTracker {
+  private video: HTMLVideoElement;
+  private onSmile: SmileUpdate;
+  private landmarker: any = null;
+  private rafId: number | null = null;
+  private timer: number | null = null;
+  private running = false;
+  private disposed = false;
+
+  constructor(video: HTMLVideoElement, onSmile: SmileUpdate) {
+    this.video = video;
+    this.onSmile = onSmile;
+  }
+
+  async init(): Promise<boolean> {
+    try {
+      this.landmarker = await createFaceLandmarker();
+      if (this.disposed || !this.landmarker) {
+        this.dispose();
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  start(): void {
+    if (this.running || !this.landmarker) return;
+    this.running = true;
+    const analyse = () => {
+      if (!this.running) return;
+      this.tick();
+      schedule();
+    };
+    const schedule = () => {
+      this.timer = window.setTimeout(() => {
+        this.rafId = window.requestAnimationFrame(() => {
+          if (!this.running) return;
+          this.timer = window.setTimeout(analyse, 0);
+        });
+      }, SMILE_DETECT_INTERVAL_MS);
+    };
+    schedule();
+  }
+
+  private tick(): void {
+    const v = this.video;
+    if (!v || v.readyState < 2 || v.videoWidth === 0) {
+      this.onSmile(false);
+      return;
+    }
+    try {
+      const res = this.landmarker.detectForVideo(v, performance.now());
+      const faces = res?.faceLandmarks || [];
+      if (faces.length !== 1) {
+        this.onSmile(false);
+        return;
+      }
+      this.onSmile(isSmiling(faces[0]));
+    } catch {
+      this.onSmile(false);
     }
   }
 

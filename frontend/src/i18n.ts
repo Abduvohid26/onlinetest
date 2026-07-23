@@ -78,7 +78,8 @@ export const translations = {
     rememberLogin: "Meni eslab qolish",
     pin: "PIN kod",
     enterPin: "Imtihon PIN kodini kiriting",
-    preExamPinHint: "Ushbu kodni o'qituvchi/administrator beradi",
+    preExamPinHint: "Ushbu kodni o'qituvchi/administrator beradi. «Boshlash» bosilganda tekshiriladi.",
+    preExamPinChecking: "PIN tekshirilmoqda…",
     invalidPin: "Noto'g'ri PIN kod",
     calculator: "Kalkulyator",
     flagQuestion: "Belgilab qo'yish",
@@ -493,6 +494,12 @@ export const translations = {
     preExamVacRulesTitle: "Intizom va VAC / proktorlik qoidalari (majburiy o‘qish)",
     preExamVacRulesIntro:
       "Quyidagi bandlarni birma-bir o‘qing. So‘ng ro‘yxat oxirigacha aylantiring va rozilik belgisini qo‘ying. Bu qoidalar imtihon davomida avtomatik nazorat (kamera, ovoz, brauzer) bilan tekshiriladi.",
+    preExamVacRulesIntroPreview:
+      "Imtihon qoidalari. To‘liq tasdiqlash «Boshlash» bosilganda modal oynada so‘raladi.",
+    preExamVacRulesIntroModal:
+      "Imtihonni boshlashdan oldin barcha qoidalarni diqqat bilan o‘qing. Pastga aylantiring va «O‘qib chiqdim» tugmasini bosing.",
+    preExamRulesModalHint: "Qoidalarga rozilik — imtihonni boshlash uchun majburiy.",
+    preExamRulesModalConfirm: "O‘qib chiqdim, boshlash",
     preExamVacRulesItems:
       "Kamera va mikrofon imtihon tugaguncha yoqilgan turishi kerak (mikrofon majburiy); boshqa dastur yoki brauzer varag‘iga o‘tmang.|||RULE|||To‘liq ekran rejimi talab qilinadi; rejimdan chiqish qayd etiladi va ogohlantirish yoki blokka olib kelishi mumkin.|||RULE|||Nusxa (Ctrl+C), chaplash (Ctrl+V), ekran surati (Print Screen) va dasturchi vositalari (F12, Ctrl+Shift+I) taqiqlanadi.|||RULE|||Telefon, noutbuk, kitob, qo‘l yozuvchi va boshqa taqiqlangan buyumlar kadrda ko‘rinmasligi kerak — tizim aniqlaydi.|||RULE|||Nazaringiz asosan monitor markaziga qaralgan bo‘lsin; uzoq vaqtga boshqa tomonga qarash ogohlantirish berishi mumkin.|||RULE|||Kadrda faqat o‘zingiz bo‘ling; boshqa shaxs yoki qo‘l bilan yordam shubha deb qayd etiladi.|||RULE|||Gapirish, pichirlash yoki atrofdagi inson nutqi mikrofon va kamera orqali aniqlanadi (og‘iz harakati bilan birga yoki fon suhbat).|||RULE|||Baland tashqi shovqin (musiqa, televizor, eshik tovushi) ham qayd etiladi — jim va sokin muhit saqlang.|||RULE|||Masofaviy boshqaruv dasturlari (AnyDesk, TeamViewer, RustDesk va h.k.) taqiqlanadi.|||RULE|||Virtual / dasturiy kamera (OBS va h.k.) o‘rniga faqat jismoniy kamera tanlanishi kerak.|||RULE|||Kadrda bir nechta shaxs va ovoz bir vaqtda bo‘lsa, imtihon darhol to‘xtatilishi mumkin.|||RULE|||Ketma-ket 3 ta rasmiy ogohlantirishdan keyin yana qayd etilgan qonunbuzarlikda imtihon to‘xtatiladi (4-hodisa).|||RULE|||10 soniya ichidagi bir nechta texnik hodisa bitta rasmiy ogohlantirishga birlashtirilishi mumkin.|||RULE|||Texnik muammo bo‘lsa avval nazoratchiga xabar bering; imtihon sahifasini yopmang.",
     preExamVacRulesScrollHint: "Davom etish uchun ro‘yxatni pastga aylantiring",
@@ -513,6 +520,7 @@ export const translations = {
     preExamChallengeTurnLeft: "Boshingizni CHAPGA buring",
     preExamChallengeTurnRight: "Boshingizni O'NGGA buring",
     preExamChallengeReturnCenter: "Endi markazga qaytib, kameraga qarang",
+    preExamChallengeSmile: "Kameraga qarab tabassum qiling (jilmang)",
     preExamChallengeRetryBtn: "Qayta urinish",
     preExamPositionTitle: "Yuz pozitsiyasi",
     preExamPositionOk: "Pozitsiya to'g'ri ✓",
@@ -783,7 +791,8 @@ export const translations = {
     rememberLogin: "Запомнить меня",
     pin: "PIN-код",
     enterPin: "Введите PIN-код экзамена",
-    preExamPinHint: "Этот код выдаёт преподаватель/администратор",
+    preExamPinHint: "Этот код выдаёт преподаватель/администратор. Проверяется при нажатии «Начать».",
+    preExamPinChecking: "Проверка PIN…",
     invalidPin: "Неверный PIN-код",
     calculator: "Калькулятор",
     flagQuestion: "Отметить вопрос",
@@ -1191,6 +1200,12 @@ export const translations = {
     preExamVacRulesTitle: "Правила дисциплины и VAC / прокторинга (обязательно прочитать)",
     preExamVacRulesIntro:
       "Прочитайте каждый пункт. Прокрутите список до конца и отметьте согласие. Во время экзамена действует автоматический контроль (камера, звук, браузер).",
+    preExamVacRulesIntroPreview:
+      "Правила экзамена. Полное подтверждение — при нажатии «Начать» в модальном окне.",
+    preExamVacRulesIntroModal:
+      "Перед началом внимательно прочитайте все правила. Прокрутите вниз и нажмите «Прочитал(а)».",
+    preExamRulesModalHint: "Согласие с правилами обязательно для начала экзамена.",
+    preExamRulesModalConfirm: "Прочитал(а), начать",
     preExamVacRulesItems:
       "Камера и микрофон должны быть включены до конца экзамена (микрофон обязателен); не переключайтесь на другие программы или вкладки.|||RULE|||Требуется полноэкранный режим; выход из него фиксируется и может привести к предупреждению или блокировке.|||RULE|||Запрещены копирование (Ctrl+C), вставка (Ctrl+V), скриншот (Print Screen) и инструменты разработчика (F12, Ctrl+Shift+I).|||RULE|||Телефон, ноутбук, книга и другие запрещённые предметы не должны попадать в кадр — система их распознаёт.|||RULE|||Взгляд должен быть в основном на центр монитора; долгий взгляд в сторону может дать предупреждение.|||RULE|||В кадре должны быть только вы; другой человек или помощь руками фиксируется как нарушение.|||RULE|||Речь, шёпот и голос других людей определяются по микрофону и камере (движение губ или фоновый разговор).|||RULE|||Громкий внешний шум (музыка, телевизор, дверь) тоже фиксируется — сохраняйте тишину.|||RULE|||Запрещены программы удалённого доступа (AnyDesk, TeamViewer, RustDesk и т.п.).|||RULE|||Вместо виртуальной камеры (OBS и т.п.) нужна физическая камера.|||RULE|||Несколько лиц в кадре и голос одновременно могут немедленно остановить экзамен.|||RULE|||После трёх официальных предупреждений следующее нарушение останавливает экзамен (4-й эпизод).|||RULE|||Несколько событий за 10 секунд могут объединиться в одно предупреждение.|||RULE|||При технической проблеме сначала сообщите наблюдателю; не закрывайте страницу экзамена.",
     preExamVacRulesScrollHint: "Прокрутите список вниз, чтобы продолжить",
@@ -1211,6 +1226,7 @@ export const translations = {
     preExamChallengeTurnLeft: "Поверните голову ВЛЕВО",
     preExamChallengeTurnRight: "Поверните голову ВПРАВО",
     preExamChallengeReturnCenter: "Теперь вернитесь в центр и смотрите в камеру",
+    preExamChallengeSmile: "Посмотрите в камеру и улыбнитесь",
     preExamChallengeRetryBtn: "Попробовать снова",
     preExamPositionTitle: "Положение лица",
     preExamPositionOk: "Положение верное ✓",
@@ -1481,7 +1497,8 @@ export const translations = {
     rememberLogin: "Remember me",
     pin: "PIN Code",
     enterPin: "Enter Exam PIN",
-    preExamPinHint: "Your teacher/administrator provides this code",
+    preExamPinHint: "Your teacher/administrator provides this code. Verified when you click Start.",
+    preExamPinChecking: "Checking PIN…",
     invalidPin: "Invalid PIN",
     calculator: "Calculator",
     flagQuestion: "Flag Question",
@@ -1889,6 +1906,12 @@ export const translations = {
     preExamVacRulesTitle: "Discipline & VAC / proctoring rules (required reading)",
     preExamVacRulesIntro:
       "Read every item below, scroll the list to the end, then check the agreement box. Automated checks (camera, audio, browser) apply during the exam.",
+    preExamVacRulesIntroPreview:
+      "Exam rules. Full confirmation is requested in a modal when you click Start.",
+    preExamVacRulesIntroModal:
+      "Before starting, read all rules carefully. Scroll to the bottom and click «I have read it».",
+    preExamRulesModalHint: "Agreeing to the rules is required to start the exam.",
+    preExamRulesModalConfirm: "I have read it, start",
     preExamVacRulesItems:
       "Keep camera and microphone on until you finish (microphone required); do not switch to other apps or browser tabs.|||RULE|||Fullscreen is required; leaving fullscreen is logged and may lead to warnings or a block.|||RULE|||Copy (Ctrl+C), paste (Ctrl+V), Print Screen, and developer tools (F12, Ctrl+Shift+I) are not allowed.|||RULE|||Phones, laptops, books, and similar items must not appear in frame — the system can detect them.|||RULE|||Keep your gaze mainly toward the centre of the screen; prolonged looking away may trigger a warning.|||RULE|||Only you should be visible; another person or hands helping you is treated as a violation.|||RULE|||Speaking, whispering, and other people's voices are detected via microphone and camera (mouth movement or background speech).|||RULE|||Loud ambient noise (music, TV, doors) is also logged — keep a quiet environment.|||RULE|||Remote-control software (AnyDesk, TeamViewer, RustDesk, etc.) is not allowed.|||RULE|||Use a physical webcam, not a virtual/OBS camera.|||RULE|||Multiple faces plus voice at the same time may stop the exam immediately.|||RULE|||After three official warnings, another logged violation ends the exam (4th episode).|||RULE|||Several events within 10 seconds may merge into one official warning.|||RULE|||If you have a technical issue, contact the invigilator first; do not close the exam page.",
     preExamVacRulesScrollHint: "Scroll the list to the bottom to continue",
@@ -1909,6 +1932,7 @@ export const translations = {
     preExamChallengeTurnLeft: "Turn your head LEFT",
     preExamChallengeTurnRight: "Turn your head RIGHT",
     preExamChallengeReturnCenter: "Now return to center and look at the camera",
+    preExamChallengeSmile: "Look at the camera and smile",
     preExamChallengeRetryBtn: "Try again",
     preExamPositionTitle: "Face position",
     preExamPositionOk: "Position correct ✓",
