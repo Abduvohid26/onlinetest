@@ -8,6 +8,7 @@ import { ImtixonTab } from './ImtixonTab';
 import { AdminExamsTab } from './AdminExamsTab';
 import { OverviewPage } from './admin/OverviewPage';
 import { LevelsPage } from './admin/LevelsPage';
+import { DirectionsPage } from './admin/DirectionsPage';
 import { GroupsPage } from './admin/GroupsPage';
 import { StudentsPage } from './admin/StudentsPage';
 import { BannedPage } from './admin/BannedPage';
@@ -19,6 +20,7 @@ import type { Level, Group } from './admin/types';
 type AdminPage =
   | 'overview'
   | 'levels'
+  | 'directions'
   | 'groups'
   | 'students'
   | 'banned'
@@ -84,6 +86,7 @@ const IC = {
 const PAGE_PATHS: Record<AdminPage, string> = {
   overview:     '/admin',
   levels:       '/admin/levels',
+  directions:   '/admin/directions',
   groups:       '/admin/groups',
   students:     '/admin/students',
   banned:       '/admin/banned',
@@ -164,6 +167,7 @@ export function AdminDashboard({
       label: t.sidebarStudentsSection,
       items: [
         { id: 'levels', label: t.sidebarLevelsSub },
+        { id: 'directions', label: t.kontingentDirections },
         { id: 'groups', label: t.sidebarGroupsSub },
         { id: 'students', label: t.sidebarStudentsSub },
         { id: 'banned', label: t.sidebarBannedSub, color: 'red' },
@@ -327,6 +331,9 @@ export function AdminDashboard({
                 navigateTo('groups');
               }}
             />
+          )}
+          {page === 'directions' && (
+            <DirectionsPage token={token} lang={lang} />
           )}
           {page === 'groups' && (
             <GroupsPage

@@ -7,7 +7,7 @@ import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
   AdminEmpty, AdminPageMessage, ChevronRight, PlusIcon,
 } from './ui';
-import type { Level, Group } from './types';
+import type { Level, Direction, Group } from './types';
 
 interface Props {
   token: string;
@@ -21,9 +21,12 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
   const h = { Authorization: `Bearer ${token}` };
 
   const [levels, setLevels] = useState<Level[]>([]);
+  const [directions, setDirections] = useState<Direction[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [filterLevelId, setFilterLevelId] = useState<string>(initialLevelId ? String(initialLevelId) : '');
+  const [filterDirectionId, setFilterDirectionId] = useState<string>('');
   const [newGroupName, setNewGroupName] = useState('');
+  const [newDirectionId, setNewDirectionId] = useState('');
   const [newTrack, setNewTrack] = useState('bachelor');
   const [newYear, setNewYear] = useState('');
   const [saving, setSaving] = useState(false);
@@ -41,14 +44,17 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
-    const [rL, rG] = await Promise.all([
+    const [rL, rD, rG] = await Promise.all([
       fetch(apiUrl('/api/admin/levels'), { headers: h }),
+      fetch(apiUrl('/api/admin/directions'), { headers: h }),
       fetch(apiUrl('/api/admin/groups'), { headers: h }),
     ]);
-    if (!checkAdminAuthResponse(rL) || !checkAdminAuthResponse(rG)) return;
+    if (!checkAdminAuthResponse(rL) || !checkAdminAuthResponse(rD) || !checkAdminAuthResponse(rG)) return;
     const jL = await readJsonSafe<Level[]>(rL);
+    const jD = await readJsonSafe<Direction[]>(rD);
     const jG = await readJsonSafe<Group[]>(rG);
     setLevels(Array.isArray(jL) ? jL : []);
+    setDirections(Array.isArray(jD) ? jD : []);
     setGroups(Array.isArray(jG) ? jG : []);
   }, [token]);
 
@@ -63,6 +69,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
     const body: Record<string, unknown> = {
       name: newGroupName.trim(),
       level_id: Number(filterLevelId),
+      direction_id: newDirectionId ? Number(newDirectionId) : null,
       program_track: newTrack,
     };
     if (newYear.trim()) body.academic_year = Number(newYear);
@@ -75,6 +82,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
     if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setNewGroupName('');
+      setNewDirectionId('');
       setMsg({ type: 'success', text: t.groupAddedOk });
       reload();
     } else {
@@ -146,7 +154,11 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
   };
 
   const selectedLevel = levels.find((l) => String(l.id) === filterLevelId);
-  const filtered = filterLevelId ? groups.filter((g) => String(g.level_id) === filterLevelId) : groups;
+  const filtered = groups.filter((g) => {
+    if (filterLevelId && String(g.level_id) !== filterLevelId) return false;
+    if (filterDirectionId && String(g.direction_id ?? '') !== filterDirectionId) return false;
+    return true;
+  });
 
   return (
     <>
@@ -165,6 +177,12 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
               <AdminSelect value={filterLevelId} onChange={(e) => setFilterLevelId(e.target.value)} required>
                 <option value="">{t.allLevels}</option>
                 {levels.map((l) => <option key={l.id} value={String(l.id)}>{l.name}</option>)}
+              </AdminSelect>
+            </AdminField>
+            <AdminField label={t.directionLabel}>
+              <AdminSelect value={newDirectionId} onChange={(e) => setNewDirectionId(e.target.value)}>
+                <option value="">{t.directionNone}</option>
+                {directions.map((d) => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
               </AdminSelect>
             </AdminField>
             <AdminField label={t.groupName} required>
@@ -206,14 +224,24 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
         title={`${t.kontingentGroups}${selectedLevel ? ` — ${selectedLevel.name}` : ''}`}
         count={filtered.length}
         right={
-          <AdminSelect
-            value={filterLevelId}
-            onChange={(e) => setFilterLevelId(e.target.value)}
-            className="h-9 text-[13px] !w-[150px] shrink-0"
-          >
-            <option value="">{t.allLevels}</option>
-            {levels.map((l) => <option key={l.id} value={String(l.id)}>{l.name}</option>)}
-          </AdminSelect>
+          <div className="flex gap-2">
+            <AdminSelect
+              value={filterDirectionId}
+              onChange={(e) => setFilterDirectionId(e.target.value)}
+              className="h-9 text-[13px] !w-[150px] shrink-0"
+            >
+              <option value="">{t.kontingentDirections}</option>
+              {directions.map((d) => <option key={d.id} value={String(d.id)}>{d.name}</option>)}
+            </AdminSelect>
+            <AdminSelect
+              value={filterLevelId}
+              onChange={(e) => setFilterLevelId(e.target.value)}
+              className="h-9 text-[13px] !w-[150px] shrink-0"
+            >
+              <option value="">{t.allLevels}</option>
+              {levels.map((l) => <option key={l.id} value={String(l.id)}>{l.name}</option>)}
+            </AdminSelect>
+          </div>
         }
       >
         <div className="divide-y divide-gray-100">
@@ -259,7 +287,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
                       <div className="flex-1 min-w-[130px] min-w-0">
                         <p className="font-semibold text-gray-900 text-[14px] sm:text-[15px] truncate">{g.name}</p>
                         <p className="text-[12px] sm:text-[13px] text-gray-400 mt-0.5 truncate">
-                          {g.level_name} · {g.program_track || 'bachelor'}
+                          {g.level_name}{g.direction_name ? ` · ${g.direction_name}` : ''} · {g.program_track || 'bachelor'}
                           {g.academic_year != null ? ` · ${g.academic_year}-yil` : ''}
                           {sc > 0 && (
                             <span className="ml-2 font-medium text-indigo-600">{sc} {t.kontingentStudents}</span>

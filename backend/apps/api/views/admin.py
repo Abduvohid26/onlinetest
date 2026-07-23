@@ -570,6 +570,59 @@ def admin_level_detail(request, pk: int):
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
+def admin_directions(request):
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    if request.method == "GET":
+        return Response(list(Direction.objects.order_by("name").values()))
+    name = (request.data or {}).get("name")
+    if not name or not str(name).strip():
+        return Response({"error": "Name required"}, status=400)
+    name = str(name).strip()[:200]
+    if Direction.objects.filter(name__iexact=name).exists():
+        return Response({"error": "Bu nomdagi yo'nalish allaqachon bor"}, status=400)
+    dr = Direction.objects.create(name=name)
+    audit(request, "create_direction", "direction", dr.id, dr.name)
+    return Response({"id": dr.id, "name": dr.name})
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def admin_direction_detail(request, pk: int):
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    dr = Direction.objects.filter(pk=pk).first()
+    if not dr:
+        return Response({"error": "Yo'nalish topilmadi"}, status=404)
+    if request.method == "GET":
+        group_count = Group.objects.filter(direction_id=pk).count()
+        return Response({"id": dr.id, "name": dr.name, "group_count": group_count})
+    if request.method == "PATCH":
+        name = (request.data or {}).get("name")
+        if not name or not str(name).strip():
+            return Response({"error": "Name required"}, status=400)
+        old_name = dr.name
+        name = str(name).strip()[:200]
+        if Direction.objects.filter(name__iexact=name).exclude(pk=pk).exists():
+            return Response({"error": "Bu nomdagi yo'nalish allaqachon bor"}, status=400)
+        dr.name = name
+        dr.save()
+        audit(request, "rename_direction", "direction", dr.id, dr.name, f"{old_name!r} → {dr.name!r}")
+        return Response({"id": dr.id, "name": dr.name})
+    if request.method == "DELETE":
+        group_count = Group.objects.filter(direction_id=pk).count()
+        if group_count > 0:
+            return Response(
+                {"error": f"Bu yo'nalishda {group_count} ta guruh bor. Avval guruhlarni boshqa yo'nalishga o'tkazing yoki o'chiring."},
+                status=400,
+            )
+        audit(request, "delete_direction", "direction", dr.id, dr.name)
+        dr.delete()
+        return Response({"success": True})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
 def admin_groups(request):
     if request.user.role != "admin":
         return Response({"error": "Forbidden"}, status=403)
@@ -582,13 +635,15 @@ def admin_groups(request):
             .annotate(cnt=Count("id"))
         }
         out = []
-        for g in Group.objects.select_related("level").all():
+        for g in Group.objects.select_related("level", "direction").all():
             out.append(
                 {
                     "id": g.id,
                     "name": g.name,
                     "level_id": g.level_id,
                     "level_name": g.level.name,
+                    "direction_id": g.direction_id,
+                    "direction_name": g.direction.name if g.direction_id else None,
                     "program_track": getattr(g, "program_track", "bachelor") or "bachelor",
                     "academic_year": getattr(g, "academic_year", None),
                     "student_count": student_counts.get(g.id, 0),
@@ -599,6 +654,12 @@ def admin_groups(request):
     name, level_id = d.get("name"), d.get("level_id")
     if not name or not level_id:
         return Response({"error": "Name and level_id are required"}, status=400)
+    direction_id = d.get("direction_id")
+    if direction_id not in (None, "", "null"):
+        if not Direction.objects.filter(pk=direction_id).exists():
+            return Response({"error": "Invalid direction"}, status=400)
+    else:
+        direction_id = None
     pt = (d.get("program_track") or "bachelor").strip()[:20]
     ay = d.get("academic_year")
     ay_val = None
@@ -607,8 +668,10 @@ def admin_groups(request):
             ay_val = int(ay)
         except (TypeError, ValueError):
             ay_val = None
-    g = Group.objects.create(name=name, level_id=level_id, program_track=pt, academic_year=ay_val)
-    audit(request, "create_group", "group", g.id, g.name, f"level_id={level_id}")
+    g = Group.objects.create(
+        name=name, level_id=level_id, direction_id=direction_id, program_track=pt, academic_year=ay_val
+    )
+    audit(request, "create_group", "group", g.id, g.name, f"level_id={level_id}, direction_id={direction_id}")
     return Response({"success": True, "id": g.id})
 @api_view(["PATCH", "DELETE"])
 @permission_classes([IsAuthenticated])
@@ -637,6 +700,9 @@ def admin_group_detail(request, pk: int):
     if "level_id" in d and d["level_id"] is not None:
         if not Level.objects.filter(pk=d["level_id"]).exists():
             return Response({"error": "Invalid level"}, status=400)
+    if "direction_id" in d and d["direction_id"] not in (None, "", "null"):
+        if not Direction.objects.filter(pk=d["direction_id"]).exists():
+            return Response({"error": "Invalid direction"}, status=400)
     uf = []
     if "name" in d and "level_id" in d:
         g.name, g.level_id = d["name"], d["level_id"]
@@ -647,6 +713,9 @@ def admin_group_detail(request, pk: int):
     elif "level_id" in d:
         g.level_id = d["level_id"]
         uf.append("level_id")
+    if "direction_id" in d:
+        g.direction_id = d["direction_id"] if d["direction_id"] not in ("", "null") else None
+        uf.append("direction_id")
     if "program_track" in d:
         g.program_track = str(d["program_track"] or "bachelor").strip()[:20] or "bachelor"
         uf.append("program_track")

@@ -1,10 +1,14 @@
 export type Level = { id: number; name: string };
 
+export type Direction = { id: number; name: string };
+
 export type Group = {
   id: number;
   name: string;
   level_id: number;
   level_name: string;
+  direction_id?: number | null;
+  direction_name?: string | null;
   program_track?: string;
   academic_year?: number | null;
   student_count?: number;

@@ -200,7 +200,11 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
               <AdminField label={t.kontingentGroups}>
                 <AdminSelect value={selectedGroupForAdd} onChange={(e) => setSelectedGroupForAdd(e.target.value)}>
                   <option value="">{t.allGroups}</option>
-                  {groups.map((g) => <option key={g.id} value={String(g.id)}>{g.name} ({g.level_name})</option>)}
+                  {groups.map((g) => (
+                    <option key={g.id} value={String(g.id)}>
+                      {g.name} ({g.level_name}{g.direction_name ? ` · ${g.direction_name}` : ''})
+                    </option>
+                  ))}
                 </AdminSelect>
               </AdminField>
             </div>
@@ -276,7 +280,13 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                         </div>
                       </td>
                       <td className="px-5 py-3.5 font-mono text-[13px] text-gray-500">{u.id}</td>
-                      <td className="px-5 py-3.5 text-[14px] text-gray-600">{groups.find((g) => g.id === u.group_id)?.name || '—'}</td>
+                      <td className="px-5 py-3.5 text-[14px] text-gray-600">
+                        {(() => {
+                          const g = groups.find((gr) => gr.id === u.group_id);
+                          if (!g) return '—';
+                          return g.direction_name ? `${g.name} · ${g.direction_name}` : g.name;
+                        })()}
+                      </td>
                       <td className="px-5 py-3.5">
                         <span className={`inline-flex items-center text-[12px] px-2.5 py-0.5 rounded-full font-semibold ${u.status === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                           {u.status === 'Active' ? t.adminStatusActive : t.adminStatusBanned}
@@ -331,7 +341,11 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                   <AdminField label={t.kontingentGroups}>
                     <AdminSelect name="group_id" defaultValue={editing.group_id ?? ''}>
                       <option value="">{t.adminEditGroupEmpty}</option>
-                      {groups.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name} ({g.level_name}{g.direction_name ? ` · ${g.direction_name}` : ''})
+                        </option>
+                      ))}
                     </AdminSelect>
                   </AdminField>
                   <AdminField label={t.newPasswordOptional}>

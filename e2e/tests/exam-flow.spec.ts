@@ -124,21 +124,19 @@ test.describe('Student exam flow (end-to-end)', () => {
       await expect(page.getByText(examTitle)).toBeVisible({ timeout: 20_000 });
       await page.getByRole('button', { name: 'Imtihonni boshlash' }).click();
 
-      // ── 6) PreExamCheck: qoidalarni oxirigacha aylantirish, rozilik ──
-      await page.getByTestId('vac-rules-box').evaluate((el) => {
-        el.scrollTop = el.scrollHeight;
-      });
-      await page.locator('input[type="checkbox"]').check();
-
-      // ── 7) Identity (mock orqali darhol "match"), so'ng liveness (passiv +
-      // active challenge — ikkalasi ham MediaPipe yo'qligi tufayli avtomatik o'tadi) ──
+      // ── 6) PreExamCheck: identity (mock), so'ng liveness ──
       const verifyBtn = page.getByRole('button', { name: 'Yuzni tekshirish' });
       await expect(verifyBtn).toBeEnabled({ timeout: 20_000 });
       await verifyBtn.click();
       await expect(page.getByText('Tasdiqlandi ✓')).toBeVisible({ timeout: 10_000 });
       await expect(page.getByText('Jonlilik tasdiqlandi ✓')).toBeVisible({ timeout: 15_000 });
 
+      // ── 7) Qoidalar modali: Boshlash → scroll → O'qib chiqdim ──
       await page.getByRole('button', { name: 'Kirish', exact: true }).click();
+      await page.getByTestId('vac-rules-modal-box').evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      await page.getByRole('button', { name: "O'qib chiqdim, boshlash" }).click();
 
       // ── 8) ExamRoom lobby: real /start chaqiruvi shu yerda sodir bo'ladi ──
       await page.getByRole('button', { name: 'Imtihonni boshlash' }).click();

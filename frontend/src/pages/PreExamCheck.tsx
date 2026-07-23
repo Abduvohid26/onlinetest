@@ -13,9 +13,9 @@ import { Check } from 'lucide-react';
 
 /* Sahifa ichidagi qisqa matnlar (uz/ru/en) — katta i18n fayliga tegmasdan. */
 const PRE_L: Record<Language, Record<string, string>> = {
-  uz: { stepCamera: 'Kamera', stepIdentity: 'Shaxs', stepLiveness: 'Jonlilik', important: 'Muhim', rulesTitle: 'Imtihon qoidalari' },
-  ru: { stepCamera: 'Камера', stepIdentity: 'Личность', stepLiveness: 'Живость', important: 'Важно', rulesTitle: 'Правила экзамена' },
-  en: { stepCamera: 'Camera', stepIdentity: 'Identity', stepLiveness: 'Liveness', important: 'Important', rulesTitle: 'Exam rules' },
+  uz: { stepCamera: 'Kamera', stepIdentity: 'Shaxs', stepLiveness: 'Jonlilik' },
+  ru: { stepCamera: 'Камера', stepIdentity: 'Личность', stepLiveness: 'Живость' },
+  en: { stepCamera: 'Camera', stepIdentity: 'Identity', stepLiveness: 'Liveness' },
 };
 import {
   attachDefaultMicrophone,
@@ -788,49 +788,26 @@ export function PreExamCheck({
         <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
-          {/* Logo + qoidalar (chap ustun) */}
-          <div className="flex flex-col gap-4 min-h-0 lg:h-full">
-            <div className="shrink-0 flex flex-col items-center justify-center rounded-xl border border-gray-200 bg-white px-6 py-8 sm:py-10">
+          {/* Logo (chap ustun) — qoidalar faqat Boshlash modali orqali */}
+          <div className="flex min-h-0 lg:h-full">
+            <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-gray-200 bg-white px-6 py-10 sm:py-12 lg:py-16">
               <InstituteLogo
                 size="xl"
-                className="!h-28 !w-28 sm:!h-36 sm:!w-36 lg:!h-40 lg:!w-40 shadow-lg ring-2 ring-indigo-100"
+                className="!h-32 !w-32 sm:!h-40 sm:!w-40 lg:!h-44 lg:!w-44 shadow-lg ring-2 ring-indigo-100"
               />
-              <p className="mt-4 text-center text-sm sm:text-[15px] font-semibold text-gray-900 leading-snug max-w-[280px]">
+              <p className="mt-5 text-center text-sm sm:text-base font-semibold text-gray-900 leading-snug max-w-[300px]">
                 {t.appBrandTitle}
               </p>
-              <p className="mt-1.5 text-center text-[12px] text-gray-500 truncate max-w-full px-2">
+              <p className="mt-2 text-center text-[12px] sm:text-[13px] text-gray-500 truncate max-w-full px-2">
                 {exam.title}
               </p>
+              <p className="mt-4 text-center text-[12px] text-gray-400 max-w-[260px] leading-relaxed">
+                {t.preExamRulesModalHint}
+              </p>
             </div>
-
-          <section className="flex flex-col flex-1 rounded-xl border border-gray-200 bg-white overflow-hidden min-h-0 max-h-[min(52dvh,520px)] lg:max-h-none">
-            <header className="shrink-0 px-4 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="w-8 h-8 rounded-lg bg-gray-100 text-gray-500 flex items-center justify-center shrink-0">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                </span>
-                <h3 className="font-semibold text-[14px] text-gray-900 truncate">{PRE_L[lang].rulesTitle}</h3>
-              </div>
-              <span className="shrink-0 inline-flex items-center gap-1 text-[10.5px] font-bold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-md">
-                {PRE_L[lang].important}
-              </span>
-            </header>
-            <div
-              data-testid="vac-rules-box"
-              className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain px-4 py-3 text-[13px] text-gray-700 leading-relaxed space-y-3 touch-pan-y"
-            >
-              <p className="text-[12.5px] text-gray-500">{t.preExamVacRulesIntroPreview}</p>
-              {t.preExamVacRulesItems.split('|||RULE|||').map((line, i) => (
-                <div key={i} className="flex gap-2.5">
-                  <span className="shrink-0 flex items-center justify-center w-5 h-5 rounded-md bg-indigo-50 text-indigo-600 font-bold text-[11px] tabular-nums mt-0.5">{i + 1}</span>
-                  <p className="min-w-0 flex-1">{line.trim()}</p>
-                </div>
-              ))}
-            </div>
-          </section>
           </div>
 
-          {/* Camera + identity — scroll faqat ichki status qatorida, butun ustun emas */}
+          {/* Camera + identity */}
           <section className="flex flex-col gap-3 min-h-0 lg:min-h-0 lg:overflow-hidden">
             <div className="shrink-0">
               <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">

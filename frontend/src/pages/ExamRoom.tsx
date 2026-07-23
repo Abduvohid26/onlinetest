@@ -3081,14 +3081,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           Rasmiy/ban modallari ustunroq (ular ochiq bo'lsa buni ko'rsatmaymiz). */}
       {smallWarn && !violationWarning && !banned && !hardBlocked && createPortal(
         <div
-          className="fixed inset-x-0 bottom-0 z-[10035] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pointer-events-none"
+          className="fixed inset-0 z-[10035] flex items-center justify-center px-4 pointer-events-none"
           role="alertdialog"
           aria-modal="false"
         >
           <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 24 }}
+            initial={{ opacity: 0, scale: 0.96, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.96, y: 8 }}
             className="pointer-events-auto w-full max-w-sm rounded-xl border border-amber-300 bg-amber-50 shadow-2xl p-4"
           >
             <div className="flex items-start gap-3">

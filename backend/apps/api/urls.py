@@ -46,6 +46,8 @@ urlpatterns = [
     path("admin/audit-log", views.admin_audit_log),
     path("admin/levels", views.admin_levels),
     path("admin/levels/<int:pk>", views.admin_level_detail),
+    path("admin/directions", views.admin_directions),
+    path("admin/directions/<int:pk>", views.admin_direction_detail),
     path("admin/groups", views.admin_groups),
     path("admin/groups/<int:pk>", views.admin_group_detail),
     path("admin/test-bank/categories", views.admin_test_bank_categories),

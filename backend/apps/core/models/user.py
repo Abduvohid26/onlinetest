@@ -2,6 +2,8 @@ from django.db import models
 
 
 class Level(models.Model):
+    """Kurs/daraja (masalan "1-kurs", "2-kurs")."""
+
     name = models.CharField(max_length=200, unique=True)
 
     class Meta:
@@ -9,9 +11,27 @@ class Level(models.Model):
         db_table = "levels"
 
 
+class Direction(models.Model):
+    """Yo'nalish/fakultet (masalan "Davolash ishi", "Stomatologiya").
+
+    Kurs (Level) bilan mustaqil o'q: guruh ikkalasiga ham bog'lanadi
+    (masalan "1-kurs / Davolash ishi / 101-guruh").
+    """
+
+    name = models.CharField(max_length=200, unique=True)
+
+    class Meta:
+        app_label = "core"
+        db_table = "directions"
+
+
 class Group(models.Model):
     name = models.CharField(max_length=200)
     level = models.ForeignKey(Level, on_delete=models.CASCADE, db_column="level_id")
+    # NULL = eski guruhlar (yo'nalish qo'shilishidan oldin yaratilgan) — majburiy emas.
+    direction = models.ForeignKey(
+        Direction, null=True, blank=True, on_delete=models.SET_NULL, db_column="direction_id"
+    )
     program_track = models.CharField(max_length=20, default="bachelor")
     academic_year = models.PositiveSmallIntegerField(null=True, blank=True)
 

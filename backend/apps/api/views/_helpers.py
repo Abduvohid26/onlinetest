@@ -112,6 +112,7 @@ from apps.core.models import (
     AuditLog,
     BanAppeal,
     BanAppealEvent,
+    Direction,
     Exam,
     ExamGroup,
     ExamRetakeWindow,
