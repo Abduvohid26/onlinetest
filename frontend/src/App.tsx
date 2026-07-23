@@ -375,6 +375,29 @@ function AppContent() {
     navigate('/');
   };
 
+  // Submit darhol TEZKOR shablon bilan javob beradi (backend `build_fallback_ai_summary`
+  // — AI kutish talabani "Yakunlash" tugmasi oldida ushlab turmasin). Haqiqiy AI
+  // tushuntirish shu yerda, natija ekrani ochilgach FONDA so'raladi: talaba hech
+  // narsa bosmasdan, bir necha soniyadan keyin shablon matn haqiqiy AI izohi bilan
+  // avtomatik almashadi (backend `_upgrade_ai_summary_if_needed`, xuddi shu endpoint).
+  useEffect(() => {
+    if (!lastSubmitResult?.exam_id || !token) return;
+    let cancelled = false;
+    fetch(apiUrl(`/api/student/exams/${lastSubmitResult.exam_id}/result-details`), {
+      headers: { Authorization: `Bearer ${token}`, 'X-Student-Lang': lang },
+    })
+      .then((r) => (r.ok ? readJsonSafe<ExamResultPayload>(r) : null))
+      .then((data) => {
+        if (cancelled || !data?.result_public_id) return;
+        setLastSubmitResult((prev) => (prev ? { ...prev, ...data } : data));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastSubmitResult?.exam_id, lastSubmitResult?.result_public_id, token]);
+
   const exitExamFlow = () => {
     clearExamFlow();
     setExamStatus('pending');
