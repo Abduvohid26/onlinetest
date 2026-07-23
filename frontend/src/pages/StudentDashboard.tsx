@@ -5,6 +5,7 @@ import { translations, Language, banReasonLabel } from '../i18n';
 import { ExamResultSummary, type ExamResultPayload } from '../components/ExamResultSummary';
 import { readJsonSafe, checkStudentAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { pollExamResultAiUpgrade } from '../lib/upgradeExamResultAi';
 import { examAuthHeaders } from '../lib/deviceFingerprint';
 import { formatCountdown, formatExamDateTime, msUntil } from '../lib/datetimeLocal';
 import { AdminBtn, AdminAlert, AdminInput, AdminSelect } from './admin/ui';
@@ -308,16 +309,18 @@ export function StudentDashboard({
     setDetailLoading(true);
     try {
       const res = await fetch(apiUrl(`/api/student/exams/${examId}/result-details`), {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'X-Student-Lang': lang },
       });
       if (!res.ok) return;
       const j = await readJsonSafe<ExamResultPayload>(res);
       if (!j?.result_public_id) return;
-      setDetailPayload({
+      const base: ExamResultPayload = {
         exam_id: examId,
         result_public_id: j.result_public_id,
         verify_url: j.verify_url,
         overview: j.overview,
+        ai_summary_source: j.ai_summary_source,
+        ai_summary_pending: j.ai_summary_pending,
         questions: j.questions,
         score: j.score,
         total: j.total,
@@ -327,7 +330,16 @@ export function StudentDashboard({
         exam_title: j.exam_title,
         student_name: j.student_name,
         student_group: j.student_group,
-      });
+      };
+      setDetailPayload(base);
+      if (j.ai_summary_pending) {
+        void pollExamResultAiUpgrade(
+          examId,
+          token,
+          lang,
+          (data) => setDetailPayload((prev) => (prev ? { ...prev, ...data, exam_id: examId } : { ...data, exam_id: examId })),
+        );
+      }
     } finally {
       setDetailLoading(false);
     }

@@ -2081,6 +2081,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           result_public_id: json.result_public_id,
           verify_url: json.verify_url,
           overview: json.overview ?? '',
+          ai_summary_source: json.ai_summary_source,
+          ai_summary_pending: json.ai_summary_pending,
           questions: json.questions,
           score: json.score,
           total: json.total,

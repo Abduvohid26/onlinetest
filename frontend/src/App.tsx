@@ -14,6 +14,7 @@ import { translations, Language } from './i18n';
 import { InstituteLogo } from './components/InstituteLogo';
 import { clearDeviceSessionToken, examAuthHeaders, setDeviceSessionToken } from './lib/deviceFingerprint';
 import { apiUrl } from './lib/apiUrl';
+import { pollExamResultAiUpgrade } from './lib/upgradeExamResultAi';
 import { readJsonSafe } from './lib/http';
 
 const SUPPORTED_LANGS: Language[] = ['uz', 'ru', 'en'];
@@ -375,28 +376,21 @@ function AppContent() {
     navigate('/');
   };
 
-  // Submit darhol TEZKOR shablon bilan javob beradi (backend `build_fallback_ai_summary`
-  // — AI kutish talabani "Yakunlash" tugmasi oldida ushlab turmasin). Haqiqiy AI
-  // tushuntirish shu yerda, natija ekrani ochilgach FONDA so'raladi: talaba hech
-  // narsa bosmasdan, bir necha soniyadan keyin shablon matn haqiqiy AI izohi bilan
-  // avtomatik almashadi (backend `_upgrade_ai_summary_if_needed`, xuddi shu endpoint).
+  // Submit darhol TEZKOR shablon bilan javob beradi. Haqiqiy AI tushuntirish
+  // `/result-details` da hisoblanadi — shu yerda poll qilib UI yangilanadi.
   useEffect(() => {
     if (!lastSubmitResult?.exam_id || !token) return;
-    let cancelled = false;
-    fetch(apiUrl(`/api/student/exams/${lastSubmitResult.exam_id}/result-details`), {
-      headers: { Authorization: `Bearer ${token}`, 'X-Student-Lang': lang },
-    })
-      .then((r) => (r.ok ? readJsonSafe<ExamResultPayload>(r) : null))
-      .then((data) => {
-        if (cancelled || !data?.result_public_id) return;
-        setLastSubmitResult((prev) => (prev ? { ...prev, ...data } : data));
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastSubmitResult?.exam_id, lastSubmitResult?.result_public_id, token]);
+    if (!lastSubmitResult.ai_summary_pending) return;
+    const ac = new AbortController();
+    void pollExamResultAiUpgrade(
+      lastSubmitResult.exam_id,
+      token,
+      lang,
+      (data) => setLastSubmitResult((prev) => (prev ? { ...prev, ...data } : data)),
+      ac.signal,
+    );
+    return () => ac.abort();
+  }, [lastSubmitResult?.exam_id, lastSubmitResult?.ai_summary_pending, token, lang]);
 
   const exitExamFlow = () => {
     clearExamFlow();

@@ -953,6 +953,8 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang
         "verify_url": verify_url,
         "integrity_code": icode,
         "overview": ai.get("overview", ""),
+        "ai_summary_source": ai.get("source") or "fallback",
+        "ai_summary_pending": needs_ai_summary_upgrade(ai),
         "score": se.score,
         "total": total,
         "percentage": pct,

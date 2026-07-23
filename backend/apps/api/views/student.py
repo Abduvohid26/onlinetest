@@ -947,6 +947,8 @@ def student_exams_submit(request, pk: int):
                 "integrity_code": icode,
                 "completed_at": completed_iso,
                 "overview": ai_summary.get("overview", ""),
+                "ai_summary_source": ai_summary.get("source") or "fallback",
+                "ai_summary_pending": needs_ai_summary_upgrade(ai_summary),
                 "questions": per_q,
             }
         ),

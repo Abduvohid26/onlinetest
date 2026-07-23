@@ -35,6 +35,10 @@ export type ExamResultPayload = {
   exam_title?: string;
   student_name?: string;
   student_group?: string;
+  /** "fallback" | "ai" — backend saqlangan tahlil manbasi */
+  ai_summary_source?: string;
+  /** true bo'lsa, haqiqiy AI tahlil hali hisoblanmoqda */
+  ai_summary_pending?: boolean;
 };
 
 type Props = {
@@ -187,6 +191,25 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
           </div>
         </div>
       </motion.div>
+
+      {data.ai_summary_pending && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-4 py-3 flex items-center gap-3">
+          <span className="inline-block h-2 w-2 rounded-full bg-indigo-500 animate-pulse shrink-0" />
+          <p className="text-sm font-medium text-indigo-800">{t.resultAiAnalyzing}</p>
+        </div>
+      )}
+
+      {data.overview?.trim() && !data.ai_summary_pending && data.ai_summary_source === 'ai' && (
+        <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
+          <h2 className="text-[15px] font-bold text-slate-900 mb-2 flex items-center gap-2">
+            <span className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
+            </span>
+            {t.resultAiSummaryTitle}
+          </h2>
+          <p className="text-slate-700 leading-relaxed text-sm sm:text-[15px]">{data.overview}</p>
+        </div>
+      )}
 
       <div className="space-y-3">
         <h2 className="text-[16px] sm:text-[17px] font-bold text-slate-900 px-1">{t.resultByQuestions}</h2>
