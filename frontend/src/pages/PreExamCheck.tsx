@@ -730,6 +730,11 @@ export function PreExamCheck({
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
   const canStart = blocked.length === 0;
 
+  const studentDisplayName = (user.name || user.id || '').toString().trim();
+  const nameParts = studentDisplayName.split(/\s+/).filter(Boolean);
+  const studentFirstName = nameParts[0] || studentDisplayName;
+  const studentLastName = nameParts.slice(1).join(' ');
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -741,15 +746,35 @@ export function PreExamCheck({
       <div className="w-full max-w-6xl mx-auto px-3 sm:px-6 py-3 sm:py-4 flex flex-col gap-3 flex-1 min-h-0">
         {/* ── Sub-header: title + stepper ── */}
         <div className="shrink-0 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div className="min-w-0">
+          <div className="min-w-0 space-y-2">
             <h1 className="text-[19px] sm:text-[22px] font-bold text-gray-900 tracking-tight leading-tight">
               {t.preExamTitle}
             </h1>
-            <p className="text-[13px] text-gray-500 mt-0.5 truncate">{exam.title}</p>
-            <p className="text-[12px] text-gray-400 mt-0.5 truncate">
-              {user.name}
-              {user.group_name ? ` · ${user.group_name}` : ''}
-            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 max-w-full rounded-lg border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[12px] font-semibold text-indigo-800">
+                <svg className="h-3.5 w-3.5 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span className="truncate">{exam.title}</span>
+              </span>
+              {user.group_name && (
+                <span className="inline-flex items-center gap-1.5 max-w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-medium text-gray-600">
+                  <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <span className="truncate">{user.group_name}</span>
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 max-w-full rounded-lg border border-gray-200 bg-white px-2.5 py-1 text-[12px] font-medium text-gray-700">
+                <svg className="h-3.5 w-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                </svg>
+                <span className="truncate">
+                  <span className="font-semibold text-gray-900">{studentFirstName}</span>
+                  {studentLastName ? <span className="text-gray-500"> {studentLastName}</span> : null}
+                </span>
+              </span>
+            </div>
           </div>
           {/* Stepper */}
           <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto">
@@ -787,14 +812,13 @@ export function PreExamCheck({
           </div>
         )}
 
-        {/* ── Body (mobilda bitta scroll, desktopda ikki ustun) ── */}
-        <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
-          <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
+        {/* ── Body (mobilda scroll, desktopda ikki ustun — ortada bo'sh joy qoldirmaydi) ── */}
+        <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-y-auto overscroll-y-contain">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 items-start">
           {/* Kamera (chap ustun) — logo olib tashlandi. Shaxs/jonlik tekshiruvi
               endi ALOHIDA (o'ng) ustunda — ikkalasi ham video ostiga siqilib,
               qisqargan joy ichida qolib ketmasin (jonlik qismi ko'rinmay qolardi). */}
-          <div className="flex flex-col gap-3 min-h-0 lg:h-full">
+          <div className="flex flex-col gap-3">
             <div className="shrink-0">
               <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">
                 <video
@@ -838,8 +862,8 @@ export function PreExamCheck({
             )}
           </div>
 
-          {/* Shaxs va jonlilik tekshiruvi — o'z ustuni, to'liq balandlik. */}
-          <section className="flex flex-col gap-3 min-h-0 lg:overflow-hidden lg:h-full">
+          {/* Shaxs va jonlilik tekshiruvi — o'z ustuni. */}
+          <section className="flex flex-col gap-3">
             {user.profile_image ? (
               <div className={`flex flex-col min-h-0 p-4 border rounded-xl space-y-3 transition-colors ${verified ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200 bg-white'}`}>
                 <div className="flex items-center gap-3 shrink-0">
@@ -946,9 +970,8 @@ export function PreExamCheck({
             )}
           </section>
             </div>
-          </div>
 
-        {/* ── Footer action bar (doim ko'rinadi, scroll ustida emas) ── */}
+        {/* ── Footer action bar (kontent ostida, ortada bo'sh joy yo'q) ── */}
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
           {needsPin && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
