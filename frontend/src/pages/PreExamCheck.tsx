@@ -790,9 +790,11 @@ export function PreExamCheck({
         {/* ── Body (mobilda bitta scroll, desktopda ikki ustun) ── */}
         <div className="flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain lg:overflow-hidden">
-            <div className="w-full max-w-2xl mx-auto lg:h-full lg:min-h-0">
-          {/* Kamera + shaxs — logo olib tashlandi, kamera markazda, kenglik to'ldiradi. */}
-          <section className="flex flex-col gap-3 min-h-0 lg:min-h-0 lg:overflow-hidden lg:h-full">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-5 lg:h-full lg:min-h-0 lg:items-stretch">
+          {/* Kamera (chap ustun) — logo olib tashlandi. Shaxs/jonlik tekshiruvi
+              endi ALOHIDA (o'ng) ustunda — ikkalasi ham video ostiga siqilib,
+              qisqargan joy ichida qolib ketmasin (jonlik qismi ko'rinmay qolardi). */}
+          <div className="flex flex-col gap-3 min-h-0 lg:h-full">
             <div className="shrink-0">
               <div className="relative w-full rounded-xl overflow-hidden border border-gray-300 bg-slate-900 aspect-video">
                 <video
@@ -834,7 +836,10 @@ export function PreExamCheck({
                 {exam.custom_rules}
               </div>
             )}
+          </div>
 
+          {/* Shaxs va jonlilik tekshiruvi — o'z ustuni, to'liq balandlik. */}
+          <section className="flex flex-col gap-3 min-h-0 lg:overflow-hidden lg:h-full">
             {user.profile_image ? (
               <div className={`flex flex-col min-h-0 p-4 border rounded-xl space-y-3 transition-colors ${verified ? 'border-emerald-200 bg-emerald-50/40' : 'border-gray-200 bg-white'}`}>
                 <div className="flex items-center gap-3 shrink-0">
@@ -882,7 +887,7 @@ export function PreExamCheck({
                 </AdminBtn>
 
                 {(verified || livenessChecking || livenessPassed || livenessFailed || challengeStatus !== 'idle') && (
-                  <div className="min-h-0 max-h-[min(22dvh,168px)] overflow-y-auto overscroll-y-contain text-[12.5px] text-gray-600 pr-0.5">
+                  <div className="min-h-0 max-h-[min(40dvh,320px)] overflow-y-auto overscroll-y-contain text-[12.5px] text-gray-600 pr-0.5">
                     {verified && !passiveMotionOk && !livenessChecking && !livenessFailed && (
                       <p>{t.preExamLivenessSelfHint}</p>
                     )}
