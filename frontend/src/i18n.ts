@@ -395,8 +395,6 @@ export const translations = {
     violationRemainingBanner: "Yana {n} ta ogohlantirish qoldi",
     violationFinalBanner: "3 ta ogohlantirish! Keyingi qoidabuzarlik = qayta topshirish yoki BAN",
     violationStepBan: "BAN",
-    violationStepFormal: "RASMIY",
-    smallWarnRemainingBanner: "Yana {n} ta kichik ogohlantirish qoldi — keyingisi rasmiy bo‘ladi",
     violationProgressTitle: "Ogohlantirish bosqichlari",
     banProgressTitle: "Nima bo‘ldi?",
     banStepsExplainer:
@@ -1114,8 +1112,6 @@ export const translations = {
     violationRemainingBanner: "Осталось предупреждений: {n} — BAN ещё нет",
     violationFinalBanner: "3 предупреждения! Следующее нарушение = BAN",
     violationStepBan: "BAN",
-    violationStepFormal: "ОФИЦИАЛЬНО",
-    smallWarnRemainingBanner: "Осталось {n} мелких предупреждений — следующее станет официальным",
     violationProgressTitle: "Этапы предупреждений",
     banProgressTitle: "Что произошло",
     banStepsExplainer:
@@ -1832,8 +1828,6 @@ export const translations = {
     violationRemainingBanner: "{n} warning(s) left — not banned yet",
     violationFinalBanner: "3 warnings given! Next violation = BAN",
     violationStepBan: "BAN",
-    violationStepFormal: "FORMAL",
-    smallWarnRemainingBanner: "{n} small warning(s) left — the next one becomes formal",
     violationProgressTitle: "Warning steps",
     banProgressTitle: "What happened",
     banStepsExplainer:
