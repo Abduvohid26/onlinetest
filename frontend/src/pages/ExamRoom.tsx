@@ -752,10 +752,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const awayStartedAtRef = useRef<number | null>(null);
   /** Modal/ogohlantirish fullscreen'dan chiqarishi — buni qoidabuzarlik deb hisoblamaymiz */
   const fullscreenSuppressRef = useRef(false);
-  /** Foydalanuvchi ESC bilan ataylab chiqdi */
-  const userEscFullscreenExitRef = useRef(false);
-  /** Bitta chiqish epizodi uchun bir marta FULLSCREEN_EXIT_HARD yoziladi */
-  const fsExitLoggedRef = useRef(false);
   const needsFullscreenRef = useRef(false);
 
   // Majburiy fullscreen (kiosk): sessiya davomida doim fullscreen; chiqilsa gate.
@@ -796,8 +792,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       .then(() => {
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
-        userEscFullscreenExitRef.current = false;
-        fsExitLoggedRef.current = false;
         needsFullscreenRef.current = false;
         setNeedsFullscreen(false);
       })
@@ -819,8 +813,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (getFullscreenElement()) {
         fullscreenEnteredRef.current = true;
         fullscreenRequestedRef.current = false;
-        userEscFullscreenExitRef.current = false;
-        fsExitLoggedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
         setNeedsFullscreen(false);
@@ -836,14 +828,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         return;
       }
 
-      // Har qanday chiqish (ESC, F11, brauzer UI) — imtihonni bloklab qayta FS talab.
+      // Chiqish → faqat majburiy gate (rasmiy ogohlantirish/strike YO'Q).
+      // Aks holda "Butun ekran talab qilinadi" bilan birga "1-ogohlantirish" chiqardi.
       needsFullscreenRef.current = true;
       setNeedsFullscreen(true);
-      if (!fsExitLoggedRef.current) {
-        fsExitLoggedRef.current = true;
-        void logViolationRef.current('FULLSCREEN_EXIT_HARD');
-      }
-      userEscFullscreenExitRef.current = false;
     };
 
     onFullscreenChange();
@@ -931,7 +919,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   }, []);
 
   const [qIndex, setQIndex] = useState(0);
-  /** Oxirgi savoldagi "Yakunlash" tugmasi uchun tasdiqlash modali. */
+  /** "Yakunlash" tugmalari (oxirgi savol + o'ng panel) — tasdiqlash modali. */
   const [submitConfirm, setSubmitConfirm] = useState(false);
   const answeredCount = Object.keys(answers).length;
   const totalQuestions = examQuestions.length || Number(exam.bank_question_count) || 0;
@@ -1038,7 +1026,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     'CLIPBOARD_ATTEMPT',
     'TAB_SWITCH_HARD',
     'TAB_SWITCH_SOFT',
-    'FULLSCREEN_EXIT_HARD',
   ]);
   /**
    * "3 kichik ogohlantirish → 4-marta rasmiy" qonuni (README.md).
@@ -1243,9 +1230,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = (e.key || '').toLowerCase();
-      if (key === 'escape' && getFullscreenElement() && sessionStartedRef.current) {
-        userEscFullscreenExitRef.current = true;
-      }
       if (isPrintScreenKeyboardEvent(e)) {
         e.preventDefault();
         reportPrintScreenViolation((t) => markGateEvent(t));
@@ -3228,7 +3212,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 variant="blue"
                 size="md"
                 loading={submitting}
-                onClick={handleSubmit}
+                onClick={() => setSubmitConfirm(true)}
                 className="w-full"
               >
                 {submitting ? t.submitting : t.submitExam}

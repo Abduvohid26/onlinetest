@@ -722,12 +722,7 @@ export function StudentDashboard({
                             ? (e.violation_retakes_remaining ?? 0)
                             : (e.identity_retakes_remaining ?? 0);
                           return (
-                            <div className="mt-3.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left space-y-1.5">
-                              {e.last_violation_reason && (
-                                <p className="text-[12px] text-amber-900 leading-relaxed font-medium">
-                                  {e.last_violation_reason}
-                                </p>
-                              )}
+                            <div className="mt-3.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-left">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="text-[12px] font-semibold text-amber-800">
                                   {t.examCardRetakeCount
