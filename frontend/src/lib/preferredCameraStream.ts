@@ -101,6 +101,18 @@ export const LIGHT_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   frameRate: { ideal: 15, max: 30 },
 };
 
+/**
+ * Proctoring mikrofoni: brauzer NS/EC/AGC O'CHIQ.
+ * Default `audio: true` noiseSuppression yoqadi — pichirlash va tashqi odam
+ * ovozini o'chiradi. Avval xom mic; qurilma rad etsa — `audio: true` fallback.
+ */
+export const RAW_PROCTOR_AUDIO: MediaTrackConstraints = {
+  echoCancellation: false,
+  noiseSuppression: false,
+  autoGainControl: false,
+  channelCount: { ideal: 1 },
+};
+
 /** Virtual bo'lsa va qat'iy rejim bo'lsa — stream to'xtatiladi va xato; lab rejimida ogohlantirish. */
 function finalizePhysicalStream(stream: MediaStream, ctx: string): MediaStream {
   if (!streamLooksLikeVirtualCamera(stream)) return stream;
@@ -120,10 +132,20 @@ export async function openPreferredCameraStream(
 ): Promise<MediaStream> {
   const videoConstraint: MediaTrackConstraints | boolean =
     video === true ? LIGHT_VIDEO_CONSTRAINTS : video;
-  const initial = await navigator.mediaDevices.getUserMedia({
-    video: videoConstraint,
-    audio: withAudio,
-  });
+  let initial: MediaStream;
+  try {
+    initial = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraint,
+      audio: withAudio ? RAW_PROCTOR_AUDIO : false,
+    });
+  } catch (err) {
+    if (!withAudio) throw err;
+    // Ba'zi qurilmalar xom constraintni rad etadi — default audio bilan qayta urinish.
+    initial = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraint,
+      audio: true,
+    });
+  }
 
   const currentTrack = initial.getVideoTracks()[0];
   const currentLabel = currentTrack?.label || '';
@@ -158,32 +180,38 @@ export async function openPreferredCameraStream(
   try {
     const switched = await navigator.mediaDevices.getUserMedia({
       video: switchedVideo,
-      audio: withAudio,
+      audio: withAudio ? RAW_PROCTOR_AUDIO : false,
     });
     initial.getTracks().forEach((t) => t.stop());
     return finalizePhysicalStream(switched, 'switched device');
   } catch {
+    if (withAudio) {
+      try {
+        const switched = await navigator.mediaDevices.getUserMedia({
+          video: switchedVideo,
+          audio: true,
+        });
+        initial.getTracks().forEach((t) => t.stop());
+        return finalizePhysicalStream(switched, 'switched device audio fallback');
+      } catch {
+        /* keep initial */
+      }
+    }
     return finalizePhysicalStream(initial, 'switch failed');
   }
 }
 
 export async function attachDefaultMicrophone(videoStream: MediaStream): Promise<boolean> {
-  try {
-    const a = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+  const tryAttach = async (audio: boolean | MediaTrackConstraints): Promise<boolean> => {
+    const a = await navigator.mediaDevices.getUserMedia({ audio, video: false });
     a.getAudioTracks().forEach((tr) => videoStream.addTrack(tr));
     return true;
+  };
+  try {
+    return await tryAttach(RAW_PROCTOR_AUDIO);
   } catch {
     try {
-      const a = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false,
-        },
-        video: false,
-      });
-      a.getAudioTracks().forEach((tr) => videoStream.addTrack(tr));
-      return true;
+      return await tryAttach(true);
     } catch {
       return false;
     }

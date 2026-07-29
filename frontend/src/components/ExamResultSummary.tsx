@@ -110,67 +110,74 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
       >
         <div className={`h-2 w-full ${passed ? 'bg-gradient-to-r from-emerald-500 to-emerald-400' : 'bg-gradient-to-r from-red-500 to-rose-400'}`} />
         <div className="p-5 sm:p-8 bg-gradient-to-br from-white via-white to-slate-50/80">
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
-            <div className="flex items-start gap-4 sm:gap-5 min-w-0 flex-1">
-              <InstituteLogo size="xl" className="shrink-0 shadow-lg ring-2 ring-white" />
-              <div className="min-w-0 pt-1">
-                <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                  Farg‘ona jamoat salomatligi tibbiyot instituti
-                </p>
-                <h1 className="text-2xl sm:text-[2rem] font-bold text-slate-900 tracking-tight mt-1.5 leading-tight">
-                  {t.resultCertTitle}
-                </h1>
-                <p className="text-xs sm:text-sm text-slate-500 mt-1.5">{t.resultCertHint}</p>
+          {/*
+            QR o'ngda balandroq — meta-blokni pastga emas, sarlavha ostiga qo'yamiz,
+            aks holda o'rtada katta bo'sh joy ochiladi.
+          */}
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_auto] gap-4 lg:gap-5 items-start">
+            <div className="min-w-0">
+              <div className="flex items-start gap-4 sm:gap-5">
+                <InstituteLogo size="xl" className="shrink-0 shadow-lg ring-2 ring-white" />
+                <div className="min-w-0 pt-1">
+                  <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
+                    Farg‘ona jamoat salomatligi tibbiyot instituti
+                  </p>
+                  <h1 className="text-2xl sm:text-[2rem] font-bold text-slate-900 tracking-tight mt-1.5 leading-tight">
+                    {t.resultCertTitle}
+                  </h1>
+                  <p className="text-xs sm:text-sm text-slate-500 mt-1.5">{t.resultCertHint}</p>
+                </div>
+              </div>
+
+              {/* PDF sertifikatdagi ma'lumotlar bloki — sarlavha ostida */}
+              <div className="mt-3 sm:mt-4 rounded-xl border border-sky-200/80 bg-sky-50/70 p-4 sm:p-5">
+                <dl className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-4 gap-y-2.5 text-sm">
+                  {[
+                    { label: t.resultIdLabel, value: data.result_public_id },
+                    { label: t.resultStudentLabel, value: data.student_name },
+                    { label: t.resultGroupLabel, value: data.student_group },
+                    { label: t.resultExamLabel, value: data.exam_title },
+                    {
+                      label: t.resultCompletedLabel,
+                      value: data.completed_at
+                        ? new Date(data.completed_at).toLocaleString()
+                        : '',
+                    },
+                    { label: t.resultIntegrityLabel, value: data.integrity_code },
+                    { label: t.resultVerifyUrlLabel, value: data.verify_url, mono: true, breakAll: true },
+                  ]
+                    .filter((row) => Boolean(row.value))
+                    .map((row) => (
+                      <React.Fragment key={row.label}>
+                        <dt className="text-[12px] font-semibold text-slate-500 sm:pt-0.5">{row.label}</dt>
+                        <dd
+                          className={`text-slate-900 font-medium ${row.mono ? 'font-mono text-[12px] sm:text-[13px]' : ''} ${
+                            row.breakAll ? 'break-all' : 'break-words'
+                          }`}
+                        >
+                          {row.breakAll && data.verify_url === row.value ? (
+                            <a
+                              href={String(row.value)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-indigo-700 hover:underline"
+                            >
+                              {row.value}
+                            </a>
+                          ) : (
+                            row.value
+                          )}
+                        </dd>
+                      </React.Fragment>
+                    ))}
+                </dl>
               </div>
             </div>
+
             <div className="flex flex-col items-center gap-2.5 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm shrink-0 mx-auto lg:mx-0">
               <QRCodeSVG value={data.verify_url} size={132} level="M" includeMargin={false} />
               <span className="text-[11px] font-medium text-slate-500 text-center">{t.resultQrVerifyLabel}</span>
             </div>
-          </div>
-
-          {/* PDF sertifikatdagi ma'lumotlar bloki */}
-          <div className="mt-5 rounded-xl border border-sky-200/80 bg-sky-50/70 p-4 sm:p-5">
-            <dl className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-4 gap-y-2.5 text-sm">
-              {[
-                { label: t.resultIdLabel, value: data.result_public_id },
-                { label: t.resultStudentLabel, value: data.student_name },
-                { label: t.resultGroupLabel, value: data.student_group },
-                { label: t.resultExamLabel, value: data.exam_title },
-                {
-                  label: t.resultCompletedLabel,
-                  value: data.completed_at
-                    ? new Date(data.completed_at).toLocaleString()
-                    : '',
-                },
-                { label: t.resultIntegrityLabel, value: data.integrity_code },
-                { label: t.resultVerifyUrlLabel, value: data.verify_url, mono: true, breakAll: true },
-              ]
-                .filter((row) => Boolean(row.value))
-                .map((row) => (
-                  <React.Fragment key={row.label}>
-                    <dt className="text-[12px] font-semibold text-slate-500 sm:pt-0.5">{row.label}</dt>
-                    <dd
-                      className={`text-slate-900 font-medium ${row.mono ? 'font-mono text-[12px] sm:text-[13px]' : ''} ${
-                        row.breakAll ? 'break-all' : 'break-words'
-                      }`}
-                    >
-                      {row.breakAll && data.verify_url === row.value ? (
-                        <a
-                          href={String(row.value)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-indigo-700 hover:underline"
-                        >
-                          {row.value}
-                        </a>
-                      ) : (
-                        row.value
-                      )}
-                    </dd>
-                  </React.Fragment>
-                ))}
-            </dl>
           </div>
 
           {/* Score focal */}
