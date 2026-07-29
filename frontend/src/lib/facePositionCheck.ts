@@ -33,13 +33,15 @@ const FACE_MODEL: string =
 const DETECT_INTERVAL_MS = 180; // ~5-6 fps
 const OK_STREAK_NEEDED = 6; // ~1s barqaror OK
 
-// Chegaralar (normalized landmark geometriyasi; kalibrlash mumkin).
+// Chegaralar (normalized landmark geometriyasi; realtimeProctor.ts bilan moslang).
+// FACE_MAX / CENTER_Y_MAX qattiqroq: yuz kadrning yuqori-o'rta qismida bo'lsin —
+// pastda stol/qo'l/telefon ko'rinsin (yonida telefon cheatini kamaytirish).
 const FACE_MIN_HEIGHT = 0.26; // bundan kichik = juda uzoq
-const FACE_MAX_HEIGHT = 0.82; // bundan katta = juda yaqin
+const FACE_MAX_HEIGHT = 0.56; // bundan katta = juda yaqin (stol FOV yo'qoladi)
 const CENTER_X_MIN = 0.30;
 const CENTER_X_MAX = 0.70;
-const CENTER_Y_MIN = 0.22;
-const CENTER_Y_MAX = 0.80;
+const CENTER_Y_MIN = 0.18;
+const CENTER_Y_MAX = 0.52; // yuz pastga tushsa — stol kadrdan chiqadi
 const YAW_MAX = 0.17; // burilish chegarasi
 
 export type FacePositionUpdate = (status: FacePositionStatus, okSustained: boolean) => void;
