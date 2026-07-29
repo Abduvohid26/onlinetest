@@ -18,6 +18,7 @@ import { ForbiddenObjectProctor } from '../lib/forbiddenObjectProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
+import { TabSwitchGuard } from '../lib/tabSwitchGuard';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -765,9 +766,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const fullscreenRequestedRef = useRef(false);
   const fullscreenEnteredRef = useRef(false);
   const blurIgnoreUntilRef = useRef(0); // timestamp: shu vaqtgacha blur ignore qilinadi
-  /** Talaba tabdan/oynadan ketgan payt (visibilitychange yoki blur). Qaytganda
-   *  (visible/focus) qancha vaqt ketgani o'lchanadi — TAB_SWITCH_HARD uchun. */
-  const awayStartedAtRef = useRef<number | null>(null);
   /** Modal/ogohlantirish fullscreen'dan chiqarishi — buni qoidabuzarlik deb hisoblamaymiz */
   const fullscreenSuppressRef = useRef(false);
   const needsFullscreenRef = useRef(false);
@@ -795,14 +793,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // TAB_GUARD_ARM_MS turgandan keyin yoqiladi. Fullscreen yo'qolishi bilan
   // darhol o'chadi. Shuning uchun o'tish paytidagi hodisalar tartibi qanday
   // bo'lishidan qat'i nazar qoidabuzarlik yozilmaydi.
-  const tabGuardArmedRef = useRef(false);
-  const tabGuardStableSinceRef = useRef(0);
+  // Mantiq `lib/tabSwitchGuard.ts` da — u yerda unit testlar bilan qoplangan.
+  const tabGuardRef = useRef<TabSwitchGuard>(new TabSwitchGuard(TAB_GUARD_ARM_MS));
 
   /** Nazoratni darhol o'chiradi va to'plangan "ketgan vaqt" hisobini tozalaydi. */
   const disarmTabGuard = useCallback(() => {
-    tabGuardArmedRef.current = false;
-    tabGuardStableSinceRef.current = 0;
-    awayStartedAtRef.current = null;
+    tabGuardRef.current.disarm();
     eventGateRef.current?.reset('TAB_SWITCH_HARD');
   }, []);
 
@@ -951,33 +947,24 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       return;
     }
     const evaluate = () => {
-      const blocked =
-        bannedRef.current ||
-        !sessionStartedRef.current ||
-        needsFullscreenRef.current ||
-        fullscreenSuppressRef.current ||
-        fullscreenRequestedRef.current ||
-        warningModalShowingRef.current ||
-        smallWarnOpenRef.current ||
-        (fullscreenSupportedRef.current && !getFullscreenElement());
-      if (blocked) {
-        disarmTabGuard();
-        return;
-      }
-      if (tabGuardArmedRef.current) return;
-      const present = document.visibilityState === 'visible' && document.hasFocus();
-      if (!present) {
-        tabGuardStableSinceRef.current = 0;
-        return;
-      }
-      const now = Date.now();
-      if (!tabGuardStableSinceRef.current) {
-        tabGuardStableSinceRef.current = now;
-        return;
-      }
-      if (now - tabGuardStableSinceRef.current >= TAB_GUARD_ARM_MS) {
-        tabGuardArmedRef.current = true;
-      }
+      const wasArmed = tabGuardRef.current.armed;
+      const nowArmed = tabGuardRef.current.evaluate(
+        {
+          sessionStarted: sessionStartedRef.current,
+          banned: bannedRef.current,
+          fullscreenRequired: needsFullscreenRef.current,
+          fullscreenSuppressed: fullscreenSuppressRef.current,
+          fullscreenRequestInFlight: fullscreenRequestedRef.current,
+          warningModalOpen: warningModalShowingRef.current,
+          smallWarnOpen: smallWarnOpenRef.current,
+          inFullscreen: !fullscreenSupportedRef.current || !!getFullscreenElement(),
+          present: document.visibilityState === 'visible' && document.hasFocus(),
+        },
+        Date.now(),
+      );
+      // Qurol o'chgan bo'lsa — event gate hisobini ham tozalaymiz, aks holda
+      // o'chgunga qadar to'plangan davomiylik qayta yoqilganda darhol rasmiyga aylanardi.
+      if (wasArmed && !nowArmed) disarmTabGuard();
     };
     evaluate();
     const id = window.setInterval(evaluate, 250);
@@ -1005,24 +992,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // (`visible`/`focus`) qancha vaqt ketganini o'lchaymiz. Hodisalar taymer muzlaganda
     // ham ishonchli ishlaydi. Qaytishda darhol rasmiy TAB_SWITCH_HARD yoziladi —
     // "kichik ogohlantirish" bermaymiz, chunki talaba boshqa tabda uni ko'rmaydi.
-    const markAwayStart = () => {
-      // Yagona shart: nazorat qurollanganmi. Barcha holat tekshiruvlari
-      // (sessiya/ban/fullscreen/gate/modal/barqarorlik) armed hisoblagichida
-      // markazlashgan — bu yerda qayta takrorlanmaydi, shu sabab hodisalar
-      // tartibiga bog'liq teshik qolmaydi.
-      if (!tabGuardArmedRef.current) {
-        awayStartedAtRef.current = null;
-        return;
-      }
-      if (awayStartedAtRef.current == null) awayStartedAtRef.current = Date.now();
-    };
+    // Yagona shart: nazorat qurollanganmi. Barcha holat tekshiruvlari
+    // (sessiya/ban/fullscreen/gate/modal/barqarorlik) TabSwitchGuard ichida
+    // markazlashgan — shu sabab hodisalar tartibiga bog'liq teshik qolmaydi.
+    const markAwayStart = () => tabGuardRef.current.markAway(Date.now());
 
     const markAwayEnd = () => {
-      const startedAt = awayStartedAtRef.current;
-      awayStartedAtRef.current = null;
-      if (startedAt == null) return;
-      if (!tabGuardArmedRef.current) return;
-      if (Date.now() - startedAt >= TAB_AWAY_VIOLATION_MS) {
+      if (tabGuardRef.current.endAway(Date.now(), TAB_AWAY_VIOLATION_MS)) {
         void logViolationRef.current('TAB_SWITCH_HARD');
       }
     };
@@ -1833,9 +1809,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       for (const type of EVENT_TYPES) consider(type, false);
       // Tab yashiringan — davomiy holat (poll). Nazorat qurollangan bo'lsagina
       // hisoblanadi (fullscreen gate / FS o'tish paytida qurol o'chirilgan).
-      const tabHidden =
-        tabGuardArmedRef.current && document.visibilityState === 'hidden';
-      if (!tabGuardArmedRef.current) gate.reset('TAB_SWITCH_HARD');
+      const tabArmed = tabGuardRef.current.armed;
+      const tabHidden = tabArmed && document.visibilityState === 'hidden';
+      if (!tabArmed) gate.reset('TAB_SWITCH_HARD');
       consider('TAB_SWITCH_HARD', tabHidden);
 
       const bestType = best ? (best as { type: string }).type : null;
@@ -2285,7 +2261,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // bo'lmaydi, shu sabab darhol yozib qoldiramiz (eng oxirgi signal).
   useEffect(() => {
     const onPageHide = () => {
-      if (!tabGuardArmedRef.current) return;
+      if (!tabGuardRef.current.armed) return;
       void logViolationRef.current('TAB_SWITCH_SOFT');
     };
     window.addEventListener('pagehide', onPageHide);
