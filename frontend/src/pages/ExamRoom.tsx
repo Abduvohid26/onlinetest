@@ -764,20 +764,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // Fullscreen kirish vaqtini kuzatish (blur/fullscreenchange false positive oldini olish)
   const fullscreenRequestedRef = useRef(false);
-  const fullscreenEnteredRef = useRef(false);
   const blurIgnoreUntilRef = useRef(0); // timestamp: shu vaqtgacha blur ignore qilinadi
   /** Modal/ogohlantirish fullscreen'dan chiqarishi — buni qoidabuzarlik deb hisoblamaymiz */
   const fullscreenSuppressRef = useRef(false);
   const needsFullscreenRef = useRef(false);
 
-  // Majburiy fullscreen (kiosk): sessiya davomida doim fullscreen; chiqilsa gate.
+  /** Fullscreen hozir yo'q — ingichka eslatma chizig'i ko'rsatiladi va
+   *  tab-nazorati o'chirilgan turadi (bloklovchi modal yo'q). */
   const [needsFullscreen, setNeedsFullscreen] = useState(false);
-  /** Bu sessiyada fullscreen'ga kamida bir marta kirilganmi. Gate matnini tanlaydi:
-   *  hali kirilmagan bo'lsa — oddiy "yoqing" ko'rsatmasi (talaba hech narsa
-   *  buzmagan); kirib chiqilgan bo'lsa — "qayta kiring". Ilgari ikkala holatda
-   *  ham "chiqib ketganingiz qayd etildi" chiqib, imtihon boshida talabani
-   *  qoidabuzarlikda ayblardi. */
-  const [fullscreenEverEntered, setFullscreenEverEntered] = useState(false);
 
   // ── Tab/oyna almashtirish nazorati: "qurollangan" holat ──────────────────
   // MUAMMO: fullscreen'ga kirish/chiqishda brauzer (ayniqsa Linux oyna
@@ -871,8 +865,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (getFullscreenElement()) {
         // Kirishdan keyin ham blur/focus kelishi mumkin — TAB deb yozilmasin.
         blurIgnoreUntilRef.current = Date.now() + 8000;
-        fullscreenEnteredRef.current = true;
-        setFullscreenEverEntered(true);
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
@@ -1415,7 +1407,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }, 500);
     }
 
-    // Har bir klik/touch — fullscreen (ESC gate ochiq bo'lsa, faqat gate tugmasi ishlaydi).
+    // Har bir foydalanuvchi harakati — fullscreen'ni AVTOMATIK tiklaydi.
+    // Bloklovchi modal yo'q: brauzer `requestFullscreen()` ni faqat foydalanuvchi
+    // harakati (gesture) ichida ruxsat beradi, shuning uchun tiklash imtihonda
+    // baribir bo'ladigan birinchi klik/tugma bosishga ulanadi.
     const ensureFullscreenOnGesture = () => {
       // Safety net: AudioContext "suspended" bo'lsa (brauzer avtoplay siyosati) —
       // har foydalanuvchi harakatida tiklaymiz. Aks holda mikrofon jimlik beradi va
@@ -1426,11 +1421,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
       void sileroRef.current?.resume();
       if (bannedRef.current) return;
-      if (needsFullscreenRef.current) return;
       if (getFullscreenElement()) return;
       requestExamFullscreen();
     };
+    // pointerdown + keydown: sichqoncha ham, klaviatura ham gesture beradi —
+    // talaba javob tanlashi bilan fullscreen o'zi tiklanadi.
     window.addEventListener('pointerdown', ensureFullscreenOnGesture, { capture: true });
+    window.addEventListener('keydown', ensureFullscreenOnGesture, { capture: true });
 
     const setupAI = async () => {
       try {
@@ -1598,6 +1595,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // Cleanup
     return () => {
       window.removeEventListener('pointerdown', ensureFullscreenOnGesture, true);
+      window.removeEventListener('keydown', ensureFullscreenOnGesture, true);
       document.removeEventListener('contextmenu', handleContextMenu);
       document.removeEventListener('copy', handleCopyPaste);
       document.removeEventListener('paste', handleCopyPaste);
@@ -2881,39 +2879,24 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   return (
     <div className="h-[100dvh] flex flex-col bg-gray-50 overflow-hidden select-none">
-      {/* ── Majburiy fullscreen gate (kiosk) ── */}
+      {/* ── Fullscreen holati: BLOKLOVCHI MODAL YO'Q ──
+          Modal olib tashlandi — fullscreen avtomatik tiklanadi
+          (`ensureFullscreenOnGesture`: har qanday klik/tugma bosish). Bu yerda
+          faqat ingichka, bosishga xalaqit bermaydigan eslatma chizig'i qoladi,
+          shunda talaba imtihonni davom ettiraverar ekan holatdan xabardor bo'ladi. */}
       <AnimatePresence>
-        {needsFullscreen && !banned && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[10060] flex items-center justify-center bg-slate-900/95 backdrop-blur-sm px-5"
+        {needsFullscreen && !banned && sessionStarted && (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            onClick={requestExamFullscreen}
+            className="fixed inset-x-0 top-0 z-[10060] flex items-center justify-center gap-2 bg-indigo-600 px-4 py-2 text-center text-xs sm:text-sm font-medium text-white shadow-md"
           >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.94, y: 14 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
-              className="w-full max-w-md text-center rounded-2xl bg-white p-7 sm:p-9 shadow-2xl"
-            >
-              <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
-                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
-              </div>
-              <h2 className="text-xl font-bold text-slate-900">
-                {fullscreenEverEntered ? t.examFullscreenGateTitle : t.examFullscreenStartTitle}
-              </h2>
-              <p className="mt-2 text-sm text-slate-500 leading-relaxed">
-                {fullscreenEverEntered ? t.examFullscreenGateBody : t.examFullscreenStartBody}
-              </p>
-              <button
-                type="button"
-                onClick={requestExamFullscreen}
-                className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-700 active:scale-[0.98]"
-              >
-                {fullscreenEverEntered ? t.examFullscreenGateBtn : t.examFullscreenStartBtn}
-              </button>
-            </motion.div>
-          </motion.div>
+            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+            <span>{t.examFullscreenAutoHint}</span>
+          </motion.button>
         )}
       </AnimatePresence>
 

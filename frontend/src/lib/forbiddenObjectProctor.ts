@@ -14,9 +14,12 @@ const WASM_BASE =
   (import.meta as any).env?.VITE_MEDIAPIPE_WASM_BASE ||
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
 
+// lite0 → lite2: telefon kadrda kichik ob'ekt bo'lgani uchun lite0 uni ko'p
+// freymda umuman topa olmasdi (detektsiya "miltillardi"). lite2 sezilarli
+// aniqroq; GPU delegate bilan bitta freym ~30-50ms — 300ms interval uchun yetarli.
 const OBJECT_MODEL =
   (import.meta as any).env?.VITE_MEDIAPIPE_OBJECT_MODEL ||
-  'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite';
+  'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite';
 
 /** COCO label (kichik harf) → rasmiy violation. */
 const LABEL_TO_VIOLATION: Record<string, string> = {
@@ -28,12 +31,38 @@ const LABEL_TO_VIOLATION: Record<string, string> = {
   laptop: 'FORBIDDEN_OBJECT_LAPTOP',
 };
 
-const SCORE_THRESHOLD = 0.32;
-const DETECT_INTERVAL_MS = 700;
+/** Detektorning o'zi qaytaradigan eng past ball — pastroq, filtr quyida. */
+const DETECTOR_MIN_SCORE = 0.2;
+
+/**
+ * Har bir tur uchun alohida ostona. Telefon kadrda kichik ko'rinadi va ball
+ * past chiqadi — unga pastroq ostona kerak. Kitob/noutbuk esa katta ob'ekt:
+ * ularga yuqoriroq ostona qo'yamiz, aks holda stol yoki papka "kitob" deb
+ * noto'g'ri aniqlanadi.
+ */
+const SCORE_THRESHOLD_BY_TYPE: Record<string, number> = {
+  FORBIDDEN_OBJECT_CELL_PHONE: 0.25,
+  FORBIDDEN_OBJECT_BOOK: 0.38,
+  FORBIDDEN_OBJECT_LAPTOP: 0.38,
+};
+
+/** Freym tahlili oralig'i. Qancha tez-tez bo'lsa, tasdiqlash shuncha tez. */
+export const DETECT_INTERVAL_MS = 300;
+
+/**
+ * Uzilishga toqat oynasi. MUHIM: bu qiymat DETECT_INTERVAL_MS dan katta
+ * bo'lishi SHART. Ilgari grace=500ms, interval=700ms edi — ya'ni detektor
+ * bitta freymda telefonni topa olmasa (kichik ob'ektda bu doim bo'ladi),
+ * keyingi tekshiruvgacha 700ms > 500ms o'tib, to'plangan vaqt NOLGA tushardi.
+ * Natijada hisoblagich 2800ms ga deyarli hech qachon yetmasdi va telefon
+ * "juda sekin" aniqlanardi. Endi ketma-ket 3 ta o'tkazib yuborishga toqat.
+ */
+export const OBJECT_GRACE_MS = DETECT_INTERVAL_MS * 3 + 100;
+
 /** Kichik ogohlantirish */
-export const OBJECT_CONFIRM_MS = 1200;
+export const OBJECT_CONFIRM_MS = 600;
 /** Rasmiy */
-export const OBJECT_ESCALATE_MS = 2800;
+export const OBJECT_ESCALATE_MS = 1800;
 
 export type ForbiddenObjectHit = {
   violationType: string;
@@ -96,9 +125,11 @@ export class ForbiddenObjectProctor {
           modelAssetPath: OBJECT_MODEL,
           delegate: 'GPU',
         },
-        scoreThreshold: SCORE_THRESHOLD,
+        scoreThreshold: DETECTOR_MIN_SCORE,
         runningMode: 'VIDEO',
-        maxResults: 8,
+        // Kadrda ko'p ob'ekt bo'lsa (stol, monitor, odam) telefon ro'yxatdan
+        // tushib qolmasin — chegara kengaytirildi.
+        maxResults: 16,
       });
       if (this.disposed) {
         this.dispose();
@@ -122,7 +153,7 @@ export class ForbiddenObjectProctor {
   private trackerFor(type: string): ContinuousSignalTracker {
     let t = this.trackers.get(type);
     if (!t) {
-      t = new ContinuousSignalTracker(500);
+      t = new ContinuousSignalTracker(OBJECT_GRACE_MS);
       this.trackers.set(type, t);
     }
     return t;
@@ -134,18 +165,21 @@ export class ForbiddenObjectProctor {
     const video = this.video;
     if (!video || video.readyState < 2 || video.videoWidth < 16) return;
 
-    let detections: ForbiddenObjectHit[] = [];
+    const detections: ForbiddenObjectHit[] = [];
     try {
       const res = this.detector.detectForVideo(video, performance.now());
       for (const d of res.detections || []) {
-        const cat = d.categories?.[0];
-        if (!cat) continue;
-        const score = Number(cat.score || 0);
-        if (score < SCORE_THRESHOLD) continue;
-        const name = String(cat.categoryName || '');
-        const violationType = mapLabel(name);
-        if (!violationType) continue;
-        detections.push({ violationType, label: name, score });
+        // Faqat categories[0] emas, BARCHA nomzodlar. Telefon ko'pincha
+        // ikkinchi-uchinchi nomzod bo'lib chiqadi (birinchisi "person" yoki
+        // "remote") — ilgari aynan shu holatda umuman aniqlanmasdi.
+        for (const cat of d.categories || []) {
+          const name = String(cat?.categoryName || '');
+          const violationType = mapLabel(name);
+          if (!violationType) continue;
+          const score = Number(cat?.score || 0);
+          if (score < (SCORE_THRESHOLD_BY_TYPE[violationType] ?? 0.35)) continue;
+          detections.push({ violationType, label: name, score });
+        }
       }
     } catch {
       return;
@@ -170,7 +204,7 @@ export class ForbiddenObjectProctor {
       }
       if (ms >= OBJECT_ESCALATE_MS) {
         const last = this.lastFormalAt.get(type) || 0;
-        if (now - last >= 8_000) {
+        if (now - last >= 6_000) {
           this.lastFormalAt.set(type, now);
           this.trackerFor(type).reset();
           this.opts.onFormal(type);
