@@ -130,6 +130,11 @@ const IDENTITY_CHECK_MS = 90_000;
  *  "Kichik ogohlantirish" bosqichi YO'Q — talaba boshqa tabda uni ko'ra olmaydi. */
 const TAB_AWAY_VIOLATION_MS = 1200;
 
+/** Fullscreen'ga kirgandan keyin tab-nazorati shuncha vaqt BARQAROR turgach
+ *  yoqiladi. Fullscreen o'tishida brauzer beradigan blur/visibility to'lqini
+ *  shu oyna ichida tugaydi — shu sababli u qoidabuzarlik deb yozilmaydi. */
+const TAB_GUARD_ARM_MS = 3000;
+
 /** Kichik ogohlantirish modali yopilgach — o'sha signal shuncha vaqt qayta ochmaydi. */
 const SMALL_WARN_GRACE_MS = 3000;
 /** Talaba "Tushundim" bosmasa ham modal shuncha vaqtdan keyin o'zi yopiladi.
@@ -776,6 +781,31 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
    *  qoidabuzarlikda ayblardi. */
   const [fullscreenEverEntered, setFullscreenEverEntered] = useState(false);
 
+  // ── Tab/oyna almashtirish nazorati: "qurollangan" holat ──────────────────
+  // MUAMMO: fullscreen'ga kirish/chiqishda brauzer (ayniqsa Linux oyna
+  // menejerlarida) blur → visibilitychange → fullscreenchange → focus
+  // hodisalarini TURLI TARTIBDA yuboradi. Ilgari har bir hodisa alohida
+  // tekshiruvlar bilan filtrlanardi va bitta tartib kombinatsiyasi baribir
+  // o'tib ketardi: "Butun ekran talab qilinadi" modali chiqishi bilan bir
+  // vaqtda "Boshqa oynaga o'tildi" ogohlantirishi ham chiqardi.
+  //
+  // YECHIM: hodisalarni birma-bir filtrlash o'rniga bitta invariant —
+  // TAB nazorati faqat imtihon BARQAROR holatda (sessiya ochiq + fullscreen
+  // ichida + gate yopiq + modal yo'q + oyna fokusda) uzluksiz
+  // TAB_GUARD_ARM_MS turgandan keyin yoqiladi. Fullscreen yo'qolishi bilan
+  // darhol o'chadi. Shuning uchun o'tish paytidagi hodisalar tartibi qanday
+  // bo'lishidan qat'i nazar qoidabuzarlik yozilmaydi.
+  const tabGuardArmedRef = useRef(false);
+  const tabGuardStableSinceRef = useRef(0);
+
+  /** Nazoratni darhol o'chiradi va to'plangan "ketgan vaqt" hisobini tozalaydi. */
+  const disarmTabGuard = useCallback(() => {
+    tabGuardArmedRef.current = false;
+    tabGuardStableSinceRef.current = 0;
+    awayStartedAtRef.current = null;
+    eventGateRef.current?.reset('TAB_SWITCH_HARD');
+  }, []);
+
   const getFullscreenElement = useCallback((): Element | null => {
     const doc = document as Document & {
       webkitFullscreenElement?: Element | null;
@@ -807,7 +837,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     fullscreenRequestedRef.current = true;
     fullscreenSuppressRef.current = true;
     // FS so'rovi/kirishida brauzer blur/focus beradi — TAB_SWITCH false positive.
-    awayStartedAtRef.current = null;
+    disarmTabGuard();
     blurIgnoreUntilRef.current = Date.now() + 8000;
     Promise.resolve(req())
       .then(() => {
@@ -815,13 +845,15 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
         setNeedsFullscreen(false);
-        awayStartedAtRef.current = null;
+        // Kirdik — lekin nazorat darhol yoqilmaydi: barqarorlik hisoblagichi
+        // (TAB_GUARD_ARM_MS) o'tgach o'zi yoqiladi.
+        disarmTabGuard();
         blurIgnoreUntilRef.current = Date.now() + 8000;
       })
       .catch(() => {
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
-        awayStartedAtRef.current = null;
+        disarmTabGuard();
         blurIgnoreUntilRef.current = Date.now() + 8000;
         // Sessiya boshlangan bo'lsa — tugma orqali qayta urinish uchun gate.
         if (sessionStartedRef.current) {
@@ -835,9 +867,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!fullscreenSupportedRef.current) return;
 
     const onFullscreenChange = () => {
+      // Har qanday fullscreen o'zgarishi — nazorat darhol o'chadi va faqat
+      // barqarorlik oynasidan keyin qayta yoqiladi. Hodisalar tartibi
+      // (blur/visibility/fullscreenchange) brauzerga bog'liq bo'lgani uchun
+      // bu yagona ishonchli himoya.
+      disarmTabGuard();
       if (getFullscreenElement()) {
         // Kirishdan keyin ham blur/focus kelishi mumkin — TAB deb yozilmasin.
-        awayStartedAtRef.current = null;
         blurIgnoreUntilRef.current = Date.now() + 8000;
         fullscreenEnteredRef.current = true;
         setFullscreenEverEntered(true);
@@ -860,9 +896,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // Chiqish → faqat majburiy gate (rasmiy ogohlantirish/strike YO'Q).
       // Aks holda "Butun ekran talab qilinadi" bilan birga "1-ogohlantirish" chiqardi.
       // Brauzer FS chiqishida blur/visibility ham beradi — TAB_SWITCH yozilmasin.
-      // Muhim: blur ba'zan fullscreenchange DAN OLDIN keladi; shuning uchun
-      // away timerini shu yerda ham tozalaymiz + gate ochamiz.
-      awayStartedAtRef.current = null;
+      // Muhim: blur ba'zan fullscreenchange DAN OLDIN keladi — nazorat
+      // yuqorida allaqachon o'chirilgan, shu sabab tartib ahamiyatsiz.
       blurIgnoreUntilRef.current = Date.now() + 8000;
       needsFullscreenRef.current = true;
       setNeedsFullscreen(true);
@@ -892,7 +927,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         return;
       }
       if (!needsFullscreenRef.current) {
-        awayStartedAtRef.current = null;
+        disarmTabGuard();
         blurIgnoreUntilRef.current = Date.now() + 8000;
         needsFullscreenRef.current = true;
         setNeedsFullscreen(true);
@@ -901,7 +936,56 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     tick();
     const id = window.setInterval(tick, 1200);
     return () => clearInterval(id);
-  }, [sessionStarted, banned, getFullscreenElement]);
+  }, [sessionStarted, banned, getFullscreenElement, disarmTabGuard]);
+
+  // Tab-nazoratini qurollash: imtihon barqaror holatda uzluksiz TAB_GUARD_ARM_MS
+  // turgandagina yoqiladi. Har qanday chetlanish (fullscreen yo'q, gate ochiq,
+  // modal ochiq, fokus yo'q) hisoblagichni noldan boshlatadi.
+  //
+  // MUHIM: "ko'rinmayapti" (visibilityState === 'hidden') holati bu yerda
+  // BARQARORLIKNI buzmaydi — aynan o'sha holat aniqlanadigan signal. Qurollash
+  // esa faqat talaba ekran oldida (visible + fokusda) bo'lganda boshlanadi.
+  useEffect(() => {
+    if (!sessionStarted || banned) {
+      disarmTabGuard();
+      return;
+    }
+    const evaluate = () => {
+      const blocked =
+        bannedRef.current ||
+        !sessionStartedRef.current ||
+        needsFullscreenRef.current ||
+        fullscreenSuppressRef.current ||
+        fullscreenRequestedRef.current ||
+        warningModalShowingRef.current ||
+        smallWarnOpenRef.current ||
+        (fullscreenSupportedRef.current && !getFullscreenElement());
+      if (blocked) {
+        disarmTabGuard();
+        return;
+      }
+      if (tabGuardArmedRef.current) return;
+      const present = document.visibilityState === 'visible' && document.hasFocus();
+      if (!present) {
+        tabGuardStableSinceRef.current = 0;
+        return;
+      }
+      const now = Date.now();
+      if (!tabGuardStableSinceRef.current) {
+        tabGuardStableSinceRef.current = now;
+        return;
+      }
+      if (now - tabGuardStableSinceRef.current >= TAB_GUARD_ARM_MS) {
+        tabGuardArmedRef.current = true;
+      }
+    };
+    evaluate();
+    const id = window.setInterval(evaluate, 250);
+    return () => {
+      clearInterval(id);
+      disarmTabGuard();
+    };
+  }, [sessionStarted, banned, getFullscreenElement, disarmTabGuard]);
 
   useEffect(() => {
     const ua = navigator.userAgent || '';
@@ -922,14 +1006,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // ham ishonchli ishlaydi. Qaytishda darhol rasmiy TAB_SWITCH_HARD yoziladi —
     // "kichik ogohlantirish" bermaymiz, chunki talaba boshqa tabda uni ko'rmaydi.
     const markAwayStart = () => {
-      if (bannedRef.current || !sessionStartedRef.current) return;
-      if (Date.now() < blurIgnoreUntilRef.current) return; // fullscreen so'rovi paytida emas
-      // Fullscreen gate ochiq / FS o'tish — brauzer blur/visibility beradi, TAB emas.
-      if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
-      // Faqat haqiqiy fullscreen ichida TAB hisoblanadi. ESC/gate paytida
-      // blur ba'zan fullscreenchange dan OLDIN keladi (FS allaqachon yo'q) —
-      // shu holda "boshqa oynaga o'tding" deb yozilmasin, faqat gate ochiladi.
-      if (fullscreenSupportedRef.current && !getFullscreenElement()) {
+      // Yagona shart: nazorat qurollanganmi. Barcha holat tekshiruvlari
+      // (sessiya/ban/fullscreen/gate/modal/barqarorlik) armed hisoblagichida
+      // markazlashgan — bu yerda qayta takrorlanmaydi, shu sabab hodisalar
+      // tartibiga bog'liq teshik qolmaydi.
+      if (!tabGuardArmedRef.current) {
         awayStartedAtRef.current = null;
         return;
       }
@@ -940,11 +1021,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const startedAt = awayStartedAtRef.current;
       awayStartedAtRef.current = null;
       if (startedAt == null) return;
-      if (bannedRef.current || !sessionStartedRef.current) return;
-      if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
-      if (Date.now() < blurIgnoreUntilRef.current) return;
-      // Qaytganda ham FS yo'q bo'lsa — bu gate/ESC holati, TAB emas.
-      if (fullscreenSupportedRef.current && !getFullscreenElement()) return;
+      if (!tabGuardArmedRef.current) return;
       if (Date.now() - startedAt >= TAB_AWAY_VIOLATION_MS) {
         void logViolationRef.current('TAB_SWITCH_HARD');
       }
@@ -1754,14 +1831,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       };
 
       for (const type of EVENT_TYPES) consider(type, false);
-      // Tab yashiringan — davomiy holat (poll). Fullscreen gate / FS o'tish — TAB emas.
-      // Faqat fullscreen ichida: aks holda ESC/gate blur "boshqa oyna" deb chiqardi.
+      // Tab yashiringan — davomiy holat (poll). Nazorat qurollangan bo'lsagina
+      // hisoblanadi (fullscreen gate / FS o'tish paytida qurol o'chirilgan).
       const tabHidden =
-        document.visibilityState === 'hidden' &&
-        !!getFullscreenElement() &&
-        now >= blurIgnoreUntilRef.current &&
-        !needsFullscreenRef.current &&
-        !fullscreenSuppressRef.current;
+        tabGuardArmedRef.current && document.visibilityState === 'hidden';
+      if (!tabGuardArmedRef.current) gate.reset('TAB_SWITCH_HARD');
       consider('TAB_SWITCH_HARD', tabHidden);
 
       const bestType = best ? (best as { type: string }).type : null;
@@ -2211,11 +2285,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // bo'lmaydi, shu sabab darhol yozib qoldiramiz (eng oxirgi signal).
   useEffect(() => {
     const onPageHide = () => {
-      if (bannedRef.current || !sessionStartedRef.current) return;
-      if (Date.now() < blurIgnoreUntilRef.current) return;
-      if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
-      // Fullscreen yo'q (gate) — pagehide ham TAB emas.
-      if (fullscreenSupportedRef.current && !getFullscreenElement()) return;
+      if (!tabGuardArmedRef.current) return;
       void logViolationRef.current('TAB_SWITCH_SOFT');
     };
     window.addEventListener('pagehide', onPageHide);
