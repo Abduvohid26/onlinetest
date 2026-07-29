@@ -32,25 +32,22 @@ const LABEL_TO_VIOLATION: Record<string, string> = {
 };
 
 /** Detektorning o'zi qaytaradigan eng past ball — pastroq, filtr quyida. */
-const DETECTOR_MIN_SCORE = 0.15;
+const DETECTOR_MIN_SCORE = 0.2;
 
 /**
  * Har bir tur uchun alohida ostona. Telefon kadrda kichik ko'rinadi va ball
  * past chiqadi — unga pastroq ostona kerak. Kitob/noutbuk esa katta ob'ekt:
  * ularga yuqoriroq ostona qo'yamiz, aks holda stol yoki papka "kitob" deb
  * noto'g'ri aniqlanadi.
- *
- * Telefon 0.18: false-positive biroz oshishi mumkin, lekin yon/past kadrdagi
- * kichik telefonni o'tkazib yuborishdan yomonroq emas (admin review bor).
  */
 const SCORE_THRESHOLD_BY_TYPE: Record<string, number> = {
-  FORBIDDEN_OBJECT_CELL_PHONE: 0.18,
+  FORBIDDEN_OBJECT_CELL_PHONE: 0.25,
   FORBIDDEN_OBJECT_BOOK: 0.38,
   FORBIDDEN_OBJECT_LAPTOP: 0.38,
 };
 
 /** Freym tahlili oralig'i. Qancha tez-tez bo'lsa, tasdiqlash shuncha tez. */
-export const DETECT_INTERVAL_MS = 250;
+export const DETECT_INTERVAL_MS = 300;
 
 /**
  * Uzilishga toqat oynasi. MUHIM: bu qiymat DETECT_INTERVAL_MS dan katta
@@ -58,26 +55,14 @@ export const DETECT_INTERVAL_MS = 250;
  * bitta freymda telefonni topa olmasa (kichik ob'ektda bu doim bo'ladi),
  * keyingi tekshiruvgacha 700ms > 500ms o'tib, to'plangan vaqt NOLGA tushardi.
  * Natijada hisoblagich 2800ms ga deyarli hech qachon yetmasdi va telefon
- * "juda sekin" aniqlanardi. Endi ketma-ket 3–4 ta o'tkazib yuborishga toqat.
+ * "juda sekin" aniqlanardi. Endi ketma-ket 3 ta o'tkazib yuborishga toqat.
  */
-export const OBJECT_GRACE_MS = DETECT_INTERVAL_MS * 4 + 100;
+export const OBJECT_GRACE_MS = DETECT_INTERVAL_MS * 3 + 100;
 
-/** Kichik ogohlantirish (telefon tezroq — pastda per-type). */
-export const OBJECT_CONFIRM_MS = 450;
-/** Rasmiy (default / telefon). Kitob-noutbuk biroz sekinroq. */
-export const OBJECT_ESCALATE_MS = 1200;
-
-const ESCALATE_MS_BY_TYPE: Record<string, number> = {
-  FORBIDDEN_OBJECT_CELL_PHONE: 1200,
-  FORBIDDEN_OBJECT_BOOK: 1800,
-  FORBIDDEN_OBJECT_LAPTOP: 1800,
-};
-
-const CONFIRM_MS_BY_TYPE: Record<string, number> = {
-  FORBIDDEN_OBJECT_CELL_PHONE: 400,
-  FORBIDDEN_OBJECT_BOOK: 600,
-  FORBIDDEN_OBJECT_LAPTOP: 600,
-};
+/** Kichik ogohlantirish */
+export const OBJECT_CONFIRM_MS = 600;
+/** Rasmiy */
+export const OBJECT_ESCALATE_MS = 1800;
 
 export type ForbiddenObjectHit = {
   violationType: string;
@@ -211,19 +196,15 @@ export class ForbiddenObjectProctor {
     const activeTypes = new Set(best.keys());
     for (const type of ['FORBIDDEN_OBJECT_CELL_PHONE', 'FORBIDDEN_OBJECT_BOOK', 'FORBIDDEN_OBJECT_LAPTOP']) {
       const ms = this.trackerFor(type).push(activeTypes.has(type), now);
-      const confirmMs = CONFIRM_MS_BY_TYPE[type] ?? OBJECT_CONFIRM_MS;
-      const escalateMs = ESCALATE_MS_BY_TYPE[type] ?? OBJECT_ESCALATE_MS;
-      if (ms >= confirmMs) {
+      if (ms >= OBJECT_CONFIRM_MS) {
         const hit = best.get(type);
         this.opts.onSmall(type, hit?.label || type);
       } else {
         this.opts.onClear(type);
       }
-      if (ms >= escalateMs) {
+      if (ms >= OBJECT_ESCALATE_MS) {
         const last = this.lastFormalAt.get(type) || 0;
-        // Telefon uchun qayta-formal qisqaroq (cheat takrorlansa tezroq ushlansin).
-        const rearmMs = type === 'FORBIDDEN_OBJECT_CELL_PHONE' ? 4_000 : 6_000;
-        if (now - last >= rearmMs) {
+        if (now - last >= 6_000) {
           this.lastFormalAt.set(type, now);
           this.trackerFor(type).reset();
           this.opts.onFormal(type);

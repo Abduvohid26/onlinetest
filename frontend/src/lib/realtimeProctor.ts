@@ -1,20 +1,3 @@
-import { GazeBurstTracker } from './gazeBurstTracker';
-import {
-  computeIrisGaze,
-  computeBlendshapeGaze,
-  fuseGaze,
-  GazeEma,
-  type GazeDirection,
-} from './eyeGaze';
-
-// Re-export — mavjud testlar / chaqiruvlar shu modul orqali ham olishi mumkin.
-export {
-  computeIrisGaze,
-  isIrisGazeAway,
-  IRIS_GAZE_X,
-  IRIS_GAZE_DOWN,
-} from './eyeGaze';
-
 /**
  * Real-time brauzer proctoring (MediaPipe FaceLandmarker + HandLandmarker).
  *
@@ -84,10 +67,6 @@ export const LIVE_SIGNAL_ESCALATE_MS = 4000;
 // ko'p yuz = kimdir keldi) uchun TEZ eskalatsiya — bularni "tuzatishga vaqt berish"
 // mantig'i shart emas, darhol ushlash kerak.
 export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
-/** Yon/pastga qarash (iris+blend yoki bosh) — uzluksiz eskalatsiya. */
-export const GAZE_SIGNAL_ESCALATE_MS = 1400;
-/** Gaze tracker grace — qisqa kameraga qaytish hisobni nolga tushirmasin. */
-export const GAZE_TRACK_GRACE_MS = 750;
 
 // GAPIRISH uchun MAXSUS (tezroq) qoida — README.md "Gapirish uchun maxsus qoida".
 // Mikrofon Silero VAD (ExamRoom):
@@ -149,9 +128,9 @@ const HAND_MODEL: string =
   env.VITE_MEDIAPIPE_HAND_MODEL ||
   'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
-// Detection tezligi va bardoshlilik. Gaze uchun biroz tezroq (~10 fps).
-const DETECT_INTERVAL_MS = 100; // ~10 fps
-// Qo'l modeli har necha kadrda ishlasin (performance). 3 = ~3 fps qo'l uchun —
+// Detection tezligi va bardoshlilik. Tez aniqlash uchun streak/cooldown kichik.
+const DETECT_INTERVAL_MS = 150; // ~6.5 fps (yuk/tezlik balansi — proctoring uchun yetarli)
+// Qo'l modeli har necha kadrda ishlasin (performance). 3 = ~2.5 fps qo'l uchun —
 // qo'l ko'tarish sekin (3-4s eskalatsiya), shu sabab yetarli; MediaPipe yuki kamayadi.
 const HAND_DETECT_EVERY = 3;
 const PER_TYPE_COOLDOWN_MS = 3500; // bir tur uchun emit oralig'i (server ham dedup qiladi)
@@ -161,27 +140,84 @@ const PER_TYPE_COOLDOWN_MS = 3500; // bir tur uchun emit oralig'i (server ham de
 // LIVE_SIGNAL_ESCALATE_MS). Bu yerda alohida streak konstantalar shart emas.
 
 // Yuz o'lchami va pozitsiya chegaralari (normalized; facePositionCheck.ts bilan moslangan).
-// Qattiqroq MAX: talaba uzoqroq o'tiradi → kadrda stol/qo'l ko'rinadi → telefon detektori ishlaydi.
 const FACE_MIN_HEIGHT = 0.26;
-const FACE_MAX_HEIGHT = 0.56;
+const FACE_MAX_HEIGHT = 0.82;
 const FACE_CTR_X_MIN = 0.28;
 const FACE_CTR_X_MAX = 0.72;
-const FACE_CTR_Y_MIN = 0.16;
-const FACE_CTR_Y_MAX = 0.52;
+const FACE_CTR_Y_MIN = 0.20;
+const FACE_CTR_Y_MAX = 0.82;
 
 // Bosh poza / gaze chegaralari (normalized landmark geometriyasi; kalibrlash mumkin).
-const YAW_TURN = 0.14; // markazdan gorizontal og'ish ulushi (sezgirroq)
-const YAW_HARD = 0.26; // kuchli yuz burilishi
-const PITCH_UP = 0.28;
-const PITCH_DOWN = 0.66;
+const YAW_TURN = 0.18; // markazdan gorizontal og'ish ulushi
+const YAW_HARD = 0.30; // kuchli yuz burilishi
+const PITCH_UP = 0.30;
+const PITCH_DOWN = 0.72;
 // Burun nuqtasining frame'lararo o'rtacha siljishi. Uzoq imtihon davomida talaba
 // charchab, oddiy o'tirishda ham biroz qimirlaydi — bu tabiiy, jazolanmasin.
 // Faqat HADDAN TASHQARI (doimiy) qimirlash uchun (qonun: 1.5s kichik, 3s rasmiy).
 const MOVE_THRESHOLD = 0.085;
 
+// --- Qorachiq (iris) asosidagi ko'z yo'nalishi ---
+// MediaPipe 478 nuqta beradi: 468 = chap iris markazi, 473 = o'ng iris markazi.
+// Bosh to'g'ri turgan holda ham ko'z chetga qarasa (yonidagi qog'oz/telefon) shu aniqlaydi.
+const IRIS_L = 468;
+const IRIS_R = 473;
+// Ko'z burchaklari va qovoqlari (chap: 33/133 burchak, 159/145 tepa/past;
+// o'ng: 362/263 burchak, 386/374 tepa/past).
+const EYE_L = { out: 33, in: 133, top: 159, bot: 145 };
+const EYE_R = { out: 263, in: 362, top: 386, bot: 374 };
+/** Qorachiq ko'z kengligining shuncha ulushiga siljisa — chetga qaragan hisoblanadi. */
+const IRIS_GAZE_X = 0.16;
+/** Pastga qarash (qog'oz/telefon tizzada) — ko'z balandligiga nisbatan. */
+const IRIS_GAZE_DOWN = 0.32;
+/** Ko'z ochiqligi (balandlik/kenglik). Bundan past — ko'z yumuq, iris ishonchsiz. */
+const EYE_OPEN_MIN_RATIO = 0.15;
+
 interface Pt {
   x: number;
   y: number;
+}
+
+/**
+ * Qorachiq (iris) asosida ko'z yo'nalishi — SOF funksiya (test qilinadi).
+ *
+ * Bosh to'g'ri turgan holda ham ko'z chetga/pastga qarasa aniqlaydi (yonidagi
+ * qog'oz, telefon, ikkinchi ekran). Qaytaradi: `{ dx, dy }` — qorachiqning ko'z
+ * markazidan siljishi (ko'z o'lchamiga nisbatan; dx>0 → tasvirda o'ngga,
+ * dy>0 → pastga). `null` = ishonchsiz (ko'z yumuq yoki iris nuqtalari yo'q).
+ */
+export function computeIrisGaze(lm: Pt[]): { dx: number; dy: number } | null {
+  // Iris nuqtalari faqat 478-nuqtali modelda bor — bo'lmasa jim o'tkazamiz.
+  if (!lm || lm.length <= IRIS_R) return null;
+
+  const eyeOffset = (
+    iris: Pt | undefined,
+    c1: Pt | undefined,
+    c2: Pt | undefined,
+    top: Pt | undefined,
+    bot: Pt | undefined,
+  ): { dx: number; dy: number } | null => {
+    if (!iris || !c1 || !c2 || !top || !bot) return null;
+    const w = Math.abs(c2.x - c1.x);
+    const h = Math.abs(bot.y - top.y);
+    if (w < 1e-4) return null;
+    // Ko'z yumuq bo'lsa iris pozitsiyasi ishonchsiz — o'tkazib yuboramiz.
+    if (h / w < EYE_OPEN_MIN_RATIO) return null;
+    const cx = (c1.x + c2.x) / 2;
+    const cy = (top.y + bot.y) / 2;
+    return { dx: (iris.x - cx) / w, dy: (iris.y - cy) / h };
+  };
+
+  const l = eyeOffset(lm[IRIS_L], lm[EYE_L.out], lm[EYE_L.in], lm[EYE_L.top], lm[EYE_L.bot]);
+  const r = eyeOffset(lm[IRIS_R], lm[EYE_R.out], lm[EYE_R.in], lm[EYE_R.top], lm[EYE_R.bot]);
+  if (l && r) return { dx: (l.dx + r.dx) / 2, dy: (l.dy + r.dy) / 2 };
+  return l ?? r;
+}
+
+/** Ko'z chetga/pastga qaraganmi (chegaralar bilan). */
+export function isIrisGazeAway(iris: { dx: number; dy: number } | null): boolean {
+  if (iris == null) return false;
+  return Math.abs(iris.dx) >= IRIS_GAZE_X || iris.dy >= IRIS_GAZE_DOWN;
 }
 
 export interface RealtimeProctorCallbacks {
@@ -236,10 +272,6 @@ export class RealtimeProctor {
   // Og'iz qimirlashi (gapirish) aniqlash
   private mouthHistory: number[] = [];
   private jawOpenHistory: number[] = [];
-  /** Qisqa yon qarashlarni yig'ish — uzluksiz escalate ga yetmasa ham 2 burst = formal. */
-  private gazeBursts = new GazeBurstTracker();
-  /** Iris miltillashini yumshatish — qisqa dropout away holatini buzmasin. */
-  private gazeEma = new GazeEma(0.5);
   // Shu freym uchun davomiy signallarning uzluksiz davomiyligi (ms) — kadr oxirida
   // eng "shoshilinch"i tanlanib onLiveSignal orqali xabar qilinadi.
   private liveMs: Record<LiveSignalType, number> = {
@@ -454,12 +486,11 @@ export class RealtimeProctor {
 
     if (faceCount >= 1) {
       let posStatus = this.checkFacePosition(faces[0]);
-      // Iris EMA + blendshape fusion — badge va analyze uchun.
-      const rawIris = computeIrisGaze(faces[0]);
-      const smoothIris = this.gazeEma.push(rawIris);
-      const blend = computeBlendshapeGaze(faceBlendshapes);
-      const fused = fuseGaze(smoothIris, blend);
-      if (posStatus === 'OK' && fused.away) posStatus = 'GAZE_AWAY';
+      // Qorachiq (iris) — bosh to'g'ri turgan bo'lsa ham ko'z chetga/pastga qarasa,
+      // badge'da "Kameraga qarang" ko'rsatamiz (aks holda talaba hech qanday
+      // fikr-mulohaza olmasdi: bosh pozitsiyasi "OK" bo'lardi).
+      const iris = this.irisGaze(faces[0]);
+      if (posStatus === 'OK' && isIrisGazeAway(iris)) posStatus = 'GAZE_AWAY';
       this.cb.onFaceStatus?.(posStatus);
 
       // Pozitsiya — kichik→katta eskalatsiya: uzluksiz LIVE_SIGNAL_ESCALATE_MS
@@ -471,7 +502,7 @@ export class RealtimeProctor {
       if (this.liveMs.TOO_CLOSE >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TOO_CLOSE');
       if (this.liveMs.OFF_CENTER >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_OFF_CENTER');
 
-      this.analyzeHeadAndMovement(faces[0], faceBlendshapes, handsPresent, fused);
+      this.analyzeHeadAndMovement(faces[0], faceBlendshapes, handsPresent, iris);
     } else {
       // Yuz yo'q — barcha yuzga bog'liq davomiy signallarni so'ndiramiz. MOVEMENT/HAND
       // ham reset qilinmasa, yuz yo'qolganda eskirgan qiymat kamera panelida noto'g'ri
@@ -486,8 +517,6 @@ export class RealtimeProctor {
       this.prevNose = null;
       this.mouthHistory = [];
       this.jawOpenHistory = [];
-      this.gazeBursts.reset();
-      this.gazeEma.reset();
       this.cb.onMouthActivity?.(false);
     }
 
@@ -507,6 +536,10 @@ export class RealtimeProctor {
       .filter(([type]) => CHIP_SIGNAL_TYPES.has(type))
       .sort((a, b) => b[1] - a[1])[0];
     this.cb.onLiveSignal?.(best ? best[0] : null, best ? best[1] : 0);
+  }
+
+  private irisGaze(lm: FaceLandmark[]): { dx: number; dy: number } | null {
+    return computeIrisGaze(lm);
   }
 
   /** Yuzning kadr ichidagi holati — overlay uchun tez javob. */
@@ -541,14 +574,7 @@ export class RealtimeProctor {
     lm: FaceLandmark[],
     blendshapes?: Array<{ categoryName: string; score: number }>,
     handsPresent = false,
-    fused: {
-      away: boolean;
-      direction: GazeDirection | null;
-      left: boolean;
-      right: boolean;
-      down: boolean;
-      up: boolean;
-    } = { away: false, direction: null, left: false, right: false, down: false, up: false },
+    iris: { dx: number; dy: number } | null = null,
   ): void {
     // MediaPipe FaceMesh indekslari: burun=1, chap yuz cheti=234, o'ng=454, manglay=10, iyak=152
     const nose = lm[1];
@@ -565,48 +591,39 @@ export class RealtimeProctor {
     const height = chin.y - top.y || 1e-6;
     const noseRelY = (nose.y - top.y) / height; // ~0.5 markaz
 
+    // Bosh burilishi/gaze — kichik→katta eskalatsiya: yo'nalish qaysi bo'lishidan
+    // qat'iy nazar, kamera panelida umumiy "HEAD_AWAY" sifatida ko'rsatiladi;
+    // rasmiy violation esa aniq yo'nalish bo'yicha alohida hisoblanadi.
     const absYaw = Math.abs(noseRelX);
     const turnMs = this.trackContinuous('turn', absYaw >= YAW_HARD);
     if (turnMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('FACE_TURNED_AWAY');
 
-    // Ko'z (iris+blend) OR bosh poza. Side gaze faqat yuz kuchli burilmaganda.
+    // Qorachiq (iris) — bosh to'g'ri turgan bo'lsa ham ko'z chetga qarasa aniqlanadi.
+    // Bosh-poza signali bilan BIRLASHTIRILADI (yo bosh burilgan, yo ko'z chetda).
+    // Ko'z yumuq / iris yo'q bo'lsa `iris` = null → faqat bosh-poza ishlaydi.
+    const irisLeft = iris != null && iris.dx >= IRIS_GAZE_X;
+    const irisRight = iris != null && iris.dx <= -IRIS_GAZE_X;
+    const irisDown = iris != null && iris.dy >= IRIS_GAZE_DOWN;
+
     const headGazeL = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;
     const headGazeR = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX < 0;
-    const gazeLActive = (headGazeL || fused.left) && absYaw < YAW_HARD;
-    const gazeRActive = (headGazeR || fused.right) && absYaw < YAW_HARD;
-    const gazeDownActive = noseRelY >= PITCH_DOWN || fused.down;
-    const gazeUpActive = noseRelY <= PITCH_UP || fused.up;
+    const gazeLActive = (headGazeL || irisLeft) && absYaw < YAW_HARD;
+    const gazeRActive = (headGazeR || irisRight) && absYaw < YAW_HARD;
+    const gazeLMs = this.trackContinuous('gazeL', gazeLActive);
+    const gazeRMs = this.trackContinuous('gazeR', gazeRActive);
+    if (gazeLMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_LEFT');
+    if (gazeRMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_RIGHT');
 
-    const gazeLMs = this.trackContinuous('gazeL', gazeLActive, GAZE_TRACK_GRACE_MS);
-    const gazeRMs = this.trackContinuous('gazeR', gazeRActive, GAZE_TRACK_GRACE_MS);
-    if (gazeLMs >= GAZE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_LEFT');
-    if (gazeRMs >= GAZE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_RIGHT');
-
-    const gazeUpMs = this.trackContinuous('gazeUp', gazeUpActive, GAZE_TRACK_GRACE_MS);
-    const gazeDownMs = this.trackContinuous('gazeDown', gazeDownActive, GAZE_TRACK_GRACE_MS);
-    if (gazeUpMs >= GAZE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_UP');
-    if (gazeDownMs >= GAZE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_DOWN');
+    const gazeUpMs = this.trackContinuous('gazeUp', noseRelY <= PITCH_UP);
+    const gazeDownMs = this.trackContinuous('gazeDown', noseRelY >= PITCH_DOWN || irisDown);
+    if (gazeUpMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_UP');
+    if (gazeDownMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_DOWN');
 
     this.liveMs.HEAD_AWAY = Math.max(turnMs, gazeLMs, gazeRMs, gazeUpMs, gazeDownMs);
 
-    // Qisqa "ko'z qirida" qarashlar: 2×≥280ms / 12s → rasmiy.
-    let burstDir: GazeDirection | null = null;
-    if (gazeLActive) burstDir = 'left';
-    else if (gazeRActive) burstDir = 'right';
-    else if (gazeDownActive) burstDir = 'down';
-    else if (gazeUpActive) burstDir = 'up';
-    else if (fused.away) burstDir = fused.direction;
-    if (this.gazeBursts.push(Boolean(burstDir), burstDir)) {
-      const d = this.gazeBursts.lastDirection;
-      if (d === 'left') this.emit('GAZE_AWAY_LEFT');
-      else if (d === 'right') this.emit('GAZE_AWAY_RIGHT');
-      else if (d === 'down') this.emit('GAZE_AWAY_DOWN');
-      else if (d === 'up') this.emit('GAZE_AWAY_UP');
-      else this.emit('GAZE_AWAY_LEFT');
-      this.gazeBursts.reset();
-    }
-
-    // Ortiqcha qimirlash
+    // 3) Ortiqcha qimirlash: burun nuqtasining frame'lararo siljishi (EMA bilan tekislash).
+    // Oddiy o'tirishdagi mayda harakat (charchoq, holatni to'g'irlash) jazolanmasin —
+    // kichik→katta eskalatsiya (qonun): 1.5s kichik, 3s rasmiy.
     if (this.prevNose) {
       const dx = nose.x - this.prevNose.x;
       const dy = nose.y - this.prevNose.y;
@@ -617,6 +634,7 @@ export class RealtimeProctor {
     }
     this.prevNose = { x: nose.x, y: nose.y };
 
+    // 4) Og'iz qimirlashi (gapirish): blendshape jawOpen + lab landmark tebranishi.
     this.detectMouthMovement(lm, blendshapes, handsPresent);
   }
 

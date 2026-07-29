@@ -81,14 +81,7 @@ test('yangi sozlama eski sozlamaga qaraganda sezilarli tez', () => {
 });
 
 test('uzluksiz ko\'rinadigan telefon belgilangan vaqtda rasmiy bo\'ladi', () => {
-  const at = msUntilEscalate(always, NEW_CONFIG);
-  assert.notEqual(at, null);
-  // Poll intervaliga bog'liq: birinchi tick escalateMs dan keyin yoki +1 interval.
-  assert.ok(
-    (at as number) >= OBJECT_ESCALATE_MS &&
-      (at as number) <= OBJECT_ESCALATE_MS + DETECT_INTERVAL_MS,
-    `kutilgan ~${OBJECT_ESCALATE_MS}..+${DETECT_INTERVAL_MS}, oldik: ${at}`,
-  );
+  assert.equal(msUntilEscalate(always, NEW_CONFIG), OBJECT_ESCALATE_MS);
 });
 
 test('telefon kadrdan olib qo\'yilsa hisob tozalanadi', () => {

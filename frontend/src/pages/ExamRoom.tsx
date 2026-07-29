@@ -19,7 +19,6 @@ import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '..
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
 import { TabSwitchGuard } from '../lib/tabSwitchGuard';
-import { installExamSiteLock } from '../lib/siteLockHardening';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -130,12 +129,12 @@ const IDENTITY_CHECK_MS = 90_000;
 /** Tab/oynadan shuncha vaqtdan ko'p ketilsa — RASMIY qoidabuzarlik (TAB_SWITCH_HARD).
  *  Qisqa tasodifiy fokus yo'qolishi (brauzer UI, OS bildirishnomasi) hisoblanmaydi.
  *  "Kichik ogohlantirish" bosqichi YO'Q — talaba boshqa tabda uni ko'ra olmaydi. */
-const TAB_AWAY_VIOLATION_MS = 700;
+const TAB_AWAY_VIOLATION_MS = 1200;
 
 /** Fullscreen'ga kirgandan keyin tab-nazorati shuncha vaqt BARQAROR turgach
  *  yoqiladi. Fullscreen o'tishida brauzer beradigan blur/visibility to'lqini
  *  shu oyna ichida tugaydi — shu sababli u qoidabuzarlik deb yozilmaydi. */
-const TAB_GUARD_ARM_MS = 2500;
+const TAB_GUARD_ARM_MS = 3000;
 
 /** Kichik ogohlantirish modali yopilgach — o'sha signal shuncha vaqt qayta ochmaydi. */
 const SMALL_WARN_GRACE_MS = 3000;
@@ -2076,7 +2075,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     onViolations: (types) => {
       for (const t of types) void logViolationRef.current(t);
     },
-    intervalMs: 8_000,
+    intervalMs: 15_000,
     disabled: banned,
   });
 
@@ -2251,18 +2250,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     window.addEventListener('pagehide', onPageHide);
     return () => window.removeEventListener('pagehide', onPageHide);
   }, []);
-
-  // Chrome "site lock" hardening: history trap + Keyboard Lock (FS) + hotkey block.
-  // Alt+Tab / telefon / boshqa monitor BLOKLANMAYDI — faqat brauzer imkoniyatlari.
-  useEffect(() => {
-    if (!sessionStarted || banned) return;
-    return installExamSiteLock({
-      onNavigationAttempt: () => {
-        if (!tabGuardRef.current.armed) return;
-        void logViolationRef.current('TAB_SWITCH_HARD');
-      },
-    });
-  }, [sessionStarted, banned]);
 
   const runSubmitCore = useCallback(
     async (ans: Record<string, string>, fl: number[]) => {
