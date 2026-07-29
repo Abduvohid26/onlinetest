@@ -464,7 +464,49 @@ def _transform_imentor_questions(raw_questions: list[dict]) -> list[dict]:
             row["explanation"] = explanation
         if option_explanations and any(option_explanations):
             row["optionExplanations"] = option_explanations
+        # Manbalar (kitob/maqola). Izoh matnida ularga [1][3] ko'rinishida
+        # ishora qilinadi — shu sabab ro'yxatning TARTIBI muhim.
+        refs = normalize_question_references(q.get("references"))
+        if refs:
+            row["references"] = refs
         out.append(row)
+    return out
+
+
+#: Bitta savolga biriktiriladigan manbalar soni chegarasi (JSON hajmi uchun).
+MAX_QUESTION_REFERENCES = 8
+
+
+def normalize_question_references(raw: Any) -> list[dict]:
+    """iMentor `references` ro'yxatini toza, cheklangan ko'rinishga keltiradi."""
+    if not isinstance(raw, list):
+        return []
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()[:300]
+        url = str(item.get("url") or "").strip()[:500]
+        if not title and not url:
+            continue
+        # Faqat xavfsiz sxemalar — natija sahifasida havola sifatida beriladi.
+        if url and not url.lower().startswith(("http://", "https://")):
+            url = ""
+        key = (title.lower(), url.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        ref = {"title": title}
+        if url:
+            ref["url"] = url
+        for field in ("authors", "publisher", "year"):
+            val = str(item.get(field) or "").strip()[:200]
+            if val:
+                ref[field] = val
+        out.append(ref)
+        if len(out) >= MAX_QUESTION_REFERENCES:
+            break
     return out
 
 
@@ -556,6 +598,11 @@ def _apply_imentor_builtin_translations(
                 ]
             if not (row[f"text_{lang}"] or "").strip() or not row[f"options_{lang}"]:
                 complete = False
+
+        # Manbalar tilga bog'liq emas (kitob/maqola bibliografiyasi) — barcha
+        # tillar uchun manba tilidagi ro'yxat ishlatiladi.
+        if isinstance(q.get("references"), list) and q.get("references"):
+            row["references"] = list(q["references"])
 
         # Manba tilidagi izohlar
         if (q.get("explanation") or "").strip():
@@ -661,6 +708,14 @@ def fetch_random_imentor_questions(
     questions = _transform_imentor_questions(raw_qs)
     if not questions:
         raise IMentorApiError("Testdan foydali savol ajratib bo'lmadi")
+
+    # Ba'zi testlarda manbalar savol darajasida emas, test darajasida keladi
+    # (`payload.references`). Savolning o'z ro'yxati bo'lmasa — o'shani beramiz.
+    payload_refs = normalize_question_references(payload.get("references"))
+    if payload_refs:
+        for q in questions:
+            if not q.get("references"):
+                q["references"] = list(payload_refs)
 
     used_builtin = False
     used_ai = False

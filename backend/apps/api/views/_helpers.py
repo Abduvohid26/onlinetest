@@ -88,6 +88,7 @@ from apps.api.services import (
     prepare_questions_for_grading,
     public_base_url,
     question_has_api_explanations,
+    question_references,
     resolve_student_exam_language,
     shuffle_in_place,
 )
@@ -966,6 +967,9 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang
                     if question_has_api_explanations(q_loc) or question_has_api_explanations(q)
                     else (ai.get("source") or "fallback")
                 ),
+                "references": (ai_row or {}).get("references")
+                or question_references(q_loc)
+                or question_references(q),
             }
         )
     pct = round((se.score / total) * 100) if total else 0

@@ -12,6 +12,10 @@ from unittest import mock
 from django.test import TestCase
 
 from apps.api.gemini_tools import paraphrase_medical_mcqs
+from apps.api.imentor_service import (
+    _transform_imentor_questions,
+    normalize_question_references,
+)
 from apps.api.services import (
     build_exam_ai_summary,
     build_fallback_ai_summary,
@@ -19,11 +23,24 @@ from apps.api.services import (
     exam_questions_add_translations,
     localize_exam_question,
     question_has_api_explanations,
+    question_references,
 )
+
+
+REFERENCES = [
+    {
+        "url": "https://pubmed.ncbi.nlm.nih.gov/29420409/",
+        "year": "2018",
+        "title": "Nausea and Vomiting of Pregnancy",
+        "authors": "ACOG Practice Bulletin",
+        "publisher": "American College of Obstetricians and Gynecologists",
+    },
+]
 
 
 def _imentor_question() -> dict:
     return {
+        "references": [dict(r) for r in REFERENCES],
         "id": 1,
         "text": "Homiladorlikda qusishda qaysi dori minimal xavf tug'diradi?",
         "options": ["Dimenhidrinat", "Meclizine", "Pyridoxine (B6)", "Prometazin"],
@@ -185,3 +202,94 @@ class AiSummaryPrefersApiTests(TestCase):
         summary = build_fallback_ai_summary([_imentor_question()], {"1": "Pyridoxine (B6)"})
         self.assertEqual(summary["source"], "api")
         self.assertIn("Manba: kitob, 120-bet", summary["items"][0]["commentCorrect"])
+
+
+class QuestionReferencesTests(TestCase):
+    """Manba (kitob/maqola) natija sahifasigacha yetib borishi.
+
+    iMentor izohda manbalarga [1][2] bilan ishora qiladi, ro'yxatning o'zi esa
+    alohida `references` maydonida keladi. Bu maydon ilgari umuman o'qilmasdi —
+    shu sababli natijada manba ko'rinmasdi.
+    """
+
+    def test_transform_reads_references_from_api(self):
+        out = _transform_imentor_questions(
+            [
+                {
+                    "question": "Savol",
+                    "options": ["A", "B"],
+                    "correctOptionIndex": 0,
+                    "explanation": "Izoh [1].",
+                    "references": REFERENCES,
+                }
+            ]
+        )
+        refs = out[0]["references"]
+        self.assertEqual(len(refs), 1)
+        self.assertEqual(refs[0]["title"], "Nausea and Vomiting of Pregnancy")
+        self.assertEqual(refs[0]["year"], "2018")
+
+    def test_normalize_drops_unsafe_url_but_keeps_title(self):
+        refs = normalize_question_references(
+            [{"title": "Kitob", "url": "javascript:alert(1)"}]
+        )
+        self.assertEqual(refs, [{"title": "Kitob"}])
+
+    def test_normalize_skips_empty_and_duplicates(self):
+        refs = normalize_question_references(
+            [
+                {"title": "Bir xil", "url": "https://a.example/1"},
+                {"title": "Bir xil", "url": "https://a.example/1"},
+                {"publisher": "faqat nashriyot"},
+                "matn",
+            ]
+        )
+        self.assertEqual(len(refs), 1)
+
+    def test_references_survive_paraphrase(self):
+        with (
+            mock.patch("apps.api.gemini_tools.api_key_configured", return_value=True),
+            mock.patch("apps.api.gemini_tools._client", return_value=object()),
+            mock.patch("apps.api.gemini_tools._generate", return_value="[]"),
+            mock.patch(
+                "apps.api.gemini_tools._extract_json_array_from_model_text",
+                return_value=[
+                    {
+                        "t": "Qayta yozilgan",
+                        "o": ["Dimenhidrinat", "Meclizine", "Vitamin B6", "Prometazin"],
+                        "ca": "Vitamin B6",
+                    }
+                ],
+            ),
+        ):
+            out = paraphrase_medical_mcqs([_imentor_question()], "uz")
+        self.assertEqual(question_references(out[0]), REFERENCES)
+
+    def test_references_survive_translation_and_localization(self):
+        q = exam_question_with_translations(
+            _imentor_question(),
+            {
+                "text_ru": "Русский",
+                "text_en": "English",
+                "options_ru": ["Д", "М", "П", "Пр"],
+                "options_en": ["D", "M", "P", "Pr"],
+                "correct_answer_ru": "П",
+                "correct_answer_en": "P",
+            },
+            "uz",
+        )
+        self.assertEqual(question_references(q), REFERENCES)
+        # Manbalar tilga bog'liq emas — har uch tilda bir xil ro'yxat.
+        for lang in ("uz", "ru", "en"):
+            self.assertEqual(question_references(localize_exam_question(q, lang)), REFERENCES)
+
+    def test_summary_item_carries_references(self):
+        summary = build_exam_ai_summary([_imentor_question()], {"1": "Dimenhidrinat"}, "uz")
+        item = summary["items"][0]
+        self.assertEqual(item["explanationSource"], "api")
+        self.assertEqual(item["references"], REFERENCES)
+
+    def test_ai_sourced_item_has_no_references(self):
+        no_api = {"id": 2, "text": "Izohsiz", "options": ["A", "B"], "correctAnswer": "A"}
+        summary = build_fallback_ai_summary([no_api], {"2": "B"})
+        self.assertEqual(summary["items"][0]["references"], [])

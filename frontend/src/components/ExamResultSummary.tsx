@@ -7,6 +7,15 @@ import { apiUrl } from '../lib/apiUrl';
 import { translations, Language } from '../i18n';
 import { cleanQuestionPrompt } from '../lib/examQuestionUtils';
 
+/** iMentor API bergan manba (kitob/maqola). Izohda [1][2] bilan ishora qilinadi. */
+export type ResultReference = {
+  title?: string;
+  url?: string;
+  authors?: string;
+  publisher?: string;
+  year?: string;
+};
+
 export type ResultQuestionRow = {
   id: number;
   text: string;
@@ -19,7 +28,51 @@ export type ResultQuestionRow = {
   whyCorrectIsRight: string;
   /** "api" | "ai" | "fallback" — tushuntirish manbasi */
   explanationSource?: string;
+  /** Manbalar ro'yxati — tartibi izohdagi [1][2] raqamlariga mos. */
+  references?: ResultReference[];
 };
+
+/**
+ * Savol izohi ostidagi manbalar ro'yxati. Raqamlash izohdagi [1][2]
+ * ishoralariga mos keladi — shuning uchun tartib o'zgartirilmaydi.
+ */
+function ReferenceList({ refs, label }: { refs?: ResultReference[]; label: string }) {
+  const rows = (refs || []).filter((r) => r && (r.title || r.url));
+  if (rows.length === 0) return null;
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-100">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 mb-1.5">
+        {label}
+      </p>
+      <ol className="space-y-1">
+        {rows.map((r, i) => {
+          const meta = [r.authors, r.publisher, r.year].filter(Boolean).join(' · ');
+          const title = r.title || r.url || '';
+          return (
+            <li key={`${title}-${i}`} className="text-xs text-slate-500 leading-relaxed flex gap-1.5">
+              <span className="shrink-0 tabular-nums text-slate-400">[{i + 1}]</span>
+              <span className="min-w-0">
+                {r.url ? (
+                  <a
+                    href={r.url}
+                    target="_blank"
+                    rel="noopener noreferrer nofollow"
+                    className="text-indigo-600 hover:text-indigo-700 hover:underline break-words"
+                  >
+                    {title}
+                  </a>
+                ) : (
+                  <span className="text-slate-600 break-words">{title}</span>
+                )}
+                {meta && <span className="text-slate-400"> — {meta}</span>}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
 
 export type ExamResultPayload = {
   exam_id?: number;
@@ -334,6 +387,7 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                   {q.whyCorrectIsRight}
                 </p>
               )}
+              <ReferenceList refs={q.references} label={t.resultReferencesLabel} />
             </div>
           </motion.div>
           );

@@ -61,7 +61,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveClipboard: "Nusxa ko'chirish urinishi — to'xtating",
     liveDevtools: "Developer tools urinishi — to'xtating",
     liveTabSwitch: "Boshqa oynaga o'tildi — imtihonga qayting",
-    livePhone: "Telefon aniqlandi — yashiring",
+    livePhone: "Telefon aniqlandi — telefon ishlatmang",
     liveBook: "Kitob/daftar aniqlandi — olib qo'ying",
     liveLaptop: "Noutbuk aniqlandi — olib qo'ying",
   },
@@ -89,7 +89,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveClipboard: 'Попытка копирования — прекратите',
     liveDevtools: 'Попытка открыть Developer tools — прекратите',
     liveTabSwitch: 'Переход в другое окно — вернитесь к экзамену',
-    livePhone: 'Обнаружен телефон — уберите',
+    livePhone: 'Обнаружен телефон — не пользуйтесь телефоном',
     liveBook: 'Обнаружена книга/тетрадь — уберите',
     liveLaptop: 'Обнаружен ноутбук — уберите',
   },
@@ -117,7 +117,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveClipboard: 'Copy attempt — please stop',
     liveDevtools: 'Developer tools attempt — please stop',
     liveTabSwitch: 'Switched to another window — return to the exam',
-    livePhone: 'Phone detected — put it away',
+    livePhone: 'Phone detected — do not use a phone',
     liveBook: 'Book/notebook detected — put it away',
     liveLaptop: 'Laptop detected — put it away',
   },
@@ -769,9 +769,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const fullscreenSuppressRef = useRef(false);
   const needsFullscreenRef = useRef(false);
 
-  /** Fullscreen hozir yo'q — ingichka eslatma chizig'i ko'rsatiladi va
-   *  tab-nazorati o'chirilgan turadi (bloklovchi modal yo'q). */
-  const [needsFullscreen, setNeedsFullscreen] = useState(false);
 
   // ── Tab/oyna almashtirish nazorati: "qurollangan" holat ──────────────────
   // MUAMMO: fullscreen'ga kirish/chiqishda brauzer (ayniqsa Linux oyna
@@ -834,7 +831,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
-        setNeedsFullscreen(false);
         // Kirdik — lekin nazorat darhol yoqilmaydi: barqarorlik hisoblagichi
         // (TAB_GUARD_ARM_MS) o'tgach o'zi yoqiladi.
         disarmTabGuard();
@@ -848,7 +844,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         // Sessiya boshlangan bo'lsa — tugma orqali qayta urinish uchun gate.
         if (sessionStartedRef.current) {
           needsFullscreenRef.current = true;
-          setNeedsFullscreen(true);
         }
       });
   }, [getFullscreenElement]);
@@ -868,7 +863,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
-        setNeedsFullscreen(false);
         return;
       }
 
@@ -888,7 +882,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // yuqorida allaqachon o'chirilgan, shu sabab tartib ahamiyatsiz.
       blurIgnoreUntilRef.current = Date.now() + 8000;
       needsFullscreenRef.current = true;
-      setNeedsFullscreen(true);
     };
 
     onFullscreenChange();
@@ -910,7 +903,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (getFullscreenElement()) {
         if (needsFullscreenRef.current) {
           needsFullscreenRef.current = false;
-          setNeedsFullscreen(false);
         }
         return;
       }
@@ -918,7 +910,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         disarmTabGuard();
         blurIgnoreUntilRef.current = Date.now() + 8000;
         needsFullscreenRef.current = true;
-        setNeedsFullscreen(true);
       }
     };
     tick();
@@ -1236,7 +1227,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     recoverCameraPreview();
     fullscreenSuppressRef.current = true;
     needsFullscreenRef.current = false;
-    setNeedsFullscreen(false);
     void requestExamFullscreen();
   }, [recoverCameraPreview]);
 
@@ -1258,7 +1248,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     postWarningGraceUntilRef.current = Date.now() + 8000;
     fullscreenSuppressRef.current = true;
     needsFullscreenRef.current = false;
-    setNeedsFullscreen(false);
     setProctorRetryNonce((n) => n + 1);
     recoverCameraPreview();
     void requestExamFullscreen();
@@ -2396,7 +2385,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // Fullscreen ochilmagan / rad etilgan — darhol gate (imtihon blok).
       if (fullscreenSupportedRef.current && !getFullscreenElement()) {
         needsFullscreenRef.current = true;
-        setNeedsFullscreen(true);
       }
     } catch {
       setStartError(t.preExamNetworkError);
@@ -2486,7 +2474,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 setWarningQueue([]);
                 fullscreenSuppressRef.current = true;
                 needsFullscreenRef.current = false;
-                setNeedsFullscreen(false);
                 requestExamFullscreen();
               }}
               className="w-full py-3 rounded-xl sm:rounded-lg font-semibold text-sm sm:text-base bg-red-600 hover:bg-red-700 text-white transition-all active:scale-[0.98]"
@@ -2879,26 +2866,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   return (
     <div className="h-[100dvh] flex flex-col bg-gray-50 overflow-hidden select-none">
-      {/* ── Fullscreen holati: BLOKLOVCHI MODAL YO'Q ──
-          Modal olib tashlandi — fullscreen avtomatik tiklanadi
-          (`ensureFullscreenOnGesture`: har qanday klik/tugma bosish). Bu yerda
-          faqat ingichka, bosishga xalaqit bermaydigan eslatma chizig'i qoladi,
-          shunda talaba imtihonni davom ettiraverar ekan holatdan xabardor bo'ladi. */}
-      <AnimatePresence>
-        {needsFullscreen && !banned && sessionStarted && (
-          <motion.button
-            type="button"
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            onClick={requestExamFullscreen}
-            className="fixed inset-x-0 top-0 z-[10060] flex items-center justify-center gap-2 bg-indigo-600 px-4 py-2 text-center text-xs sm:text-sm font-medium text-white shadow-md"
-          >
-            <svg className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
-            <span>{t.examFullscreenAutoHint}</span>
-          </motion.button>
-        )}
-      </AnimatePresence>
+      {/* Fullscreen uchun UI YO'Q — na modal, na chiziq. Talabaning birinchi
+          klik/tugma bosishida `ensureFullscreenOnGesture` uni o'zi yoqadi
+          (brauzer fullscreen'ni faqat foydalanuvchi harakati ichida beradi).
+          Fullscreen yo'q paytda tab-nazorati o'chirilgan turadi — bu holat
+          uchun talabaga hech qanday qoidabuzarlik yozilmaydi. */}
 
       {/* ── Yuqori panel: sarlavha + progress + taymer + topshirish ── */}
       <header className="shrink-0 bg-white border-b border-gray-200 shadow-sm">

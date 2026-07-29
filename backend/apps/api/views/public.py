@@ -91,6 +91,7 @@ def public_verify_result(request, result_id: str):
                     if question_has_api_explanations(q)
                     else (ai.get("source") or "fallback")
                 ),
+                "references": (ai_row or {}).get("references") or question_references(q),
             }
         )
     pdf_rel = f"/api/public/verify-result/{result_id}/certificate.pdf?k={k}"
@@ -172,6 +173,9 @@ def public_verify_certificate_pdf(request, result_id: str):
                     if question_has_api_explanations(q_loc) or question_has_api_explanations(q)
                     else (ai.get("source") or "fallback")
                 ),
+                "references": (ai_row or {}).get("references")
+                or question_references(q_loc)
+                or question_references(q),
             }
         )
     rows = result_questions_to_pdf_rows(per_q)

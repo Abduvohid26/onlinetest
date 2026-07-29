@@ -63,6 +63,14 @@ def _api_explanation_pair(q: dict, student_answer: str, *, is_correct: bool) -> 
     return ("", why_wrong, why_right)
 
 
+def question_references(q: dict) -> list[dict]:
+    """Savolga biriktirilgan manbalar (iMentor `references`). Bo'sh bo'lishi mumkin."""
+    refs = q.get("references") if isinstance(q, dict) else None
+    if not isinstance(refs, list):
+        return []
+    return [r for r in refs if isinstance(r, dict) and (r.get("title") or r.get("url"))]
+
+
 def question_has_api_explanations(q: dict) -> bool:
     if str(q.get("explanation") or "").strip():
         return True
@@ -100,6 +108,7 @@ def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) ->
                 "whyStudentWrong": why_wrong,
                 "whyCorrectIsRight": why_right,
                 "explanationSource": item_source,
+                "references": question_references(q) if item_source == "api" else [],
             }
         )
     if used_api == len(questions) and questions:
@@ -161,6 +170,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
                     "whyStudentWrong": "" if ok else (w_api or ai_row.get("whyStudentWrong") or ""),
                     "whyCorrectIsRight": "" if ok else (r_api or ai_row.get("whyCorrectIsRight") or ""),
                     "explanationSource": "api",
+                    "references": question_references(q),
                 }
             )
         else:
@@ -173,6 +183,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
                     "whyStudentWrong": "" if ok else ai_row.get("whyStudentWrong", ""),
                     "whyCorrectIsRight": "" if ok else ai_row.get("whyCorrectIsRight", ""),
                     "explanationSource": "ai" if (ai.get("source") == "ai") else str(ai_row.get("explanationSource") or ai.get("source") or "ai"),
+                    "references": [],
                 }
             )
 
@@ -617,6 +628,11 @@ def _carry_api_explanations(src_q: dict, out: dict, source_lang: str) -> None:
         val = src_q.get(key)
         if isinstance(val, list) and any(str(x).strip() for x in val):
             out[key] = [str(x).strip() for x in val]
+
+    # Manbalar (kitob/maqola) — tilga bog'liq emas, o'zgarishsiz ko'chiriladi.
+    refs = src_q.get("references")
+    if isinstance(refs, list) and refs:
+        out["references"] = list(refs)
 
 
 def exam_questions_add_translations(questions: list[dict], source_language: str | None = None) -> list[dict]:

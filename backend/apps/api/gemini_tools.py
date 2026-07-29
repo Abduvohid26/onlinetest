@@ -1240,6 +1240,10 @@ def _carry_paraphrase_fields(src: dict, dst: dict, option_count: int) -> None:
                 dst[key] = val
         elif str(val or "").strip():
             dst[key] = str(val).strip()
+    # Manbalar (kitob/maqola) savol matni qayta yozilsa ham o'zgarmaydi.
+    refs = src.get("references")
+    if isinstance(refs, list) and refs:
+        dst["references"] = list(refs)
     for key in _PARAPHRASE_KEEP_LIST:
         val = src.get(key)
         if not isinstance(val, list) or not any(str(x).strip() for x in val):

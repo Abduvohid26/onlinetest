@@ -5,7 +5,7 @@ VIOLATION_REASON_UZ: dict[str, str] = {
     "SUSPICIOUS_AUDIO": "Shovqin aniqlandi! Jimlik saqlang, gapirmang.",
     "FACE_NOT_VISIBLE": "Yuzingiz kamerada ko'rinmayapti! To'g'ri o'tiring va kameraga qarang.",
     "MULTIPLE_FACES": "Kadrda bir nechta shaxs aniqlandi! Boshqalar kameradan uzoqlashsin.",
-    "FORBIDDEN_OBJECT_CELL_PHONE": "Telefon aniqlandi! Telefoni yashiring yoki stoldan olib qo'ying.",
+    "FORBIDDEN_OBJECT_CELL_PHONE": "Telefon aniqlandi! Imtihon davomida telefon ishlatmang.",
     "FORBIDDEN_OBJECT_LAPTOP": "Noutbuk aniqlandi! Ruxsatsiz qurilmani olib qo'ying.",
     "FORBIDDEN_OBJECT_BOOK": "Kitob aniqlandi! Ruxsatsiz materiallarni olib qo'ying.",
     "TAB_SWITCH_SOFT": "Boshqa oynaga o'tildi! Imtihon oynasini yopmang.",

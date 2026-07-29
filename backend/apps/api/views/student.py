@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
-from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations
+from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations, question_references
 from apps.api.proctor_config import max_warnings_before_ban, warn_suppress_seconds
 from apps.api.proctor_escalation import (
     apply_official_warning_or_ban,
@@ -914,6 +914,7 @@ def student_exams_submit(request, pk: int):
                 "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
                 "explanationSource": (ai_row or {}).get("explanationSource")
                 or ("api" if question_has_api_explanations(q) else (ai_summary.get("source") or "fallback")),
+                "references": (ai_row or {}).get("references") or question_references(q),
             }
         )
     return _exam_guarded_response(
