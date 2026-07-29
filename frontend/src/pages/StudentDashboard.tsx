@@ -408,6 +408,8 @@ export function StudentDashboard({
   }, [results, resultStatusFilter]);
 
   const firstName = (user?.name || '').toString().trim().split(/\s+/)[0] || '';
+  const groupName = (user?.group_name || '').toString().trim();
+  const greetingName = [firstName, groupName ? `(${groupName})` : ''].filter(Boolean).join(' ');
 
   const Tab = ({ id, label, count }: { id: 'available' | 'results'; label: string; count: number }) => {
     const active = activeTab === id;
@@ -463,7 +465,7 @@ export function StudentDashboard({
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-5">
         <div className="min-w-0">
           <h1 className="text-[22px] sm:text-[26px] font-bold tracking-tight text-gray-900 leading-tight">
-            {L.greeting}{firstName ? `, ${firstName}` : ''}
+            {L.greeting}{greetingName ? `, ${greetingName}` : ''}
           </h1>
           <p className="text-[13.5px] text-gray-500 mt-1">
             {visibleExams.length > 0

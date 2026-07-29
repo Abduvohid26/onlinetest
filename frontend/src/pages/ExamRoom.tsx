@@ -20,7 +20,7 @@ import { ViolationGate } from '../lib/violationGate';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
-import { translations, Language, banReasonLabel } from '../i18n';
+import { translations, Language, banReasonLabel, formatPreExamMediaAccessFailure } from '../i18n';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
@@ -501,6 +501,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const identityStatusTimerRef = useRef<number | null>(null);
   const [proctorRetryNonce, setProctorRetryNonce] = useState(0);
   const [cameraPreviewOk, setCameraPreviewOk] = useState(false);
+  const [micReady, setMicReady] = useState(false);
+  /** Bir marta ochilgach, mid-exam media qayta urinishida savollarni yashirmaymiz. */
+  const [startMediaGateDone, setStartMediaGateDone] = useState(false);
   const [cameraErrorHint, setCameraErrorHint] = useState('');
   const enableSizeHeuristicDevtools =
     String(import.meta.env.VITE_DEVTOOLS_SIZE_HEURISTIC || '').toLowerCase().trim() === 'true';
@@ -509,6 +512,31 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     challengeSeed: exam.sessionChallenge as string | undefined,
   });
 
+  const proctorMediaReady = cameraPreviewOk && micReady && !cameraErrorHint;
+  /** Latch: bir marta ochilgach mid-exam media uzilishida savollarni yashirmaymiz. */
+  const questionsUnlocked = startMediaGateDone || proctorMediaReady;
+  const showExamMediaGate = Boolean(sessionStarted && !banned && !questionsUnlocked);
+
+  useEffect(() => {
+    if (!sessionStarted || banned) return;
+    if (proctorMediaReady) setStartMediaGateDone(true);
+  }, [sessionStarted, banned, proctorMediaReady]);
+
+  // getUserMedia osilib qolsa — cheksiz spinner o'rniga qayta urinish.
+  useEffect(() => {
+    if (!showExamMediaGate || cameraErrorHint) return;
+    const id = window.setTimeout(() => {
+      setCameraErrorHint(translations[lang].preExamMediaInUse);
+    }, 45_000);
+    return () => window.clearTimeout(id);
+  }, [showExamMediaGate, cameraErrorHint, lang]);
+
+  const syncMicReadyFromStream = useCallback((stream: MediaStream | null | undefined) => {
+    const tracks = stream?.getAudioTracks?.() ?? [];
+    const live = tracks.some((t) => t.readyState === 'live' && t.enabled);
+    setMicReady(live);
+    return live;
+  }, []);
   useEffect(() => {
     vacStateRef.current = {
       seq: Number(exam.sessionSeqStart || 1),
@@ -726,72 +754,130 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const fullscreenSuppressRef = useRef(false);
   /** Foydalanuvchi ESC bilan ataylab chiqdi */
   const userEscFullscreenExitRef = useRef(false);
+  /** Bitta chiqish epizodi uchun bir marta FULLSCREEN_EXIT_HARD yoziladi */
+  const fsExitLoggedRef = useRef(false);
   const needsFullscreenRef = useRef(false);
 
-  // Majburiy fullscreen (kiosk): faqat ESC bilan chiqilganda gate ko'rsatiladi.
+  // Majburiy fullscreen (kiosk): sessiya davomida doim fullscreen; chiqilsa gate.
   const [needsFullscreen, setNeedsFullscreen] = useState(false);
+
+  const getFullscreenElement = useCallback((): Element | null => {
+    const doc = document as Document & {
+      webkitFullscreenElement?: Element | null;
+      msFullscreenElement?: Element | null;
+    };
+    return doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement || null;
+  }, []);
+
   const fullscreenSupportedRef = useRef(
-    typeof document !== 'undefined' && !!document.documentElement.requestFullscreen,
+    typeof document !== 'undefined' &&
+      !!(
+        document.documentElement.requestFullscreen ||
+        (document.documentElement as HTMLElement & { webkitRequestFullscreen?: () => Promise<void> })
+          .webkitRequestFullscreen
+      ),
   );
 
   const requestExamFullscreen = useCallback(() => {
-    const el = document.documentElement;
-    if (document.fullscreenElement || !el.requestFullscreen) return;
+    const el = document.documentElement as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+      msRequestFullscreen?: () => Promise<void> | void;
+    };
+    if (getFullscreenElement()) return;
+    const req =
+      el.requestFullscreen?.bind(el) ||
+      el.webkitRequestFullscreen?.bind(el) ||
+      el.msRequestFullscreen?.bind(el);
+    if (!req) return;
     fullscreenRequestedRef.current = true;
     fullscreenSuppressRef.current = true;
     blurIgnoreUntilRef.current = Date.now() + 3000;
-    el.requestFullscreen().then(
-      () => {
+    Promise.resolve(req())
+      .then(() => {
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         userEscFullscreenExitRef.current = false;
+        fsExitLoggedRef.current = false;
         needsFullscreenRef.current = false;
         setNeedsFullscreen(false);
-      },
-      () => {
+      })
+      .catch(() => {
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
-      },
-    );
-  }, []);
+        // Sessiya boshlangan bo'lsa — tugma orqali qayta urinish uchun gate.
+        if (sessionStartedRef.current) {
+          needsFullscreenRef.current = true;
+          setNeedsFullscreen(true);
+        }
+      });
+  }, [getFullscreenElement]);
 
   useEffect(() => {
     if (!fullscreenSupportedRef.current) return;
 
     const onFullscreenChange = () => {
-      if (document.fullscreenElement) {
+      if (getFullscreenElement()) {
         fullscreenEnteredRef.current = true;
         fullscreenRequestedRef.current = false;
         userEscFullscreenExitRef.current = false;
+        fsExitLoggedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
         setNeedsFullscreen(false);
         return;
       }
 
-      if (!fullscreenEnteredRef.current || bannedRef.current) return;
+      // Sessiya boshlanmagan — gate kerak emas.
+      if (!sessionStartedRef.current || bannedRef.current) return;
 
+      // Ogohlantirish modallari ba'zan FS dan chiqaradi — buni jazalamaymiz,
+      // lekin watchdog keyinroq qayta gate ochadi.
       if (fullscreenSuppressRef.current || warningModalShowingRef.current) {
         return;
       }
 
-      if (userEscFullscreenExitRef.current && sessionStartedRef.current) {
-        userEscFullscreenExitRef.current = false;
-        needsFullscreenRef.current = true;
-        setNeedsFullscreen(true);
+      // Har qanday chiqish (ESC, F11, brauzer UI) — imtihonni bloklab qayta FS talab.
+      needsFullscreenRef.current = true;
+      setNeedsFullscreen(true);
+      if (!fsExitLoggedRef.current) {
+        fsExitLoggedRef.current = true;
         void logViolationRef.current('FULLSCREEN_EXIT_HARD');
-        return;
       }
-
-      // Boshqa sabab (brauzer UI) — gate ko'rsatilmaydi; keyingi klikda qayta fullscreen.
-      needsFullscreenRef.current = false;
-      setNeedsFullscreen(false);
+      userEscFullscreenExitRef.current = false;
     };
 
     onFullscreenChange();
     document.addEventListener('fullscreenchange', onFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', onFullscreenChange);
-  }, []);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange as EventListener);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange as EventListener);
+    };
+  }, [getFullscreenElement]);
+
+  // Watchdog: sessiya ochiq, lekin fullscreen yo'q → gate (brauzer gesture'siz
+  // requestFullscreen qilolmaydi — shu sabab faqat UI bloklanadi).
+  useEffect(() => {
+    if (!sessionStarted || banned || !fullscreenSupportedRef.current) return;
+    const tick = () => {
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      if (fullscreenSuppressRef.current || warningModalShowingRef.current) return;
+      if (getFullscreenElement()) {
+        if (needsFullscreenRef.current) {
+          needsFullscreenRef.current = false;
+          setNeedsFullscreen(false);
+        }
+        return;
+      }
+      if (!needsFullscreenRef.current) {
+        needsFullscreenRef.current = true;
+        setNeedsFullscreen(true);
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1200);
+    return () => clearInterval(id);
+  }, [sessionStarted, banned, getFullscreenElement]);
 
   useEffect(() => {
     const ua = navigator.userAgent || '';
@@ -1040,12 +1126,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       .play()
       .then(() => {
         setCameraPreviewOk(true);
-        setCameraErrorHint('');
+        if (syncMicReadyFromStream(s)) setCameraErrorHint('');
       })
       .catch(() => {
         setProctorRetryNonce((n) => n + 1);
       });
-  }, []);
+  }, [syncMicReadyFromStream]);
 
   const resumeAfterViolationAck = useCallback(() => {
     warningModalShowingRef.current = false;
@@ -1091,6 +1177,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const v = videoRef.current;
       const s = streamRef.current;
       const vt = s?.getVideoTracks?.()?.[0];
+      syncMicReadyFromStream(s);
       if (!v || !s || !vt) return;
       if (vt.readyState !== 'live') {
         setCameraPreviewOk(false);
@@ -1102,12 +1189,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (v.readyState >= 2 && !v.paused) {
         if (!cameraPreviewOk) {
           setCameraPreviewOk(true);
-          setCameraErrorHint('');
+          if (syncMicReadyFromStream(s)) setCameraErrorHint('');
         }
       }
     }, 2500);
     return () => window.clearInterval(id);
-  }, [banned, cameraPreviewOk]);
+  }, [banned, cameraPreviewOk, syncMicReadyFromStream]);
 
   useEffect(() => {
     if (banned) return;
@@ -1121,7 +1208,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         .play()
         .then(() => {
           setCameraPreviewOk(true);
-          setCameraErrorHint('');
+          if (syncMicReadyFromStream(s)) setCameraErrorHint('');
         })
         .catch(() => {
           setCameraPreviewOk(false);
@@ -1137,7 +1224,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [proctorStreamRevision, banned]);
+  }, [proctorStreamRevision, banned, syncMicReadyFromStream]);
 
   // --- AI Proctoring Setup & Security ---
   useEffect(() => {
@@ -1156,7 +1243,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = (e.key || '').toLowerCase();
-      if (key === 'escape' && document.fullscreenElement && sessionStartedRef.current) {
+      if (key === 'escape' && getFullscreenElement() && sessionStartedRef.current) {
         userEscFullscreenExitRef.current = true;
       }
       if (isPrintScreenKeyboardEvent(e)) {
@@ -1170,7 +1257,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         ((e.ctrlKey || e.metaKey) && e.shiftKey && ['i', 'j'].includes(key));
       if (isDevtoolsCombo) {
         e.preventDefault();
-        if (document.hasFocus() && Boolean(document.fullscreenElement)) {
+        if (document.hasFocus() && Boolean(getFullscreenElement())) {
           markGateEvent('DEVTOOLS_OPEN');
         }
         return;
@@ -1217,7 +1304,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       let consecutiveHits = 0;
       devtoolsTick = window.setInterval(() => {
         if (bannedRef.current || !sessionStartedRef.current) return;
-        if (!document.fullscreenElement || !document.hasFocus()) {
+        if (!getFullscreenElement() || !document.hasFocus()) {
           consecutiveHits = 0;
           return;
         }
@@ -1240,7 +1327,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
       if (bannedRef.current) return;
       if (needsFullscreenRef.current) return;
-      if (document.fullscreenElement) return;
+      if (getFullscreenElement()) return;
       requestExamFullscreen();
     };
     window.addEventListener('pointerdown', ensureFullscreenOnGesture, { capture: true });
@@ -1249,9 +1336,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       try {
         setCameraErrorHint('');
         setCameraPreviewOk(false);
+        setMicReady(false);
         const stream = await openPreferredProctorStream();
         streamRef.current = stream;
         setProctorStreamRevision((n) => n + 1);
+
+        const micOk = syncMicReadyFromStream(stream);
+        if (!micOk) {
+          // Kamera ochilgan bo'lishi mumkin, lekin savollar mikrofon siz ochilmasin.
+          setCameraErrorHint(translations[langRef.current].examMediaMicRequired);
+        }
 
         // Django Channels WebSocket (Node.js Socket.IO o'rniga)
         const wsUrl = buildRealtimeUrl(token);
@@ -1384,6 +1478,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       } catch (err) {
         setCameraPreviewOk(false);
+        setMicReady(false);
         if (err instanceof DOMException && err.message === VIRTUAL_CAMERA_BLOCKED_MESSAGE) {
           setCameraErrorHint(translations[langRef.current].virtualCameraBlocked);
           // Alohida mahalliy xabar YO'Q — bu haqiqiy qoidabuzarlik, logViolation
@@ -1391,7 +1486,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           void logViolationRef.current('VIRTUAL_WEBCAM_SUSPECTED');
         } else {
           console.error('Failed to setup AI proctoring:', err);
-          setCameraErrorHint(translations[langRef.current].examCameraPlayBlocked);
+          setCameraErrorHint(formatPreExamMediaAccessFailure(err, langRef.current));
           void logViolationRef.current('CAMERA_MIC_ACCESS_FAILED');
         }
       }
@@ -1413,8 +1508,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       document.removeEventListener('gesturechange', blockGesture);
       if (devtoolsTick !== null) clearInterval(devtoolsTick);
       
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+      if (getFullscreenElement()) {
+        const doc = document as Document & {
+          webkitExitFullscreen?: () => Promise<void> | void;
+          msExitFullscreen?: () => Promise<void> | void;
+        };
+        const exit =
+          doc.exitFullscreen?.bind(doc) ||
+          doc.webkitExitFullscreen?.bind(doc) ||
+          doc.msExitFullscreen?.bind(doc);
+        void Promise.resolve(exit?.()).catch(() => {});
       }
 
       socketRef.current?.destroy();
@@ -1427,7 +1530,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         audioContextRef.current.close().catch(() => {});
       }
     };
-  }, [banned, exam.id, token, user.id, proctorRetryNonce, requestExamFullscreen]);
+  }, [banned, exam.id, token, user.id, proctorRetryNonce, requestExamFullscreen, syncMicReadyFromStream]);
 
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   // Qonun (README.md "Proctoring eskalatsiya qoidasi") bilan bir xil ikki bosqich:
@@ -1443,9 +1546,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Ovoz manbali kichik yorliq — kamera panelida video signalidan ALOHIDA qatorda
    *  ko'rsatiladi (shovqin va gapirish matni farqlanishi uchun). */
   const [audioLiveLabel, setAudioLiveLabel] = useState<string | null>(null);
-  /** VAQTINCHA DEBUG: audio qiymatlarini ekranda ko'rsatish (ovoz-aniqlash muammosini
-   *  aniqlash uchun; muammo hal bo'lgach olib tashlanadi). */
-  const audioDbgTickRef = useRef(0);
 
   useEffect(() => {
     if (banned) return;
@@ -1453,9 +1553,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
     if (!ambientTrackerRef.current) ambientTrackerRef.current = new AmbientNoiseTracker();
-    // Ovoz (gapirish): grace 400ms — so'zlar orasidagi pauza ko'prik, lekin
-    // tinch xonadagi qisqa spike'lar uzoq "uzluksiz" hisoblanmasin (ilgari 700ms).
-    if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(400);
+    // Ovoz (gapirish): grace 600ms — so'zlar/qisqa pauzalarni ko'prik qiladi
+    // (400ms da formal pastroq edi; 600–700ms da ESC-50 FP hali 0%).
+    if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(600);
     // Shovqin: grace QISQA (250ms) — bir martalik "taq"lar orasidagi tanaffus ko'prik
     // qilinmasin, faqat HAQIQATAN uzluksiz shovqin (musiqa/TV) to'planib rasmiy bo'lsin.
     if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(250);
@@ -1486,36 +1586,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // mouthActiveRef orqali (MOUTH_MOVEMENT_TALKING vs WHISPER) hal qilinadi.
       const speechMs = speechContinuousRef.current!.push(speechRaw, now);
 
-      audioDbgTickRef.current += 1;
-      const ctxState = audioContextRef.current?.state ?? 'yo\'q';
-      // Diagnostika: har ~1s serverga yuboriladi (ekranda ko'rinmaydi) —
-      // `docker compose logs app` orqali o'qiladi. Muammo hal bo'lgach olib tashlanadi.
-      if (audioDbgTickRef.current % 5 === 0) {
-        void fetch(apiUrl('/api/student/debug-audio'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...examAuthHeaders(tokenRef.current) },
-          body: JSON.stringify({
-            rms: Number(frame.rms.toFixed(4)),
-            humanVoice: frame.humanVoice,
-            speechRatio: Number(frame.speechRatio.toFixed(3)),
-            harmonicity: Number(frame.harmonicity.toFixed(3)),
-            zcr: Number(frame.zcr.toFixed(3)),
-            lowFreqRatio: Number(frame.lowFreqRatio.toFixed(3)),
-            crestFactor: Number(frame.crestFactor.toFixed(2)),
-            sileroReady: Boolean(sileroRef.current?.ready),
-            sileroProb: Number((sileroRef.current?.probability ?? 0).toFixed(3)),
-            speechMs: Math.round(speechMs),
-            ambientMs: Math.round(ambientMs),
-            ctx: ctxState,
-            faceStatus: faceStatusRef.current,
-          }),
-        }).catch(() => {});
-      }
-
-      // Gapirish: kichik ogohlantirish ~0.9s uzluksiz nutqdan keyin (ilgari 0ms —
-      // bitta freym ham modal ochardi → tinch o'tirganda soxta signal). Rasmiy ~2.5s.
-      // DSP zaxira (Silero yo'q) da biroz qattiqroq — DSP soxta ijobiyga moyil.
-      // Shovqin (ambient): 2s kichik, 5s rasmiy — oddiy xona shovqini kamroq bezovta qilsin.
+      // Gapirish: asosiy — Silero (real ovoz). DSP zaxira qattiqroq.
       const speechConfirmMs = silero?.ready
         ? TALK_SIGNAL_CONFIRM_MS
         : Math.max(TALK_SIGNAL_CONFIRM_MS, 1400);
@@ -1877,6 +1948,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     },
     onRecheckIdentity: () => triggerIdentityCheckRef.current(),
     onFaceStatus: setFaceStatus,
+    onMouthActivity: (active) => {
+      mouthActiveRef.current = active;
+    },
     onSmallWarningStage: (types) => {
       // Modal ochiq — nazorat muzlagan: bu kadrda hech narsa sanamaymiz.
       if (smallWarnOpenRef.current) return;
@@ -1884,14 +1958,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // qolganlarini "epizod tugadi" deb yopamiz (keyingi safar yangi epizod).
       const active = new Set<string>(types.map(liveSignalViolationType));
       for (const key of ALL_LIVE_SIGNAL_VIOLATIONS) {
+        // Gapirish video orqali hisoblanMAYDI (Silero audio).
+        if (key === 'MOUTH_MOVEMENT_TALKING') continue;
         if (active.has(key)) noteSmallWarningRef.current(key);
         else smallWarningLedgerRef.current.noteCleared(key);
       }
     },
     onLiveSignal: (type) => {
-      // Ovoz eskalatsiyasi (audio effekt) uchun — video og'iz harakati hozir
-      // faolmi (WHISPER vs MOUTH_MOVEMENT_TALKING ajratishda ishlatiladi).
-      mouthActiveRef.current = type === 'TALKING';
       // Modal ochiq — nazorat muzlagan: chip va modalni yangilamaymiz.
       if (smallWarnOpenRef.current) return;
       if (!type) {
@@ -1909,14 +1982,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         NO_FACE: EXAM_L[langRef.current].liveNoFace,
         MULTI_FACE: EXAM_L[langRef.current].liveMultiFace,
       }[type];
-      // Kamera panelidagi kichik yorliq (chip) — jonli holat. Rasmiy ogohlantirish
-      // ikki yo'l bilan keladi: (a) signal uzluksiz eskalatsiya muddatiga yetsa
-      // (realtimeProctor.ts), (b) shu tur bo'yicha kichik ogohlantirishlar 3 tadan
-      // oshsa (SmallWarningLedger).
+      // Gapirish chip/modal — faqat Silero audio (pastdagi interval).
+      if (type === 'TALKING') return;
       const violationType = liveSignalViolationType(type);
       const label = withSmallCount(msg, violationType);
       setLiveSignalLabel(label);
-      // Chip ustiga — talaba tasdiqlashi uchun kichik modal.
       showSmallWarnRef.current(`v:${type}`, violationType, label);
     },
   });
@@ -2117,7 +2187,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     setStartingSession(true);
     setStartError('');
     try {
-      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+      if (fullscreenSupportedRef.current && !getFullscreenElement()) {
         requestExamFullscreen();
       }
       if (audioContextRef.current?.state === 'suspended') {
@@ -2164,12 +2234,26 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         challengeSeed: data.sessionChallenge,
       };
       setTimeLeft(merged.duration_minutes * 60);
+      // Fullscreen ochilmagan / rad etilgan — darhol gate (imtihon blok).
+      if (fullscreenSupportedRef.current && !getFullscreenElement()) {
+        needsFullscreenRef.current = true;
+        setNeedsFullscreen(true);
+      }
     } catch {
       setStartError(t.preExamNetworkError);
     } finally {
       setStartingSession(false);
     }
-  }, [exam.id, exam.preExamPin, startingSession, t.preExamNetworkError, t.preExamStartError, token, requestExamFullscreen]);
+  }, [
+    exam.id,
+    exam.preExamPin,
+    startingSession,
+    t.preExamNetworkError,
+    t.preExamStartError,
+    token,
+    requestExamFullscreen,
+    getFullscreenElement,
+  ]);
 
   // Vaqt tugaganda darhol topshirish (sahifa yuklanganda ham)
   useEffect(() => {
@@ -2811,6 +2895,60 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 </AdminBtn>
               </div>
             </div>
+          ) : showExamMediaGate ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-6 lg:py-10">
+              <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-sm p-6 sm:p-8 text-center space-y-4">
+                {cameraErrorHint ? (
+                  <>
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                      <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+                    </div>
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{t.examMediaGateTitle}</h2>
+                      <p className="mt-3 text-sm text-red-700 leading-relaxed whitespace-pre-line text-left">{cameraErrorHint}</p>
+                      <p className="mt-2 text-xs text-gray-500 leading-relaxed">{t.preExamSiteSettingsHint}</p>
+                    </div>
+                    <AdminBtn
+                      variant="blue"
+                      size="lg"
+                      onClick={() => {
+                        setStartMediaGateDone(false);
+                        setCameraErrorHint('');
+                        setCameraPreviewOk(false);
+                        setMicReady(false);
+                        setProctorRetryNonce((n) => n + 1);
+                      }}
+                      className="w-full sm:px-10"
+                    >
+                      {t.examMediaGateRetry}
+                    </AdminBtn>
+                  </>
+                ) : (
+                  <>
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
+                      <svg className="h-7 w-7 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden>
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{t.examMediaGateTitle}</h2>
+                      <p className="mt-2 text-sm text-gray-500 leading-relaxed">{t.examMediaGateBody}</p>
+                      <div className="mt-4 flex flex-wrap items-center justify-center gap-3 text-xs font-medium text-gray-600">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${cameraPreviewOk ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${cameraPreviewOk ? 'bg-emerald-500' : 'bg-gray-400 animate-pulse'}`} />
+                          {cameraPreviewOk ? t.preExamCameraActive : t.examCameraLoadingPreview}
+                        </span>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${micReady ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${micReady ? 'bg-emerald-500' : 'bg-gray-400 animate-pulse'}`} />
+                          {micReady ? t.preExamMicActive : t.preExamMicInactive}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           ) : (
           <>
           {warningMsgModal}
@@ -2981,12 +3119,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                       onLoadedMetadata={() => {
                         if (videoRef.current && videoRef.current.videoWidth > 0) {
                           setCameraPreviewOk(true);
-                          setCameraErrorHint('');
+                          if (syncMicReadyFromStream(streamRef.current)) setCameraErrorHint('');
                         }
                       }}
                       onPlaying={() => {
                         setCameraPreviewOk(true);
-                        setCameraErrorHint('');
+                        if (syncMicReadyFromStream(streamRef.current)) setCameraErrorHint('');
                       }}
                       className="w-full h-full object-cover"
                       style={{ transform: 'scaleX(-1)' }}
@@ -3014,6 +3152,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                               onClick={() => {
                                 setCameraErrorHint('');
                                 setCameraPreviewOk(false);
+                                setMicReady(false);
                                 setProctorRetryNonce((n) => n + 1);
                               }}
                             >
@@ -3031,7 +3170,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             );
           })()}
 
-          {sessionStarted && (
+          {sessionStarted && !showExamMediaGate && (
           <>
           <div className="flex flex-col bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
             <div className="shrink-0 px-3 py-2 border-b border-gray-100 flex items-center justify-between">

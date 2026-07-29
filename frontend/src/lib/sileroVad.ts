@@ -52,21 +52,23 @@ const CONTEXT = 64;
  * Gisterezis: nutq "boshlandi" deb hisoblash uchun yuqori chegara, "tugadi" deb
  * hisoblash uchun pastroq. Bitta chegara bo'lsa, chegara atrofidagi ehtimollik
  * signalni tinimsiz yoqib-o'chirardi.
+ *
+ * Asos: Silero v5 public default = threshold 0.5, neg_threshold = threshold−0.15.
+ * Biz biroz qattiqroq (0.55/0.40) — notebook AGC uchun zaxira; ESC-50 da hali
+ * 0% FP (`docs/VAD_BENCHMARK.md`, `verify_chain.py --grid`).
  */
-// Biroz qattiqroq — nafas/klaviatura/ventilyator soxta ijobiylarni kamaytiradi.
-const SPEECH_START_PROB = 0.78;
-const SPEECH_STOP_PROB = 0.55;
+const SPEECH_START_PROB = 0.55;
+const SPEECH_STOP_PROB = 0.40;
 
 /**
  * SEZGIRLIK KALITI — nutq shuncha kadr UZLUKSIZ davom etsagina tasdiqlanadi
- * (1 kadr = 32ms, ya'ni 16 kadr ≈ 512ms).
+ * (1 kadr = 32ms, 8 kadr ≈ 256ms ≈ Silero `min_speech_duration_ms=250`).
  *
- * Benchmark (`docs/VAD_BENCHMARK.md`): 384ms da soxta signal ~0%. Productionda
- * ba'zi mikrofonlar (notebook built-in + AGC) tinch xonada ham qisqa spike
- * berardi — 512ms + yuqoriroq ehtimollik chegarasi bu holatlarni yumshatadi.
- * Haqiqiy gapirish hali ham aniq ushlanadi (so'z ≥0.5s).
+ * Yo'tal/kulgi/xorildash spike'lari maxP yuqori bo'lishi mumkin, lekin
+ * tasdiqlangan uzluksizlik ≤96ms — 256ms filtri ularni chipga yetkazmaydi.
+ * Eski 0.78/16 (~512ms) real nutq chipini 98.8% → 92.5% ga tushirardi.
  */
-const SPEECH_MIN_FRAMES = 16;
+const SPEECH_MIN_FRAMES = 8;
 
 /**
  * Navbat cho'zilib ketsa (sekin qurilma) eng eski kadrlarni tashlaymiz — real-time

@@ -118,29 +118,63 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                   Farg‘ona jamoat salomatligi tibbiyot instituti
                 </p>
                 <h1 className="text-2xl sm:text-[2rem] font-bold text-slate-900 tracking-tight mt-1.5 leading-tight">
-                  {t.resultPageTitle}
+                  {t.resultCertTitle}
                 </h1>
-                {data.exam_title && (
-                  <p className="text-slate-600 mt-1.5 font-semibold text-sm sm:text-base break-words">{data.exam_title}</p>
-                )}
-                {data.student_name && (
-                  <p className="text-xs sm:text-sm text-slate-500 mt-1">
-                    {t.userFullName}: <span className="font-medium text-slate-700">{data.student_name}</span>
-                    {data.student_group && (
-                      <span className="text-slate-400"> · {data.student_group}</span>
-                    )}
-                  </p>
-                )}
+                <p className="text-xs sm:text-sm text-slate-500 mt-1.5">{t.resultCertHint}</p>
               </div>
             </div>
             <div className="flex flex-col items-center gap-2.5 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm shrink-0 mx-auto lg:mx-0">
               <QRCodeSVG value={data.verify_url} size={132} level="M" includeMargin={false} />
-              <span className="text-[11px] font-medium text-slate-500 text-center">{t.resultQrHint}</span>
+              <span className="text-[11px] font-medium text-slate-500 text-center">{t.resultQrVerifyLabel}</span>
             </div>
           </div>
 
+          {/* PDF sertifikatdagi ma'lumotlar bloki */}
+          <div className="mt-5 rounded-xl border border-sky-200/80 bg-sky-50/70 p-4 sm:p-5">
+            <dl className="grid grid-cols-1 sm:grid-cols-[140px_1fr] gap-x-4 gap-y-2.5 text-sm">
+              {[
+                { label: t.resultIdLabel, value: data.result_public_id },
+                { label: t.resultStudentLabel, value: data.student_name },
+                { label: t.resultGroupLabel, value: data.student_group },
+                { label: t.resultExamLabel, value: data.exam_title },
+                {
+                  label: t.resultCompletedLabel,
+                  value: data.completed_at
+                    ? new Date(data.completed_at).toLocaleString()
+                    : '',
+                },
+                { label: t.resultIntegrityLabel, value: data.integrity_code },
+                { label: t.resultVerifyUrlLabel, value: data.verify_url, mono: true, breakAll: true },
+              ]
+                .filter((row) => Boolean(row.value))
+                .map((row) => (
+                  <React.Fragment key={row.label}>
+                    <dt className="text-[12px] font-semibold text-slate-500 sm:pt-0.5">{row.label}</dt>
+                    <dd
+                      className={`text-slate-900 font-medium ${row.mono ? 'font-mono text-[12px] sm:text-[13px]' : ''} ${
+                        row.breakAll ? 'break-all' : 'break-words'
+                      }`}
+                    >
+                      {row.breakAll && data.verify_url === row.value ? (
+                        <a
+                          href={String(row.value)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-700 hover:underline"
+                        >
+                          {row.value}
+                        </a>
+                      ) : (
+                        row.value
+                      )}
+                    </dd>
+                  </React.Fragment>
+                ))}
+            </dl>
+          </div>
+
           {/* Score focal */}
-          <div className="mt-6 flex items-center gap-4 sm:gap-6 rounded-2xl border border-slate-200 bg-white/90 p-4 sm:p-6 shadow-inner">
+          <div className="mt-5 flex items-center gap-4 sm:gap-6 rounded-2xl border border-slate-200 bg-white/90 p-4 sm:p-6 shadow-inner">
             <div className="relative w-24 h-24 shrink-0">
               <svg viewBox="0 0 36 36" className="w-24 h-24 -rotate-90">
                 <circle cx="18" cy="18" r="16" fill="none" stroke="#e5e7eb" strokeWidth="3" />
@@ -169,15 +203,6 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
               </p>
             </div>
           </div>
-
-          {data.completed_at && (
-            <div className="mt-4 rounded-xl bg-gray-50 border border-gray-200 p-4 max-w-sm">
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">{t.resultCompletedLabel}</p>
-              <p className="text-sm font-semibold text-slate-800 mt-1 tabular-nums">
-                {new Date(data.completed_at).toLocaleString()}
-              </p>
-            </div>
-          )}
 
           <div className="mt-5 flex flex-col sm:flex-row gap-2 sm:gap-3">
             <Button className="w-full sm:w-auto" onClick={downloadPdf} disabled={pdfBusy}>

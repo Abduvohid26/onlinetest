@@ -1,6 +1,6 @@
 # Odam ovozi vs maishiy shovqin — o'lchov hisoboti
 
-**Sana:** 2026-07-22 · **Qaror:** qo'lda yozilgan DSP → **Silero VAD** (neyron tarmoq)
+**Sana:** 2026-07-29 (retune) · **Qaror:** qo'lda yozilgan DSP → **Silero VAD** (neyron tarmoq)
 
 ---
 
@@ -159,16 +159,70 @@ ta'sir qilmaydi** — har qanday haqiqiy gap 0.4s dan uzun.
 aniqlash chip darajasida **100% bo'lib qoldi**; rasmiy ogohlantirish esa 5 soniyalik
 klipda 88.8% → 66.2%, ya'ni oldingi darajaning **~75%** i (66.2 / 88.8 = 74.5%).
 
-## Sozlamalar
-
-`frontend/src/lib/sileroVad.ts`:
+## Sozlamalar (eski, 2026-07-22)
 
 ```ts
-const SPEECH_START_PROB = 0.7;   // ilgari 0.5
-const SPEECH_STOP_PROB  = 0.5;   // ilgari 0.35
-const SPEECH_MIN_FRAMES = 12;    // ilgari yo'q edi (1 kadr = 32ms)
+const SPEECH_START_PROB = 0.7;
+const SPEECH_STOP_PROB  = 0.5;
+const SPEECH_MIN_FRAMES = 12;    // ~384ms
 ```
 
-Yana kamaytirish kerak bo'lsa `SPEECH_MIN_FRAMES` ni oshiring (16 = 512ms).
-Oshirish kerak bo'lsa kamaytiring, lekin **8 (256ms) dan pastda soxta signallar
-qayta paydo bo'ladi**. O'zgartirgandan keyin `verify_chain.py` ni qayta chopting.
+---
+
+# Parametr retune (2026-07-29)
+
+Public Silero v5 defaultlari (`threshold=0.5`, `neg_threshold=threshold−0.15`,
+`min_speech_duration_ms=250`) va LibriSpeech+ESC-50 ustida to'liq zanjir
+grid-search (`verify_chain.py --grid`, grace/confirm sweep).
+
+## Muammo
+
+Production haddan **qattiq** edi (`0.78 / 0.55 / 16≈512ms`, grace 400ms, confirm 900ms):
+maishiy FP 0% bo'lib qolgan, lekin real nutq chip **92.5%** ga tushgan (SNR5 da **87.5%**).
+Rasmiy (2.5s) uzluksiz gapirishda ham sezgirlik yarmi edi.
+
+## Yangi sozlamalar (tanlangan)
+
+| Qatlam | Qiymat | Asos |
+|---|---|---|
+| `SPEECH_START_PROB` | **0.55** | public 0.5 + notebook AGC zaxira |
+| `SPEECH_STOP_PROB` | **0.40** | public gisterezis (−0.15) |
+| `SPEECH_MIN_FRAMES` | **8 (~256ms)** | Silero `min_speech_duration_ms=250` |
+| speech grace | **600ms** | so'z pauzalari; FP hali 0% |
+| confirm / escalate | **800 / 2500ms** | chip 98.8%; escalate o'zgarmagan |
+
+## Zanjir o'lchovi (80 nutq + 124 shovqin)
+
+| Config | Nutq chip | Jim chip | SNR5 chip | Shovqin chip | Edge chip |
+|---|---:|---:|---:|---:|---:|
+| ESKI prod `0.78/16 g400 c900` | 92.5% | 93.8% | 87.5% | **0/124** | 0/28 |
+| PUBLIC `0.50/0.35/8 g500 c800` | 98.8% | 98.8% | 98.8% | **0/124** | 0/28 |
+| **YANGI `0.55/0.40/8 g600 c800`** | **98.8%** | **98.8%** | **98.8%** | **0/124** | **0/28** |
+
+Raw Silero (0.5, ≥0.5s nutq): nutq **100%**, shovqin FP **0%** (shu jumladan
+breathing/coughing/laughing/sneezing/snoring/crying_baby).
+
+Edge spike'lar (yo'tal/kulgi) `maxP` 0.9+ bo'lishi mumkin, lekin **tasdiqlangan
+uzluksizlik ≤96ms** — 256ms + 800ms chip chegarasiga yetmaydi.
+
+## OpenAI Whisper spot-check
+
+Yuqori spike edge kliplar + 1 nutq (`whisper-1`):
+
+| Klip | Whisper | VAD chip? |
+|---|---|---|
+| coughing | nonsens (`Ew/Yuck`) | yo'q |
+| laughing | `Haha…` | yo'q (run 96ms) |
+| sneezing | `Pfft` | yo'q |
+| snoring | bo'sh | yo'q |
+| crying_baby | gapga o'xshash matn | yo'q |
+| LibriSpeech nutq | to'g'ri jumla | ha |
+
+Xulosa: Whisper ba'zi non-speech tovushlarga matn “yopishtirishi” mumkin; imtihon
+proctoring uchun **Silero + min_frames + grace/confirm** to'g'ri filtr.
+
+```bash
+cd tools/vad-benchmark
+./venv/bin/python verify_chain.py --grid
+./venv/bin/python silero_bench.py
+```

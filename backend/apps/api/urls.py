@@ -17,7 +17,6 @@ urlpatterns = [
     path("student/exams/<int:pk>/start", views.student_exams_start),
     path("student/proctor-config", views.student_proctor_config),
     path("student/exams/<int:pk>/submit", views.student_exams_submit),
-    path("student/debug-audio", views.student_debug_audio),  # VAQTINCHA: ovoz debug
     path("student/results", views.student_results),
     path("student/exams/<int:exam_id>/result-details", views.student_result_details),
     path("student/exams/<int:exam_id>/certificate.pdf", views.student_certificate_pdf),

@@ -11,6 +11,8 @@ interface UseRealtimeProctoringOpts {
   onFaceStatus?: (status: FaceStatusLive) => void;
   /** Davomiy signal (gapirish/bosh burilishi/pozitsiya) kichik→katta eskalatsiya holati. */
   onLiveSignal?: (type: LiveSignalType | null, elapsedMs: number) => void;
+  /** Og'iz qimirlashi (Silero nutqini o'zi/boshqa deb ajratish). */
+  onMouthActivity?: (active: boolean) => void;
   /** Kichik ogohlantirish bosqichidagi barcha signallar — "3 kichik → rasmiy" qonuni uchun. */
   onSmallWarningStage?: (types: LiveSignalType[]) => void;
   /** Stream tayyor bo'lgani: shu o'zgarganda engine qayta ishga tushadi. */
@@ -30,6 +32,7 @@ export function useRealtimeProctoring({
   onRecheckIdentity,
   onFaceStatus,
   onLiveSignal,
+  onMouthActivity,
   onSmallWarningStage,
   streamRevision = 0,
   disabled = false,
@@ -46,6 +49,7 @@ export function useRealtimeProctoring({
       onRecheckIdentity,
       onFaceStatus,
       onLiveSignal,
+      onMouthActivity,
       onSmallWarningStage,
       onReady,
       onStatus: (m) => console.info('[realtime-proctor]', m),

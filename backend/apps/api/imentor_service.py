@@ -455,6 +455,95 @@ def _transform_imentor_questions(raw_questions: list[dict]) -> list[dict]:
     return out
 
 
+def _infer_imentor_source_language(
+    translations: dict[str, Any],
+    *,
+    source_language: str | None = None,
+    sample_text: str = "",
+) -> str:
+    """iMentor: translations — asosiy tildan TASHQARI 2 til. Yo'q til = manba."""
+    hint = (source_language or "").lower().strip()
+    if hint in ("uz", "ru", "en"):
+        return hint
+    present = {lg for lg in ("uz", "ru", "en") if isinstance(translations.get(lg), dict)}
+    missing = {"uz", "ru", "en"} - present
+    if len(missing) == 1:
+        return next(iter(missing))
+    if sample_text:
+        try:
+            from apps.api.gemini_tools import detect_question_language
+
+            return detect_question_language(sample_text)
+        except Exception:
+            pass
+    return "uz"
+
+
+def _apply_imentor_builtin_translations(
+    base_questions: list[dict],
+    payload: dict,
+    *,
+    source_language: str | None = None,
+) -> tuple[list[dict], bool]:
+    """
+    iMentor payload.translations dan UZ/RU/EN maydonlarini yig'adi.
+    Qaytaradi: (savollar, to'liq_3_til_bormi).
+    To'liq bo'lsa AI chaqirish shart emas.
+    """
+    raw_tr = payload.get("translations") if isinstance(payload, dict) else None
+    if not isinstance(raw_tr, dict) or not raw_tr:
+        return base_questions, False
+
+    by_lang: dict[str, list[dict]] = {}
+    for lang, block in raw_tr.items():
+        code = str(lang or "").lower().strip()
+        if code not in ("uz", "ru", "en") or not isinstance(block, dict):
+            continue
+        mapped = _transform_imentor_questions(block.get("questions") or [])
+        if mapped:
+            by_lang[code] = mapped
+    if not by_lang:
+        return base_questions, False
+
+    sample = " ".join(str(q.get("text") or "") for q in base_questions[:8])
+    src = _infer_imentor_source_language(by_lang, source_language=source_language, sample_text=sample)
+
+    out: list[dict] = []
+    complete = True
+    for i, q in enumerate(base_questions):
+        row = {
+            "id": q.get("id"),
+            "text": q.get("text"),
+            "options": list(q.get("options") or []),
+            "correctAnswer": q.get("correctAnswer"),
+        }
+        # Manba til
+        row[f"text_{src}"] = row["text"]
+        row[f"options_{src}"] = list(row["options"])
+        row[f"correct_answer_{src}"] = row["correctAnswer"]
+
+        for lang, qs in by_lang.items():
+            if lang == src:
+                continue
+            if i >= len(qs):
+                complete = False
+                continue
+            tq = qs[i]
+            # Index mosligi: variantlar soni farq qilsa ham matnni olamiz
+            row[f"text_{lang}"] = tq.get("text") or ""
+            row[f"options_{lang}"] = list(tq.get("options") or [])
+            row[f"correct_answer_{lang}"] = tq.get("correctAnswer") or ""
+            if not (row[f"text_{lang}"] or "").strip() or not row[f"options_{lang}"]:
+                complete = False
+
+        for lang in ("uz", "ru", "en"):
+            if not (row.get(f"text_{lang}") or "").strip():
+                complete = False
+        out.append(row)
+
+    return out, complete and len(out) == len(base_questions)
+
+
 def fetch_random_imentor_questions(
     subject_codes: list[str],
     *,
@@ -469,6 +558,9 @@ def fetch_random_imentor_questions(
     max_questions=0 bo'lsa API detail cheklovsiz (bazadagi barcha savollar).
     max_questions>0 bo'lsa question_limit=10..30 API ga uzatiladi.
     variant_label / topic_code — ixtiyoriy filtrlash (katalog 4–6 qadam).
+
+    add_translations=True: avvalo iMentor payload.translations ishlatiladi;
+    yetishmasa (eski testlar) AI fallback.
     """
     bounds = question_limit_bounds()
     question_limit = validate_question_limit_value(int(max_questions or 0), bounds=bounds)
@@ -537,8 +629,29 @@ def fetch_random_imentor_questions(
     if not questions:
         raise IMentorApiError("Testdan foydali savol ajratib bo'lmadi")
 
+    used_builtin = False
+    used_ai = False
     if add_translations:
-        questions = exam_questions_add_translations(questions, source_language)
+        merged, complete = _apply_imentor_builtin_translations(
+            questions,
+            payload,
+            source_language=source_language,
+        )
+        if complete:
+            questions = merged
+            used_builtin = True
+        elif merged is not questions and any(
+            (q.get("text_uz") or q.get("text_ru") or q.get("text_en")) for q in merged
+        ):
+            # Qisman iMentor tarjimasi — yetishmaganini AI to'ldiradi
+            from apps.api.services import fill_missing_exam_translations
+
+            questions = fill_missing_exam_translations(merged)
+            used_builtin = True
+            used_ai = True
+        else:
+            questions = exam_questions_add_translations(questions, source_language)
+            used_ai = True
 
     meta = {
         "imentor_test_id": test_id,
@@ -558,6 +671,9 @@ def fetch_random_imentor_questions(
         "question_limit_bounds": parse_question_limit_bounds(detail),
         "verification_code": str(detail.get("verification_code") or pick.get("verification_code") or ""),
         "document_id": str(detail.get("document_id") or pick.get("document_id") or ""),
+        "translations_source": (
+            "imentor" if used_builtin and not used_ai else ("mixed" if used_ai and used_builtin else ("ai" if used_ai else "none"))
+        ),
     }
     return questions, meta
 

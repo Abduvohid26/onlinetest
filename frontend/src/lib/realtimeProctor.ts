@@ -69,13 +69,11 @@ export const LIVE_SIGNAL_ESCALATE_MS = 4000;
 export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 
 // GAPIRISH uchun MAXSUS (tezroq) qoida — README.md "Gapirish uchun maxsus qoida".
-// Og'iz qimirlashi (video) VA tashqi odam ovozi (audio):
-//   ~0.9s uzluksiz → kichik ogohlantirish, ~2.5s → rasmiy.
-// Ilgari kichik ogohlantirish 0ms (bitta freym) edi — tinch o'tirganda ham
-// nafas/mikrofon shovqini soxta signal berardi. Endi qisqa tasodifiy spike
-// modal ochmaydi; haqiqiy gapirish (≥1s) hali ham tez ushlanadi.
+// Mikrofon Silero VAD (ExamRoom):
+//   ~0.8s uzluksiz → kichik ogohlantirish, ~2.5s → rasmiy.
+// 800ms: LibriSpeech chip 98.8% (900ms esa ~97.5%); ESC-50 FP 0%.
 // Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI.
-export const TALK_SIGNAL_CONFIRM_MS = 900;
+export const TALK_SIGNAL_CONFIRM_MS = 800;
 export const TALK_SIGNAL_ESCALATE_MS = 2500;
 
 /** Shu signal turi uchun "kichik ogohlantirish" chegarasi (gapirish tezroq). */
@@ -112,7 +110,7 @@ export const ALL_LIVE_SIGNAL_VIOLATIONS: RealtimeViolation[] =
 // (uzoq/yaqin/markaz/burilish) kamera badge'ida ko'rsatiladi — takror bo'lmasin. Lekin
 // yuz yo'q / ko'p yuz — jiddiy, shu sabab ular ham chip bilan aniq ko'rsatiladi.
 const CHIP_SIGNAL_TYPES = new Set<LiveSignalType>([
-  'TALKING',
+  // TALKING chip/modal YO'Q — gapirish faqat Silero mikrofon VAD orqali (ExamRoom).
   'MOVEMENT',
   'HAND',
   'NO_FACE',
@@ -232,6 +230,9 @@ export interface RealtimeProctorCallbacks {
   /** Davomiy signal (gapirish/bosh burilishi/pozitsiya) hozir faolmi va necha ms'dan
    *  beri uzluksiz davom etyapti. Faol signal yo'q bo'lsa `type=null` bilan chaqiriladi. */
   onLiveSignal?: (type: LiveSignalType | null, elapsedMs: number) => void;
+  /** Talaba og'zi qimirlayaptimi (Silero nutqini o'zi/boshqa deb ajratish uchun).
+   *  Bu o'zi ogohlantirish bermaydi — faqat audio VAD bilan birga ishlatiladi. */
+  onMouthActivity?: (active: boolean) => void;
   /** Hozir "kichik ogohlantirish" bosqichidagi BARCHA signallar (chipsizlari ham).
    *  `SmallWarningLedger` shular asosida "3 kichik → 4-si rasmiy" qonunini qo'llaydi. */
   onSmallWarningStage?: (types: LiveSignalType[]) => void;
@@ -516,6 +517,7 @@ export class RealtimeProctor {
       this.prevNose = null;
       this.mouthHistory = [];
       this.jawOpenHistory = [];
+      this.cb.onMouthActivity?.(false);
     }
 
     // Kichik chip (onLiveSignal) — FAQAT badge'siz signallar uchun. Pozitsiya/gaze/yuz
@@ -526,11 +528,9 @@ export class RealtimeProctor {
       ([type, ms]) => ms > 0 && ms >= confirmMsFor(type),
     );
 
-    // "3 kichik → 4-si rasmiy" qonuni uchun: BARCHA kichik-ogohlantirish bosqichidagi
-    // signallar (chip ko'rinmaydiganlari — pozitsiya/gaze — ham, ular badge'da
-    // ko'rsatiladi va bari bir kichik ogohlantirish hisoblanadi).
-    // Chip'dan OLDIN chaqiriladi — chip yorlig'i yangi hisobni ko'rsata olsin.
-    this.cb.onSmallWarningStage?.(atConfirmStage.map(([type]) => type));
+    // Gapirish (TALKING) video ledger'ga KIRMAYDI — Silero audio oqimi hisoblaydi.
+    const stageForLedger = atConfirmStage.filter(([type]) => type !== 'TALKING');
+    this.cb.onSmallWarningStage?.(stageForLedger.map(([type]) => type));
 
     const best = atConfirmStage
       .filter(([type]) => CHIP_SIGNAL_TYPES.has(type))
@@ -702,10 +702,11 @@ export class RealtimeProctor {
     // "gapiryapti" signali berishi mumkin, shu sabab bu freymda hisobga olinmaydi.
     const talking2 = talking && !handsPresent;
 
-    // Gapirish — kichik→katta eskalatsiya. Grace qisqa (350ms): to'xtaganда darhol
-    // bo'shasin — shunda kichik ogohlantirishda to'xtagan talaba rasmiy olmaydi.
+    // Gapirish — faqat holat (og'iz qimirlayaptimi). Rasmiy/kichik ogohlantirish
+    // MIKROFON orqali Silero VAD bilan chiqadi (ExamRoom) — video og'iz yolg'iz
+    // o'tirganda soxta signal berardi.
     const talkMs = this.trackContinuous('mouth', talking2, 350);
-    if (talkMs >= TALK_SIGNAL_ESCALATE_MS) this.emit('MOUTH_MOVEMENT_TALKING');
     this.liveMs.TALKING = talkMs;
+    this.cb.onMouthActivity?.(talkMs >= TALK_SIGNAL_CONFIRM_MS);
   }
 }

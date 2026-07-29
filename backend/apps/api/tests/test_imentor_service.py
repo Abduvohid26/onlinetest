@@ -12,6 +12,7 @@ from apps.api.imentor_client import (
     IMentorApiError,
 )
 from apps.api.imentor_service import (
+    _apply_imentor_builtin_translations,
     _transform_imentor_questions,
     departments_from_catalog,
     fetch_random_imentor_questions,
@@ -40,6 +41,68 @@ class IMentorServiceTests(TestCase):
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["text"], "2+2=?")
         self.assertEqual(out[0]["correctAnswer"], "4")
+
+    def test_apply_imentor_builtin_translations_skips_ai_when_complete(self):
+        base = _transform_imentor_questions(
+            [{"question": "Savol uz?", "options": ["A", "B"], "correctOptionIndex": 0}]
+        )
+        payload = {
+            "questions": [{"question": "Savol uz?", "options": ["A", "B"], "correctOptionIndex": 0}],
+            "translations": {
+                "ru": {
+                    "questions": [
+                        {"question": "Вопрос ru?", "options": ["А", "Б"], "correctOptionIndex": 0}
+                    ]
+                },
+                "en": {
+                    "questions": [
+                        {"question": "Question en?", "options": ["A", "B"], "correctOptionIndex": 0}
+                    ]
+                },
+            },
+        }
+        merged, complete = _apply_imentor_builtin_translations(base, payload)
+        self.assertTrue(complete)
+        self.assertEqual(merged[0]["text_uz"], "Savol uz?")
+        self.assertEqual(merged[0]["text_ru"], "Вопрос ru?")
+        self.assertEqual(merged[0]["text_en"], "Question en?")
+        self.assertEqual(merged[0]["options_ru"], ["А", "Б"])
+
+    @mock.patch("apps.api.imentor_service.exam_questions_add_translations")
+    @mock.patch("apps.api.imentor_service.imentor_get_test")
+    @mock.patch("apps.api.imentor_service.imentor_collect_tests_for_subject")
+    @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
+    @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
+    @mock.patch("apps.api.imentor_service._build_subject_registry")
+    def test_fetch_uses_imentor_translations_not_ai(
+        self, mock_registry, _bounds, _resolve, mock_collect, mock_get, mock_ai
+    ):
+        mock_registry.return_value = {"ANAT": {"subject_code": "ANAT", "test_count": 1}}
+        mock_collect.return_value = [{"id": 9, "subject_code": "ANAT"}]
+        mock_get.return_value = {
+            "payload": {
+                "questions": [
+                    {"question": "Savol?", "options": ["A", "B"], "correctOptionIndex": 0}
+                ],
+                "translations": {
+                    "ru": {
+                        "questions": [
+                            {"question": "Вопрос?", "options": ["А", "Б"], "correctOptionIndex": 0}
+                        ]
+                    },
+                    "en": {
+                        "questions": [
+                            {"question": "Q?", "options": ["A", "B"], "correctOptionIndex": 0}
+                        ]
+                    },
+                },
+            }
+        }
+        qs, meta = fetch_random_imentor_questions(["ANAT"], max_questions=10, add_translations=True)
+        mock_ai.assert_not_called()
+        self.assertEqual(meta["translations_source"], "imentor")
+        self.assertEqual(qs[0]["text_ru"], "Вопрос?")
+        self.assertEqual(qs[0]["text_en"], "Q?")
 
     def test_parse_question_limit_bounds_defaults(self):
         self.assertEqual(parse_question_limit_bounds({}), DEFAULT_QUESTION_LIMIT_BOUNDS)

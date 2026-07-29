@@ -785,11 +785,9 @@ def _admin_exams_create_impl(request):
             )
         )
 
-        # Savollar YARATISHDA olib kelinadi va (auto til bo'lsa) 3 tilga tarjima
-        # qilinadi — barcha talaba bir xil (fiksirlangan) to'plamni ko'radi.
-        # Sabab: ilgari bu ish har talaba BIRINCHI marta kirganda sodir bo'lardi —
-        # ya'ni yuzlab talaba AI javobini kutib turardi. Endi buni admin bir marta,
-        # imtihon yaratishda kutadi (bu yerda javob biroz sekinroq bo'lishi mumkin).
+        # Savollar YARATISHDA olib kelinadi. Til=auto bo'lsa: avvalo iMentor
+        # payload.translations (UZ/RU/EN) ishlatiladi — AI qayta tarjima qilmaydi.
+        # Tarjima yo'q eski testlarda AI fallback.
         try:
             questions, _meta = fetch_random_imentor_questions(
                 codes,
