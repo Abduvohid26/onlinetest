@@ -14,6 +14,7 @@ import {
 } from '../lib/realtimeProctor';
 import { SmallWarningLedger, SMALL_WARNINGS_BEFORE_FORMAL } from '../lib/smallWarningLedger';
 import { SileroVad } from '../lib/sileroVad';
+import { ForbiddenObjectProctor } from '../lib/forbiddenObjectProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
@@ -34,7 +35,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -59,6 +60,9 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveClipboard: "Nusxa ko'chirish urinishi — to'xtating",
     liveDevtools: "Developer tools urinishi — to'xtating",
     liveTabSwitch: "Boshqa oynaga o'tildi — imtihonga qayting",
+    livePhone: "Telefon aniqlandi — yashiring",
+    liveBook: "Kitob/daftar aniqlandi — olib qo'ying",
+    liveLaptop: "Noutbuk aniqlandi — olib qo'ying",
   },
   ru: {
     answered: 'Отвечено',
@@ -84,6 +88,9 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveClipboard: 'Попытка копирования — прекратите',
     liveDevtools: 'Попытка открыть Developer tools — прекратите',
     liveTabSwitch: 'Переход в другое окно — вернитесь к экзамену',
+    livePhone: 'Обнаружен телефон — уберите',
+    liveBook: 'Обнаружена книга/тетрадь — уберите',
+    liveLaptop: 'Обнаружен ноутбук — уберите',
   },
   en: {
     answered: 'Answered',
@@ -109,6 +116,9 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveClipboard: 'Copy attempt — please stop',
     liveDevtools: 'Developer tools attempt — please stop',
     liveTabSwitch: 'Switched to another window — return to the exam',
+    livePhone: 'Phone detected — put it away',
+    liveBook: 'Book/notebook detected — put it away',
+    liveLaptop: 'Laptop detected — put it away',
   },
 };
 
@@ -787,17 +797,23 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!req) return;
     fullscreenRequestedRef.current = true;
     fullscreenSuppressRef.current = true;
-    blurIgnoreUntilRef.current = Date.now() + 3000;
+    // FS so'rovi/kirishida brauzer blur/focus beradi — TAB_SWITCH false positive.
+    awayStartedAtRef.current = null;
+    blurIgnoreUntilRef.current = Date.now() + 8000;
     Promise.resolve(req())
       .then(() => {
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
         setNeedsFullscreen(false);
+        awayStartedAtRef.current = null;
+        blurIgnoreUntilRef.current = Date.now() + 8000;
       })
       .catch(() => {
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
+        awayStartedAtRef.current = null;
+        blurIgnoreUntilRef.current = Date.now() + 8000;
         // Sessiya boshlangan bo'lsa — tugma orqali qayta urinish uchun gate.
         if (sessionStartedRef.current) {
           needsFullscreenRef.current = true;
@@ -811,6 +827,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
     const onFullscreenChange = () => {
       if (getFullscreenElement()) {
+        // Kirishdan keyin ham blur/focus kelishi mumkin — TAB deb yozilmasin.
+        awayStartedAtRef.current = null;
+        blurIgnoreUntilRef.current = Date.now() + 8000;
         fullscreenEnteredRef.current = true;
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
@@ -831,6 +850,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // Chiqish → faqat majburiy gate (rasmiy ogohlantirish/strike YO'Q).
       // Aks holda "Butun ekran talab qilinadi" bilan birga "1-ogohlantirish" chiqardi.
       // Brauzer FS chiqishida blur/visibility ham beradi — TAB_SWITCH yozilmasin.
+      // Muhim: blur ba'zan fullscreenchange DAN OLDIN keladi; shuning uchun
+      // away timerini shu yerda ham tozalaymiz + gate ochamiz.
       awayStartedAtRef.current = null;
       blurIgnoreUntilRef.current = Date.now() + 8000;
       needsFullscreenRef.current = true;
@@ -895,6 +916,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (Date.now() < blurIgnoreUntilRef.current) return; // fullscreen so'rovi paytida emas
       // Fullscreen gate ochiq / FS o'tish — brauzer blur/visibility beradi, TAB emas.
       if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
+      // Faqat haqiqiy fullscreen ichida TAB hisoblanadi. ESC/gate paytida
+      // blur ba'zan fullscreenchange dan OLDIN keladi (FS allaqachon yo'q) —
+      // shu holda "boshqa oynaga o'tding" deb yozilmasin, faqat gate ochiladi.
+      if (fullscreenSupportedRef.current && !getFullscreenElement()) {
+        awayStartedAtRef.current = null;
+        return;
+      }
       if (awayStartedAtRef.current == null) awayStartedAtRef.current = Date.now();
     };
 
@@ -905,6 +933,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (bannedRef.current || !sessionStartedRef.current) return;
       if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
       if (Date.now() < blurIgnoreUntilRef.current) return;
+      // Qaytganda ham FS yo'q bo'lsa — bu gate/ESC holati, TAB emas.
+      if (fullscreenSupportedRef.current && !getFullscreenElement()) return;
       if (Date.now() - startedAt >= TAB_AWAY_VIOLATION_MS) {
         void logViolationRef.current('TAB_SWITCH_HARD');
       }
@@ -930,9 +960,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [qIndex, setQIndex] = useState(0);
   /** "Yakunlash" tugmalari (oxirgi savol + o'ng panel) — tasdiqlash modali. */
   const [submitConfirm, setSubmitConfirm] = useState(false);
-  const answeredCount = Object.keys(answers).length;
-  const totalQuestions = examQuestions.length || Number(exam.bank_question_count) || 0;
-  const progress = examQuestions.length > 0 ? (answeredCount / examQuestions.length) * 100 : 0;
+  const totalQuestions = examQuestions.length;
+  /** Faqat joriy sessiya savollari + bo'sh bo'lmagan javob. Aks holda
+   *  localStorage'dagi eski kalitlar answeredCount ni sun'iy oshirib,
+   *  Yakunlash erta chiqardi. */
+  const answeredCount = examQuestions.reduce((n, q) => {
+    const v = answers[String(q.id)];
+    return n + (typeof v === 'string' && v.trim() ? 1 : 0);
+  }, 0);
+  const allAnswered = totalQuestions > 0 && answeredCount >= totalQuestions;
+  const progress = totalQuestions > 0 ? (answeredCount / totalQuestions) * 100 : 0;
   const currentQ = examQuestions[qIndex];
   const currentOptions = React.useMemo(
     () => normalizeQuestionOptions(currentQ?.options),
@@ -1025,6 +1062,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const analyserRef = useRef<AnalyserNode | null>(null);
   /** Silero VAD — odam ovozini maishiy shovqindan ajratuvchi asosiy detektor. */
   const sileroRef = useRef<SileroVad | null>(null);
+  /** MediaPipe ObjectDetector — telefon/kitob/noutbuk (brauzerda, real-time). */
+  const objectProctorRef = useRef<ForbiddenObjectProctor | null>(null);
+  const [objectLiveLabel, setObjectLiveLabel] = useState<string | null>(null);
   
   const identityCheckBusyRef = useRef(false);
   const logViolationRef = useRef<(type: string) => Promise<void>>(async () => {});
@@ -1088,6 +1128,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     analyserRef.current = null;
     sileroRef.current?.dispose();
     sileroRef.current = null;
+    objectProctorRef.current?.dispose();
+    objectProctorRef.current = null;
+    setObjectLiveLabel(null);
   }, []);
 
   // Imtihon TO'LIQ tugaganda (submit muvaffaqiyatli) — kamera/mikrofondan tashqari
@@ -1318,6 +1361,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (audioContextRef.current?.state === 'suspended') {
         audioContextRef.current.resume().catch(() => {});
       }
+      void sileroRef.current?.resume();
       if (bannedRef.current) return;
       if (needsFullscreenRef.current) return;
       if (getFullscreenElement()) return;
@@ -1461,6 +1505,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           sileroRef.current = vad;
           void vad.init(stream).then((ok) => {
             console.info('[silero-vad]', ok ? 'tayyor' : 'yo\'q — DSP zaxirasi');
+            if (ok) void vad.resume();
           });
         } else {
           audioContextRef.current = null;
@@ -1542,48 +1587,42 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   useEffect(() => {
     if (banned) return;
+    // analyserRef dependency sifatida ishlamaydi — micReady state orqali qayta ulanamiz.
+    if (!micReady) return;
     const analyser = analyserRef.current;
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
     if (!ambientTrackerRef.current) ambientTrackerRef.current = new AmbientNoiseTracker();
     // Ovoz (gapirish): grace 600ms — so'zlar/qisqa pauzalarni ko'prik qiladi
-    // (400ms da formal pastroq edi; 600–700ms da ESC-50 FP hali 0%).
     if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(600);
-    // Shovqin: grace QISQA (250ms) — bir martalik "taq"lar orasidagi tanaffus ko'prik
-    // qilinmasin, faqat HAQIQATAN uzluksiz shovqin (musiqa/TV) to'planib rasmiy bo'lsin.
+    // Shovqin: grace QISQA (250ms)
     if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(250);
+
+    // AudioContext suspended bo'lishi mumkin — birinchi tickda tiklashga urinamiz.
+    void audioContextRef.current?.resume?.().catch(() => {});
+    void sileroRef.current?.resume();
+
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
-      // Modal ochiq — nazorat muzlagan: audio hisobini butunlay to'xtatamiz.
-      if (smallWarnOpenRef.current) return;
       const frame = analyzeVoiceFrame(analyserRef.current);
       const now = Date.now();
 
-      // ODAM OVOZI: asosiy detektor — Silero VAD (neyron tarmoq). Real audioda
-      // o'lchangan: 100% aniqlash, 0% soxta ijobiy; qo'lda yozilgan DSP esa jim
-      // ovozda 7.5%, soxta ijobiyda 13.7% berardi (docs/VAD_BENCHMARK.md).
-      // Model yuklanmasa — eski DSP zaxira sifatida ishlaydi (imtihon buzilmasin).
+      // Silero ready LEKIN kadr kelmasa (suspended AudioContext) — DSP zaxira.
+      // Aks holda ready=true bo'lib tinimsiz false qaytarardi va ovoz "o'lik" edi.
       const silero = sileroRef.current;
-      const speechRaw = silero?.ready
-        ? silero.isSpeaking()
+      const sileroLive = Boolean(silero?.ready && silero.isReceivingAudio());
+      const speechRaw = sileroLive
+        ? silero!.isSpeaking()
         : voiceTrackerRef.current!.push(frame);
 
-      // Shovqin (SUSPICIOUS_AUDIO) — baland, LEKIN nutq bo'lmagan tovush. Nutq
-      // qarorini Silero beradi, shu sabab gapirish shovqin deb ikki marta
-      // yozilmaydi.
       const ambientRaw = ambientTrackerRef.current!.push(frame, speechRaw);
       const ambientMs = ambientContinuousRef.current!.push(ambientRaw, now);
-      // OVOZ DOIM aniqlanadi — yuz holatiga BOG'LANMAYDI. Ilgari isFaceVisibleForTalk
-      // gate'i bor edi: MediaPipe yuzni WAITING/aniqlamagan paytda ovoz umuman
-      // sezilmasdi. Talaba o'zi gapiryaptimi yoki kamerasiz kimdir — bu farq keyin
-      // mouthActiveRef orqali (MOUTH_MOVEMENT_TALKING vs WHISPER) hal qilinadi.
       const speechMs = speechContinuousRef.current!.push(speechRaw, now);
 
-      // Gapirish: asosiy — Silero (real ovoz). DSP zaxira qattiqroq.
-      const speechConfirmMs = silero?.ready
+      const speechConfirmMs = sileroLive
         ? TALK_SIGNAL_CONFIRM_MS
         : Math.max(TALK_SIGNAL_CONFIRM_MS, 1400);
-      const speechEscalateMs = silero?.ready
+      const speechEscalateMs = sileroLive
         ? TALK_SIGNAL_ESCALATE_MS
         : Math.max(TALK_SIGNAL_ESCALATE_MS, 3000);
       const ambientConfirmMs = Math.max(LIVE_SIGNAL_CONFIRM_MS, 2000);
@@ -1591,24 +1630,31 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       const speechSmall = speechMs >= speechConfirmMs;
       const ambientSmall = ambientMs >= ambientConfirmMs;
-      if (speechSmall) noteSmallWarningRef.current(SPEECH_LEDGER_KEY);
-      else smallWarningLedgerRef.current.noteCleared(SPEECH_LEDGER_KEY);
-      if (ambientSmall) noteSmallWarningRef.current('SUSPICIOUS_AUDIO');
-      else smallWarningLedgerRef.current.noteCleared('SUSPICIOUS_AUDIO');
 
-      if (speechSmall) {
-        const label = withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY);
-        setAudioLiveLabel(label);
-        showSmallWarnRef.current('a:speech', SPEECH_LEDGER_KEY, label);
-      } else if (ambientSmall) {
-        const label = withSmallCount(
-          EXAM_L[langRef.current].liveAmbientNoise,
-          'SUSPICIOUS_AUDIO',
-        );
-        setAudioLiveLabel(label);
-        showSmallWarnRef.current('a:ambient', 'SUSPICIOUS_AUDIO', label);
-      } else {
-        setAudioLiveLabel(null);
+      // Modal ochiq — yangi kichik modal OCHILMAYDI, lekin hisob DAVOM ETADI
+      // (object-proctor telefon ogohlantirishi ovozni "o'ldirmasin").
+      const frozenUi = smallWarnOpenRef.current;
+
+      if (!frozenUi) {
+        if (speechSmall) noteSmallWarningRef.current(SPEECH_LEDGER_KEY);
+        else smallWarningLedgerRef.current.noteCleared(SPEECH_LEDGER_KEY);
+        if (ambientSmall) noteSmallWarningRef.current('SUSPICIOUS_AUDIO');
+        else smallWarningLedgerRef.current.noteCleared('SUSPICIOUS_AUDIO');
+
+        if (speechSmall) {
+          const label = withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY);
+          setAudioLiveLabel(label);
+          showSmallWarnRef.current('a:speech', SPEECH_LEDGER_KEY, label);
+        } else if (ambientSmall) {
+          const label = withSmallCount(
+            EXAM_L[langRef.current].liveAmbientNoise,
+            'SUSPICIOUS_AUDIO',
+          );
+          setAudioLiveLabel(label);
+          showSmallWarnRef.current('a:ambient', 'SUSPICIOUS_AUDIO', label);
+        } else {
+          setAudioLiveLabel(null);
+        }
       }
 
       if (ambientMs >= ambientEscalateMs) {
@@ -1619,15 +1665,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (speechMs >= speechEscalateMs) {
         speechContinuousRef.current!.reset();
         formalIssuedFor(SPEECH_LEDGER_KEY);
-        // Talabaning o'z og'zi ham qimirlayotgan bo'lsa — o'zi gapiryapti; aks holda
-        // atrofda/orqada boshqa odam gapirishi shubhasi.
         void logViolationRef.current(
           mouthActiveRef.current ? 'MOUTH_MOVEMENT_TALKING' : 'WHISPER_OR_CONVERSATION_SUSPECTED',
         );
       }
     }, 200);
     return () => clearInterval(id);
-  }, [banned, analyserRef.current]);
+  }, [banned, micReady]);
 
   // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi. Davomiy holat
   // (mikrofon tuzatilmaguncha davom etadi) — qonun bo'yicha uzluksiz kuzatiladi,
@@ -1701,8 +1745,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       for (const type of EVENT_TYPES) consider(type, false);
       // Tab yashiringan — davomiy holat (poll). Fullscreen gate / FS o'tish — TAB emas.
+      // Faqat fullscreen ichida: aks holda ESC/gate blur "boshqa oyna" deb chiqardi.
       const tabHidden =
         document.visibilityState === 'hidden' &&
+        !!getFullscreenElement() &&
         now >= blurIgnoreUntilRef.current &&
         !needsFullscreenRef.current &&
         !fullscreenSuppressRef.current;
@@ -1919,6 +1965,58 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   logViolationRef.current = logViolation;
 
+  // --- Taqiqlangan ob'ektlar (telefon/kitob/noutbuk) — brauzer MediaPipe ObjectDetector ---
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    const video = videoRef.current;
+    if (!video) return;
+
+    let cancelled = false;
+    let activeType: string | null = null;
+    const OBJECT_LABEL: Record<string, 'livePhone' | 'liveBook' | 'liveLaptop'> = {
+      FORBIDDEN_OBJECT_CELL_PHONE: 'livePhone',
+      FORBIDDEN_OBJECT_BOOK: 'liveBook',
+      FORBIDDEN_OBJECT_LAPTOP: 'liveLaptop',
+    };
+
+    const proctor = new ForbiddenObjectProctor(video, {
+      isFrozen: () =>
+        Boolean(smallWarnOpenRef.current || warningModalShowingRef.current || bannedRef.current),
+      onSmall: (violationType) => {
+        activeType = violationType;
+        const key = OBJECT_LABEL[violationType] || 'livePhone';
+        const label = withSmallCount(EXAM_L[langRef.current][key], violationType);
+        setObjectLiveLabel(label);
+        noteSmallWarningRef.current(violationType);
+        showSmallWarnRef.current(`o:${violationType}`, violationType, label);
+      },
+      onClear: (violationType) => {
+        smallWarningLedgerRef.current.noteCleared(violationType);
+        if (activeType === violationType) {
+          activeType = null;
+          setObjectLiveLabel(null);
+        }
+      },
+      onFormal: (violationType) => {
+        formalIssuedFor(violationType);
+        void logViolationRef.current(violationType);
+      },
+    });
+    objectProctorRef.current = proctor;
+
+    void proctor.init().then((ok) => {
+      if (cancelled || !ok) return;
+      proctor.start();
+    });
+
+    return () => {
+      cancelled = true;
+      proctor.dispose();
+      if (objectProctorRef.current === proctor) objectProctorRef.current = null;
+      setObjectLiveLabel(null);
+    };
+  }, [banned, sessionStarted, proctorStreamRevision]);
+
   // --- Server-side kadr tahlili (har 15s): yuz + telefon/kitob/noutbuk (Vision) ---
   useServerProctoring({
     examId: exam.id,
@@ -2099,6 +2197,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (bannedRef.current || !sessionStartedRef.current) return;
       if (Date.now() < blurIgnoreUntilRef.current) return;
       if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
+      // Fullscreen yo'q (gate) — pagehide ham TAB emas.
+      if (fullscreenSupportedRef.current && !getFullscreenElement()) return;
       void logViolationRef.current('TAB_SWITCH_SOFT');
     };
     window.addEventListener('pagehide', onPageHide);
@@ -2190,6 +2290,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (audioContextRef.current?.state === 'suspended') {
         await audioContextRef.current.resume().catch(() => {});
       }
+      await sileroRef.current?.resume();
       const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
         method: 'POST',
         headers: {
@@ -3039,7 +3140,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 {/* Yakunlash FAQAT barcha savollar yechilganda. Oxirgi savolda
                     hali javobsizlar bo'lsa — oldinga yo'l yo'q, orqaga qaytish mumkin. */}
                 {qIndex >= totalQuestions - 1 ? (
-                  answeredCount >= totalQuestions && totalQuestions > 0 ? (
+                  allAnswered ? (
                     <AdminBtn
                       variant="blue"
                       size="md"
@@ -3102,6 +3203,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <div className="px-3 py-1.5 bg-sky-50 border-b border-sky-100 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse shrink-0" />
                     <span className="text-[11px] font-medium text-sky-800 truncate">{audioLiveLabel}</span>
+                  </div>
+                )}
+                {objectLiveLabel && (
+                  <div className="px-3 py-1.5 bg-violet-50 border-b border-violet-100 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse shrink-0" />
+                    <span className="text-[11px] font-medium text-violet-800 truncate">{objectLiveLabel}</span>
                   </div>
                 )}
                 {eventLiveLabel && (
@@ -3224,8 +3331,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 ))}
               </div>
             </div>
-            <div className="p-2.5">
-              {answeredCount >= totalQuestions && totalQuestions > 0 ? (
+            {allAnswered ? (
+              <div className="p-2.5">
                 <AdminBtn
                   variant="blue"
                   size="md"
@@ -3235,14 +3342,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 >
                   {submitting ? t.submitting : t.submitExam}
                 </AdminBtn>
-              ) : (
-                <p className="text-[11px] text-center text-gray-500 leading-snug px-1">
-                  {t.submitConfirmUnanswered
-                    .replace('{n}', String(Math.max(0, totalQuestions - answeredCount)))
-                    .replace('{total}', String(totalQuestions))}
-                </p>
-              )}
-            </div>
+              </div>
+            ) : null}
           </div>
           </>
           )}
@@ -3315,8 +3416,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         document.body,
       )}
 
-      {/* Yakunlashni tasdiqlash — javobsiz savollar sonini ko'rsatadi */}
-      {submitConfirm && createPortal(
+      {/* Yakunlashni tasdiqlash — faqat barcha savollar yechilganda */}
+      {submitConfirm && allAnswered && createPortal(
         <div
           className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/50 overflow-y-auto px-4 py-8"
           role="dialog"
@@ -3329,16 +3430,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           >
             <div className="w-full p-6 rounded-xl border border-gray-200 bg-white shadow-2xl">
               <h2 className="text-lg font-bold text-gray-900 mb-3">{t.submitConfirmTitle}</h2>
-              <p
-                className={`text-sm font-semibold mb-1.5 ${
-                  answeredCount >= totalQuestions ? 'text-green-700' : 'text-amber-700'
-                }`}
-              >
-                {answeredCount >= totalQuestions
-                  ? t.submitConfirmAllAnswered.replace('{total}', String(totalQuestions))
-                  : t.submitConfirmUnanswered
-                      .replace('{n}', String(totalQuestions - answeredCount))
-                      .replace('{total}', String(totalQuestions))}
+              <p className="text-sm font-semibold mb-1.5 text-green-700">
+                {t.submitConfirmAllAnswered.replace('{total}', String(totalQuestions))}
               </p>
               <p className="text-sm text-gray-600 mb-5">{t.submitConfirmWarning}</p>
               <div className="flex flex-col-reverse sm:flex-row gap-2">

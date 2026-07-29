@@ -87,6 +87,7 @@ from apps.api.services import (
     parse_pdf_questions,
     prepare_questions_for_grading,
     public_base_url,
+    question_has_api_explanations,
     resolve_student_exam_language,
     shuffle_in_place,
 )
@@ -959,6 +960,12 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang
                 "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
                 "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),
                 "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
+                "explanationSource": (ai_row or {}).get("explanationSource")
+                or (
+                    "api"
+                    if question_has_api_explanations(q_loc) or question_has_api_explanations(q)
+                    else (ai.get("source") or "fallback")
+                ),
             }
         )
     pct = round((se.score / total) * 100) if total else 0

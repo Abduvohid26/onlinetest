@@ -80,7 +80,9 @@ def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) ->
         comment, why_wrong, why_right = _api_explanation_pair(q, st, is_correct=ok)
         if question_has_api_explanations(q) and (comment or why_wrong or why_right):
             used_api += 1
+            item_source = "api"
         else:
+            item_source = "fallback"
             comment = "Javob to'g'ri tanlangan." if ok else ""
             why_wrong = (
                 "" if ok
@@ -97,6 +99,7 @@ def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) ->
                 "commentCorrect": comment,
                 "whyStudentWrong": why_wrong,
                 "whyCorrectIsRight": why_right,
+                "explanationSource": item_source,
             }
         )
     if used_api == len(questions) and questions:
@@ -153,6 +156,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
                     "commentCorrect": c_api if ok else "",
                     "whyStudentWrong": "" if ok else (w_api or ai_row.get("whyStudentWrong") or ""),
                     "whyCorrectIsRight": "" if ok else (r_api or ai_row.get("whyCorrectIsRight") or ""),
+                    "explanationSource": "api",
                 }
             )
         else:
@@ -164,6 +168,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
                     "commentCorrect": ai_row.get("commentCorrect", "") if ok else "",
                     "whyStudentWrong": "" if ok else ai_row.get("whyStudentWrong", ""),
                     "whyCorrectIsRight": "" if ok else ai_row.get("whyCorrectIsRight", ""),
+                    "explanationSource": "ai" if (ai.get("source") == "ai") else str(ai_row.get("explanationSource") or ai.get("source") or "ai"),
                 }
             )
 

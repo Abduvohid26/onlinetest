@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
-from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading
+from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations
 from apps.api.proctor_config import max_warnings_before_ban, warn_suppress_seconds
 from apps.api.proctor_escalation import (
     apply_official_warning_or_ban,
@@ -912,6 +912,8 @@ def student_exams_submit(request, pk: int):
                 "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
                 "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),
                 "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
+                "explanationSource": (ai_row or {}).get("explanationSource")
+                or ("api" if question_has_api_explanations(q) else (ai_summary.get("source") or "fallback")),
             }
         )
     return _exam_guarded_response(
@@ -1490,13 +1492,12 @@ def student_proctor_frame(request, pk: int):
     if len(frame_b64) > 2_000_000:
         return Response({"error": "frame too large (max ~1.5 MB base64)"}, status=413)
 
-    # Telefon/kitob/noutbuk — Vision AI. Default YOQILGAN (oldingi "0" tufayli
-    # lokal yuz ishlasa ob'ekt umuman tekshirilmasdi). O'chirish: PROCTOR_OPENAI_OBJECTS=0
-    enrich_objects = str(os.environ.get("PROCTOR_OPENAI_OBJECTS", "1")).strip().lower() in (
-        "1",
-        "true",
-        "yes",
-    )
+    # Telefon/kitob/noutbuk — Vision AI. Default YOQILGAN.
+    # Explicit o'chirish: PROCTOR_OPENAI_OBJECTS=0. Kalit yo'q bo'lsa ham urinmaymiz.
+    from apps.api.openai_client import api_key_configured
+
+    env_flag = str(os.environ.get("PROCTOR_OPENAI_OBJECTS", "1")).strip().lower()
+    enrich_objects = env_flag not in ("0", "false", "no", "off") and api_key_configured()
 
     try:
         task = analyze_proctor_frame_task.delay(frame_b64, enrich_objects)

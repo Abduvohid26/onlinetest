@@ -212,8 +212,25 @@ export class SileroVad {
    */
   isSpeaking(maxAgeMs = 1000): boolean {
     if (!this.ready) return false;
-    if (Date.now() - this.lastAt > maxAgeMs) return false;
+    if (!this.isReceivingAudio(maxAgeMs)) return false;
     return this.confirmed;
+  }
+
+  /** Worklet kadrlar kelayaptimi (AudioContext suspended bo'lsa false). */
+  isReceivingAudio(maxAgeMs = 1500): boolean {
+    if (!this.ready || this.lastAt <= 0) return false;
+    return Date.now() - this.lastAt <= maxAgeMs;
+  }
+
+  /** Brauzer avtoplay siyosati — foydalanuvchi gesture'da chaqiriladi. */
+  async resume(): Promise<void> {
+    if (this.audioCtx?.state === 'suspended') {
+      try {
+        await this.audioCtx.resume();
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   dispose(): void {

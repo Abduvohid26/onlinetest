@@ -108,8 +108,10 @@ export const LIGHT_VIDEO_CONSTRAINTS: MediaTrackConstraints = {
  */
 export const RAW_PROCTOR_AUDIO: MediaTrackConstraints = {
   echoCancellation: false,
+  // NS o'chiq — uzoq/pichirlashni "shovqin" deb o'chirmasin.
   noiseSuppression: false,
-  autoGainControl: false,
+  // AGC YOQIQ — ba'zi notebook mic'lar xom holda juda jim; Silero eshitmaydi.
+  autoGainControl: true,
   channelCount: { ideal: 1 },
 };
 

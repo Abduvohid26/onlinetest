@@ -85,6 +85,12 @@ def public_verify_result(request, result_id: str):
                 "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
                 "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),
                 "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
+                "explanationSource": (ai_row or {}).get("explanationSource")
+                or (
+                    "api"
+                    if question_has_api_explanations(q)
+                    else (ai.get("source") or "fallback")
+                ),
             }
         )
     pdf_rel = f"/api/public/verify-result/{result_id}/certificate.pdf?k={k}"
@@ -160,6 +166,12 @@ def public_verify_certificate_pdf(request, result_id: str):
                 "commentCorrect": (ai_row or {}).get("commentCorrect", "") if ok else "",
                 "whyStudentWrong": "" if ok else (ai_row or {}).get("whyStudentWrong", ""),
                 "whyCorrectIsRight": "" if ok else (ai_row or {}).get("whyCorrectIsRight", ""),
+                "explanationSource": (ai_row or {}).get("explanationSource")
+                or (
+                    "api"
+                    if question_has_api_explanations(q_loc) or question_has_api_explanations(q)
+                    else (ai.get("source") or "fallback")
+                ),
             }
         )
     rows = result_questions_to_pdf_rows(per_q)

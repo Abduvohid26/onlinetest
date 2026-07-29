@@ -17,6 +17,8 @@ export type ResultQuestionRow = {
   commentCorrect: string;
   whyStudentWrong: string;
   whyCorrectIsRight: string;
+  /** "api" | "ai" | "fallback" — tushuntirish manbasi */
+  explanationSource?: string;
 };
 
 export type ExamResultPayload = {
@@ -243,6 +245,11 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                 {t.resultAnalysisSourceApi}
               </span>
             )}
+            {data.ai_summary_source === 'ai' && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700">
+                {t.resultAnalysisSourceAi}
+              </span>
+            )}
             {data.ai_summary_source === 'mixed' && (
               <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-sky-50 text-sky-700">
                 {t.resultAnalysisSourceMixed}
@@ -255,7 +262,13 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
 
       <div className="space-y-3">
         <h2 className="text-[16px] sm:text-[17px] font-bold text-slate-900 px-1">{t.resultByQuestions}</h2>
-        {data.questions.map((q, i) => (
+        {data.questions.map((q, i) => {
+          const src = (q.explanationSource || '').toLowerCase();
+          const hasExplain = Boolean(
+            (q.isCorrect && q.commentCorrect) ||
+              (!q.isCorrect && (q.whyStudentWrong || q.whyCorrectIsRight)),
+          );
+          return (
           <motion.div
             key={q.id}
             initial={{ opacity: 0, y: 8 }}
@@ -275,9 +288,21 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                 <span className="text-slate-400 mr-1.5">{i + 1}.</span>
                 {cleanQuestionPrompt(q.text)}
               </p>
-              <span className={`shrink-0 text-[10px] font-bold uppercase px-2.5 py-1 rounded-md ${q.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
-                {q.isCorrect ? t.resultCorrectBadge : t.resultWrongBadge}
-              </span>
+              <div className="shrink-0 flex flex-col items-end gap-1">
+                <span className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded-md ${q.isCorrect ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                  {q.isCorrect ? t.resultCorrectBadge : t.resultWrongBadge}
+                </span>
+                {hasExplain && src === 'api' && (
+                  <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700">
+                    {t.resultAnalysisSourceApi}
+                  </span>
+                )}
+                {hasExplain && src === 'ai' && (
+                  <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700">
+                    {t.resultAnalysisSourceAi}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="px-4 sm:px-5 py-4 space-y-2 text-sm">
               <p className="text-slate-700">
@@ -311,7 +336,8 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
               )}
             </div>
           </motion.div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
