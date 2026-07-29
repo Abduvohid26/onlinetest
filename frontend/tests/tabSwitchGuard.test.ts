@@ -11,12 +11,10 @@ function stable(over: Partial<TabGuardState> = {}): TabGuardState {
   return {
     sessionStarted: true,
     banned: false,
-    fullscreenRequired: false,
     fullscreenSuppressed: false,
     fullscreenRequestInFlight: false,
     warningModalOpen: false,
     smallWarnOpen: false,
-    inFullscreen: true,
     present: true,
     ...over,
   };
@@ -37,18 +35,33 @@ test('barqarorlik oynasi tugamaguncha qurollanmaydi', () => {
   assert.equal(g.evaluate(stable(), 1_000 + ARM_MS), true);
 });
 
-test('fullscreen gate ochiq — hech qachon qurollanmaydi', () => {
+test('fullscreen so\'rovi ketayotganda qurollanmaydi', () => {
   const g = new TabSwitchGuard(ARM_MS);
-  g.evaluate(stable({ fullscreenRequired: true }), 1_000);
-  g.evaluate(stable({ fullscreenRequired: true }), 10_000);
+  g.evaluate(stable({ fullscreenRequestInFlight: true }), 1_000);
+  g.evaluate(stable({ fullscreenRequestInFlight: true }), 10_000);
   assert.equal(g.armed, false);
 });
 
-test('fullscreen yo\'qolishi bilan darhol o\'chadi', () => {
+test('fullscreen o\'zgarishi disarm() bilan qoplanadi va qayta qurollanadi', () => {
+  // Fullscreen majburiy emas — "ichidamizmi" shart emas. O'tish shovqinini
+  // `disarm()` yopadi (ExamRoom uni har `fullscreenchange` da chaqiradi).
   const g = new TabSwitchGuard(ARM_MS);
   const t = armed(g);
-  g.evaluate(stable({ inFullscreen: false }), t + 10);
+  g.disarm();
   assert.equal(g.armed, false);
+  g.markAway(t + 10);
+  assert.equal(g.endAway(t + 5_000, AWAY_MS), false, 'o\'tish paytida yozilmasin');
+
+  g.evaluate(stable(), t + 6_000);
+  g.evaluate(stable(), t + 6_000 + ARM_MS);
+  assert.equal(g.armed, true, 'fullscreen bo\'lmasa ham qayta qurollansin');
+});
+
+test('fullscreen\'siz ham tab almashtirish aniqlanadi (teshik yo\'q)', () => {
+  const g = new TabSwitchGuard(ARM_MS);
+  const t = armed(g);
+  g.markAway(t + 100);
+  assert.equal(g.endAway(t + 100 + AWAY_MS, AWAY_MS), true);
 });
 
 test('imtihon boshida fullscreen o\'tish to\'lqini qoidabuzarlik bermaydi', () => {
@@ -57,11 +70,11 @@ test('imtihon boshida fullscreen o\'tish to\'lqini qoidabuzarlik bermaydi', () =
   const g = new TabSwitchGuard(ARM_MS);
   let t = 1_000;
 
-  // Sessiya boshlandi, fullscreen hali yo'q → gate ochiq.
-  g.evaluate(stable({ inFullscreen: false, fullscreenRequired: true }), t);
+  // Sessiya endi boshlandi — hali barqaror emas.
+  g.evaluate(stable({ present: false }), t);
   // Brauzer o'tish paytida blur/visibility to'lqini beradi.
   g.markAway(t + 50);
-  assert.equal(g.endAway(t + 900, AWAY_MS), false, 'gate ochiq — yozilmasin');
+  assert.equal(g.endAway(t + 900, AWAY_MS), false, 'qurollanmagan — yozilmasin');
 
   // Fullscreen so'rovi yuborildi (javob kutilmoqda).
   g.evaluate(stable({ fullscreenRequestInFlight: true }), t + 1_000);
@@ -118,6 +131,7 @@ test('ban yoki sessiya yopilishi bloklaydi', () => {
   assert.equal(tabGuardBlocked(stable({ banned: true })), true);
   assert.equal(tabGuardBlocked(stable({ sessionStarted: false })), true);
   assert.equal(tabGuardBlocked(stable({ smallWarnOpen: true })), true);
+  assert.equal(tabGuardBlocked(stable({ warningModalOpen: true })), true);
   assert.equal(tabGuardBlocked(stable({ fullscreenSuppressed: true })), true);
   assert.equal(tabGuardBlocked(stable()), false);
 });

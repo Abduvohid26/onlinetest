@@ -488,9 +488,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const showSmallWarn = useCallback(
     (graceKey: string, violationType: string, text: string) => {
       if (smallWarnOpenRef.current) return; // bitta modal — biri ochiq bo'lsa yangisi kutadi
-      // Fullscreen gate ekranni qoplab turibdi — talaba bu ogohlantirishni ko'ra
-      // ham, sababini tuzata ham olmaydi (faqat FS tugmasi bosiladi). Ko'rsatmaymiz.
-      if (needsFullscreenRef.current) return;
       if (graceKey === smallWarnKeyRef.current && Date.now() < smallWarnGraceRef.current) return;
       smallWarnKeyRef.current = graceKey;
       smallWarnOpenRef.current = true;
@@ -935,12 +932,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         {
           sessionStarted: sessionStartedRef.current,
           banned: bannedRef.current,
-          fullscreenRequired: needsFullscreenRef.current,
           fullscreenSuppressed: fullscreenSuppressRef.current,
           fullscreenRequestInFlight: fullscreenRequestedRef.current,
           warningModalOpen: warningModalShowingRef.current,
           smallWarnOpen: smallWarnOpenRef.current,
-          inFullscreen: !fullscreenSupportedRef.current || !!getFullscreenElement(),
           present: document.visibilityState === 'visible' && document.hasFocus(),
         },
         Date.now(),
@@ -1835,12 +1830,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // bu jiddiy xavfsizlik hodisasi, muzlatib bo'lmaydi.
     if (smallWarnOpenRef.current && !INSTANT_BAN_TYPES.has(type)) return;
 
-    // Fullscreen gate ochiq (imtihon boshida yoki FS dan chiqilganda): ekranni
-    // to'liq modal qoplab turadi — talaba faqat "Butun ekranga o'tish" tugmasini
-    // bosa oladi. Bu paytda yuz/nigoh/ovoz/ob'ekt detektorlari ishlashda davom
-    // etib, talaba tuzata olmaydigan holat uchun RASMIY ogohlantirish yozardi
-    // (imtihon boshida "boshqa ekranga o'tmang" kabi). Gate yopilguncha muzlatamiz.
-    if (needsFullscreenRef.current && !INSTANT_BAN_TYPES.has(type)) return;
+    // DIQQAT: bu yerda fullscreen holatiga qarab filtr QO'YMAYMIZ.
+    // Ilgari "gate modali ekranni qoplab turibdi" degan sabab bilan
+    // `needsFullscreenRef` bo'yicha hamma narsa muzlatilardi. Bloklovchi modal
+    // olib tashlangach bu filtr butun nazoratni o'chirib qo'yardi: talaba
+    // fullscreen'ga kirmasa yuz/nigoh/ovoz/telefon signallari jimgina
+    // tashlanardi. Fullscreen o'tishidagi soxta TAB signallari esa allaqachon
+    // TabSwitchGuard darajasida to'g'ri ushlanadi — bu yerda takrorlash shart emas.
 
     // Modal ochiqligida yangi violationlar (IDENTITY_SUBSTITUTION dan tashqari) bloklansn —
     // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.

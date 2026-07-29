@@ -60,6 +60,18 @@ def _api_explanation_pair(q: dict, student_answer: str, *, is_correct: bool) -> 
         return (explanation or "Javob to'g'ri tanlangan.", "", "")
     why_wrong = _option_explanation_for(q, student_answer)
     why_right = explanation or _option_explanation_for(q, str(q.get("correctAnswer") or ""))
+    if not why_wrong and why_right:
+        # Ko'p iMentor testlarida umumiy `explanation` bor, lekin har bir variant
+        # uchun alohida izoh (`optionExplanations`) yo'q. Bunday holatda "Nega
+        # xato" maydoni bo'sh qolib, talaba natijada hech narsa ko'rmasdi.
+        # Tibbiy sabab O'YLAB TOPILMAYDI — faqat baholash faktи aytiladi,
+        # asosiy tushuntirish esa quyidagi "to'g'ri variant" qatorida turadi.
+        chosen = str(student_answer or "").strip()
+        correct = str(q.get("correctAnswer") or "").strip()
+        if chosen:
+            why_wrong = f'Siz "{chosen}" variantini tanladingiz — to\'g\'ri javob "{correct}".'
+        else:
+            why_wrong = f'Javob belgilanmagan — to\'g\'ri javob "{correct}".'
     return ("", why_wrong, why_right)
 
 

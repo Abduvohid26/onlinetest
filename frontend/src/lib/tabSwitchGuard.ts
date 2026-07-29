@@ -18,31 +18,34 @@ export interface TabGuardState {
   /** Imtihon sessiyasi ochiq (savollar berilgan). */
   sessionStarted: boolean;
   banned: boolean;
-  /** "Butun ekran talab qilinadi" gate ochiq. */
-  fullscreenRequired: boolean;
   /** Modal/ichki oqim fullscreen'dan chiqargan — jazolanmaydi. */
   fullscreenSuppressed: boolean;
   /** `requestFullscreen()` javobi hali kelmagan. */
   fullscreenRequestInFlight: boolean;
   warningModalOpen: boolean;
   smallWarnOpen: boolean;
-  /** Haqiqatan fullscreen ichidamiz (brauzer qo'llab-quvvatlamasa `true`). */
-  inFullscreen: boolean;
   /** Talaba ekran oldida: sahifa ko'rinadi va oyna fokusda. */
   present: boolean;
 }
 
-/** Barqarorlikni buzadigan holat bormi (ko'rinish/fokusdan tashqari). */
+/**
+ * Barqarorlikni buzadigan holat bormi (ko'rinish/fokusdan tashqari).
+ *
+ * DIQQAT: "fullscreen ichidamizmi" bu ro'yxatda YO'Q. Fullscreen majburiy emas
+ * (bloklovchi modal olib tashlangan), shuning uchun uni shart qilib qo'yish
+ * talabaga fullscreen'dan chiqib bemalol alt-tab qilish yo'lini ochib berardi.
+ * Fullscreen o'tishidagi hodisa to'lqini o'rniga `disarm()` bilan qoplanadi:
+ * har bir `fullscreenchange` nazoratni o'chiradi va u 3 soniyadan keyin qayta
+ * yoqiladi — natijada o'tish shovqini ham, teshik ham qolmaydi.
+ */
 export function tabGuardBlocked(s: TabGuardState): boolean {
   return (
     !s.sessionStarted ||
     s.banned ||
-    s.fullscreenRequired ||
     s.fullscreenSuppressed ||
     s.fullscreenRequestInFlight ||
     s.warningModalOpen ||
-    s.smallWarnOpen ||
-    !s.inFullscreen
+    s.smallWarnOpen
   );
 }
 
