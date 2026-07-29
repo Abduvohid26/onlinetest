@@ -69,12 +69,14 @@ export const LIVE_SIGNAL_ESCALATE_MS = 4000;
 export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 
 // GAPIRISH uchun MAXSUS (tezroq) qoida — README.md "Gapirish uchun maxsus qoida".
-// Og'iz qimirlashi (video) VA tashqi odam ovozi (audio) ikkalasi ham shu vaqtlarda:
-//   aniqlanishi bilanoq (0ms) → kichik ogohlantirish, 2s → rasmiy.
-// Sabab: gapirish/suflyor eng jiddiy va eng tez tarqaladigan aldash usuli — unga
-// umumiy 1.5s/4s juda sekin. Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI.
-export const TALK_SIGNAL_CONFIRM_MS = 0;
-export const TALK_SIGNAL_ESCALATE_MS = 2000;
+// Og'iz qimirlashi (video) VA tashqi odam ovozi (audio):
+//   ~0.9s uzluksiz → kichik ogohlantirish, ~2.5s → rasmiy.
+// Ilgari kichik ogohlantirish 0ms (bitta freym) edi — tinch o'tirganda ham
+// nafas/mikrofon shovqini soxta signal berardi. Endi qisqa tasodifiy spike
+// modal ochmaydi; haqiqiy gapirish (≥1s) hali ham tez ushlanadi.
+// Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI.
+export const TALK_SIGNAL_CONFIRM_MS = 900;
+export const TALK_SIGNAL_ESCALATE_MS = 2500;
 
 /** Shu signal turi uchun "kichik ogohlantirish" chegarasi (gapirish tezroq). */
 export function confirmMsFor(type: LiveSignalType): number {

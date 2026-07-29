@@ -216,8 +216,45 @@ def departments_from_catalog() -> list[dict]:
     return out
 
 
+def _normalize_catalog_variants(row: dict) -> list[dict]:
+    """Katalog variants[] → UI uchun {label, topics[{code, title}]}."""
+    out: list[dict] = []
+    raw_variants = row.get("variants")
+    if not isinstance(raw_variants, list):
+        labels = row.get("variant_labels") or []
+        if isinstance(labels, list):
+            for lab in labels:
+                label = str(lab or "").strip()
+                if label:
+                    out.append({"label": label, "topics": []})
+        return out
+    for var in raw_variants:
+        if not isinstance(var, dict):
+            continue
+        label = str(var.get("label") or "").strip()
+        if not label:
+            continue
+        topics: list[dict] = []
+        for t in var.get("topics") or []:
+            if not isinstance(t, dict):
+                continue
+            tid = str(t.get("id") or "").strip()
+            title = str(t.get("title") or tid).strip()
+            if not tid:
+                continue
+            topics.append({"code": tid.lower(), "id": tid, "title": title})
+        out.append(
+            {
+                "label": label,
+                "file_name": str(var.get("file_name") or "").strip(),
+                "topics": topics,
+            }
+        )
+    return out
+
+
 def subjects_for_department(department_code: str) -> tuple[dict | None, list[dict]]:
-    """Admin UI 2-qadam: kafedra fanlari + e'lon qilingan test soni."""
+    """Admin UI 2-qadam: kafedra fanlari + variants/topics + e'lon qilingan test soni."""
     code = str(department_code or "").strip()
     if not code or not imentor_configured():
         return None, []
@@ -227,7 +264,11 @@ def subjects_for_department(department_code: str) -> tuple[dict | None, list[dic
         return None, []
 
     test_idx = _subject_stats_index()
-    dept_tests = imentor_published_test_count(subject_code=code, department_code=code)
+    dept_tests = 0
+    try:
+        dept_tests = imentor_published_test_count(subject_code=code, department_code=code)
+    except IMentorApiError:
+        dept_tests = 0
     out: list[dict] = []
     for row in catalog_rows:
         if not isinstance(row, dict):
@@ -238,21 +279,44 @@ def subjects_for_department(department_code: str) -> tuple[dict | None, list[dic
         stats_row = test_idx.get(subj_code) or test_idx.get(subj_code.lower()) or {}
         syllabus_id = int(row.get("id") or stats_row.get("syllabus_id") or 0) or None
         dept_code = str(row.get("department_code") or dept_meta.get("code") or code).strip()
-        api_count = imentor_published_test_count(
-            subject_code=subj_code,
-            syllabus_id=syllabus_id,
-            department_code=dept_code,
-        )
-        test_count = max(int(stats_row.get("test_count") or 0), api_count, dept_tests)
+        variants = _normalize_catalog_variants(row)
+        variant_labels = [v["label"] for v in variants]
+        if not variant_labels:
+            raw_labels = row.get("variant_labels") or []
+            if isinstance(raw_labels, list):
+                variant_labels = [str(x).strip() for x in raw_labels if str(x).strip()]
+        stats_count = int(stats_row.get("test_count") or 0)
+        # Per-subject list API faqat stats bo'sh bo'lsa — tezlik uchun.
+        api_count = 0
+        if stats_count < 1:
+            try:
+                api_count = imentor_published_test_count(
+                    subject_code=subj_code,
+                    syllabus_id=syllabus_id,
+                    department_code=dept_code,
+                )
+            except IMentorApiError:
+                api_count = 0
+        test_count = max(stats_count, api_count, dept_tests if "__" not in subj_code else 0)
+        # Katalog fanlari uchun department legacy testlarini ham hisobga olish
+        if "__" in subj_code and dept_tests > 0 and stats_count < 1 and api_count < 1:
+            test_count = max(test_count, dept_tests)
         out.append(
             {
                 "id": syllabus_id or int(row.get("id") or 0),
                 "subject_code": subj_code,
                 "subject_name": str(row.get("subject_name") or subj_code).strip(),
-                "department_code": str(row.get("department_code") or dept_meta.get("code") or code).strip(),
+                "department_code": dept_code,
                 "department_name": str(row.get("department_name") or dept_meta.get("name") or "").strip(),
-                "variants_count": int(row.get("variants_count") or 0),
-                "topics_count": int(row.get("topics_count") or 0),
+                "instruction_language": str(row.get("instruction_language") or "").strip(),
+                "variants_count": int(row.get("variants_count") or len(variants) or 0),
+                "topics_count": int(
+                    row.get("topics_count")
+                    or sum(len(v.get("topics") or []) for v in variants)
+                    or 0
+                ),
+                "variant_labels": variant_labels,
+                "variants": variants,
                 "syllabus_id": syllabus_id or int(row.get("id") or 0),
                 "test_count": test_count,
                 "questions_total": int(stats_row.get("questions_total") or 0),
@@ -266,7 +330,73 @@ def subjects_for_department(department_code: str) -> tuple[dict | None, list[dic
             "name": str(dept_meta.get("name") or code).strip(),
             "sort_order": int(dept_meta.get("sort_order") or 0),
         }
+    elif catalog_rows:
+        department = {"code": code, "name": code, "sort_order": 0}
     return department, out
+
+
+def parse_imentor_selection(raw: Any) -> dict[str, Any]:
+    """
+    Imtihon konfiguratsiyasi:
+      ["code"] yoki [{"subject_code","variant_label","topic_code"}]
+    """
+    codes: list[str] = []
+    variant_label = ""
+    topic_code = ""
+    if isinstance(raw, dict) and "subject_codes" in raw:
+        for c in raw.get("subject_codes") or []:
+            token = str(c or "").strip()
+            if token:
+                codes.append(token)
+        variant_label = str(raw.get("variant_label") or "").strip()
+        topic_code = str(raw.get("topic_code") or "").strip().lower()
+        return {
+            "subject_codes": codes,
+            "variant_label": variant_label,
+            "topic_code": topic_code,
+        }
+    if not isinstance(raw, list):
+        return {"subject_codes": [], "variant_label": "", "topic_code": ""}
+    for item in raw:
+        if isinstance(item, str):
+            token = item.strip()
+            if token:
+                codes.append(token)
+        elif isinstance(item, dict):
+            token = str(item.get("subject_code") or "").strip()
+            if token:
+                codes.append(token)
+            if not variant_label:
+                variant_label = str(item.get("variant_label") or "").strip()
+            if not topic_code:
+                topic_code = str(item.get("topic_code") or "").strip().lower()
+    return {
+        "subject_codes": codes,
+        "variant_label": variant_label,
+        "topic_code": topic_code,
+    }
+
+
+def dump_imentor_selection(
+    subject_codes: list[str],
+    *,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
+) -> list:
+    """Saqlash uchun JSON-serializable selection."""
+    v = str(variant_label or "").strip()
+    t = str(topic_code or "").strip().lower()
+    if not v and not t:
+        return list(subject_codes)
+    return [
+        {
+            "subject_code": code,
+            "variant_label": v,
+            "topic_code": t,
+        }
+        for code in subject_codes
+        if str(code).strip()
+    ]
 
 
 def subjects_from_stats() -> list[dict]:
@@ -331,14 +461,19 @@ def fetch_random_imentor_questions(
     max_questions: int = 0,
     source_language: str | None = None,
     add_translations: bool = True,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """
     Tanlangan fanlardan tasodifiy bitta test tanlab savollarni qaytaradi.
     max_questions=0 bo'lsa API detail cheklovsiz (bazadagi barcha savollar).
     max_questions>0 bo'lsa question_limit=10..30 API ga uzatiladi.
+    variant_label / topic_code — ixtiyoriy filtrlash (katalog 4–6 qadam).
     """
     bounds = question_limit_bounds()
     question_limit = validate_question_limit_value(int(max_questions or 0), bounds=bounds)
+    v_label = str(variant_label or "").strip() or None
+    t_code = str(topic_code or "").strip().lower() or None
 
     try:
         codes = resolve_imentor_subject_codes(subject_codes)
@@ -359,6 +494,8 @@ def fetch_random_imentor_questions(
                 code,
                 syllabus_id=syllabus_id,
                 department_code=department_code,
+                variant_label=v_label,
+                topic_code=t_code,
                 min_questions=list_min,
                 max_questions=list_max,
             )
@@ -367,6 +504,8 @@ def fetch_random_imentor_questions(
                     code,
                     syllabus_id=syllabus_id,
                     department_code=department_code,
+                    variant_label=v_label,
+                    topic_code=t_code,
                     min_questions=None,
                     max_questions=None,
                 )
@@ -376,7 +515,8 @@ def fetch_random_imentor_questions(
 
     if not pool:
         raise IMentorApiError(
-            "Tanlangan fanlarda e'lon qilingan test topilmadi (1 soat kutish talabi bo'lishi mumkin)"
+            "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test topilmadi "
+            "(1 soat kutish talabi bo'lishi mumkin)"
         )
 
     pick = random.choice(pool)
@@ -407,6 +547,8 @@ def fetch_random_imentor_questions(
         "subject_name": str(detail.get("subject_name") or pick.get("subject_name") or ""),
         "department_code": str(detail.get("department_code") or pick.get("department_code") or ""),
         "department_name": str(detail.get("department_name") or pick.get("department_name") or ""),
+        "variant_label": str(detail.get("variant_label") or pick.get("variant_label") or v_label or ""),
+        "topic_code": str(detail.get("topic_code") or pick.get("topic_code") or t_code or ""),
         "question_count": len(questions),
         "question_limit": int(detail.get("question_limit") or question_limit or 0),
         "question_count_available": int(
@@ -420,7 +562,12 @@ def fetch_random_imentor_questions(
     return questions, meta
 
 
-def validate_imentor_subjects(subject_codes: list[str]) -> tuple[bool, str, int]:
+def validate_imentor_subjects(
+    subject_codes: list[str],
+    *,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
+) -> tuple[bool, str, int]:
     """Imtihon yaratishda: fanlar mavjudligi va kamida bitta test borligini tekshirish."""
     if not imentor_configured():
         return False, "iMentor API kaliti sozlanmagan (IMENTOR_API_KEY)", 0
@@ -428,19 +575,23 @@ def validate_imentor_subjects(subject_codes: list[str]) -> tuple[bool, str, int]
         resolved = resolve_imentor_subject_codes(subject_codes)
     except IMentorApiError as ex:
         return False, str(ex), 0
+    v_label = str(variant_label or "").strip() or None
+    t_code = str(topic_code or "").strip().lower() or None
     total_tests = 0
     for code in resolved:
         ctx = _subject_context(code)
         department_code = str(ctx.get("department_code") or "").strip() or None
         syllabus_id = ctx.get("syllabus_id")
         total_tests += max(
-            int(ctx.get("test_count") or 0),
+            0 if (v_label or t_code) else int(ctx.get("test_count") or 0),
             imentor_published_test_count(
                 subject_code=code,
                 syllabus_id=syllabus_id,
                 department_code=department_code,
+                variant_label=v_label,
+                topic_code=t_code,
             ),
         )
     if total_tests < 1:
-        return False, "Tanlangan fanlarda e'lon qilingan test yo'q (yangi testlar 1 soatdan keyin)", 0
+        return False, "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test yo'q (yangi testlar 1 soatdan keyin)", 0
     return True, "", total_tests

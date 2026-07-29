@@ -53,7 +53,8 @@ export interface VoiceFrame {
  * davriy (1.0). Uni `harmonicCount` rad etadi: sof tonda 1–2 ta ohang, nutqda
  * (vokal trakt + formantlar) 4–12 ta.
  */
-const RMS_VOICE = 0.022;
+/** Minimal RMS — nafas/jim mikrofon shovqinidan biroz yuqoriroq. */
+const RMS_VOICE = 0.024;
 /** Nutq f0 diapazoni (chuqur erkak ovozidan baland ayol ovozigacha). */
 const PITCH_MIN_HZ = 75;
 const PITCH_MAX_HZ = 350;
@@ -232,39 +233,38 @@ export function analyzeVoiceFrame(analyser: AnalyserNode): VoiceFrame {
  * bilan hisoblanadi — bu klass faqat shu freymda nutq bor-yo'qligini aytadi.
  */
 export class VoiceActivityTracker {
-  private noiseFloor = 0.018;
-  private calibrateLeft = 45;
+  private noiseFloor = 0.02;
+  private calibrateLeft = 60;
   private prevRms = 0;
 
   push(frame: VoiceFrame): boolean {
     if (this.calibrateLeft > 0) {
-      this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.85);
+      this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.9);
       this.calibrateLeft -= 1;
+      return false; // kalibrlash paytida hech narsa "gapirish" deb yozilmasin
     }
 
     const spike = this.prevRms > 0.015 && frame.rms > this.prevRms * 3.2;
     this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
     if (spike) return false;
 
-    // Sezgirroq: uzoq/sekin ovoz ham fon shovqinidan sal balandroq bo'lsa yetadi.
-    const aboveFloor = frame.rms > this.noiseFloor * 1.3;
+    // Fon shovqinidan aniq ajralishi kerak — 1.3× haddan sezgir edi (soxta signal).
+    const aboveFloor = frame.rms > this.noiseFloor * 1.85;
     return frame.humanVoice && aboveFloor;
   }
 }
 
-// Tashqi shovqin chegarasi — ATAYLAB baland. Oddiy xona shovqini (ventilyator, uzoq
-// shovqin, klaviatura, "taq" bir martalik urish) jazolanmasin; faqat haqiqatan baland
-// va DAVOMIY shovqin (musiqa, televizor) aniqlansin. Bir martalik "taq"ni qisqa grace
-// (ambient tracker 300ms) va spike-filtr bloklaydi; ustiga 4s uzluksiz talab qilinadi.
-const AMBIENT_RMS_MIN = 0.14;
-const AMBIENT_FLOOR_MULT = 3.0;
+// Tashqi shovqin — faqat HAQIQATAN baland va davomiy (musiqa/TV). Oddiy xona
+// (ventilyator, noutbuk kuleri, uzoq shovqin) jazolanmasin.
+const AMBIENT_RMS_MIN = 0.2;
+const AMBIENT_FLOOR_MULT = 3.8;
 
 /**
  * Baland tashqi shovqin (musiqa, televizor, eshik — inson nutqi emas) — xom holat.
  */
 export class AmbientNoiseTracker {
-  private noiseFloor = 0.02;
-  private calibrateLeft = 45;
+  private noiseFloor = 0.025;
+  private calibrateLeft = 60;
   private prevRms = 0;
 
   /**
@@ -276,6 +276,7 @@ export class AmbientNoiseTracker {
     if (this.calibrateLeft > 0) {
       this.noiseFloor = Math.max(this.noiseFloor, frame.rms * 0.9);
       this.calibrateLeft -= 1;
+      return false;
     }
 
     const spike = this.prevRms > 0.015 && frame.rms > this.prevRms * 3.2;
@@ -287,7 +288,7 @@ export class AmbientNoiseTracker {
       !speech &&
       frame.rms >= AMBIENT_RMS_MIN &&
       frame.rms > this.noiseFloor * AMBIENT_FLOOR_MULT &&
-      (frame.lowFreqRatio > 0.35 || frame.speechRatio < 0.45)
+      (frame.lowFreqRatio > 0.4 || frame.speechRatio < 0.4)
     );
   }
 }

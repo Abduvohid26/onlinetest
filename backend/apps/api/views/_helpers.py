@@ -741,18 +741,25 @@ def _admin_exams_create_impl(request):
     questions: list = []
 
     if mode == "imentor_mixed":
-        from apps.api.imentor_service import validate_imentor_subjects
+        from apps.api.imentor_service import (
+            dump_imentor_selection,
+            parse_imentor_selection,
+            validate_imentor_subjects,
+        )
 
         raw_codes = d.get("imentor_subject_codes")
-        if isinstance(raw_codes, list):
-            raw_list = [str(c).strip() for c in raw_codes if str(c).strip()]
-        else:
-            raw_list = [
-                str(c).strip()
-                for c in safe_json_loads(raw_codes or "[]", [])
-                if str(c).strip()
-            ]
-        ok, err, _total = validate_imentor_subjects(raw_list)
+        selection = parse_imentor_selection(raw_codes if isinstance(raw_codes, (list, dict)) else safe_json_loads(raw_codes or "[]", []))
+        # Alohida maydonlar (UI) — selection ustidan ustun
+        if d.get("imentor_variant_label"):
+            selection["variant_label"] = str(d.get("imentor_variant_label") or "").strip()
+        if d.get("imentor_topic_code"):
+            selection["topic_code"] = str(d.get("imentor_topic_code") or "").strip().lower()
+        raw_list = selection["subject_codes"]
+        ok, err, _total = validate_imentor_subjects(
+            raw_list,
+            variant_label=selection.get("variant_label") or None,
+            topic_code=selection.get("topic_code") or None,
+        )
         if not ok:
             return Response({"error": err}, status=400)
         from apps.api.imentor_service import (
@@ -770,7 +777,13 @@ def _admin_exams_create_impl(request):
             if isinstance(ex, IMentorApiError):
                 return Response({"error": str(ex)}, status=400)
             return Response({"error": "Noto'g'ri savollar soni"}, status=400)
-        imentor_codes_json = json.dumps(codes)
+        imentor_codes_json = json.dumps(
+            dump_imentor_selection(
+                codes,
+                variant_label=selection.get("variant_label"),
+                topic_code=selection.get("topic_code"),
+            )
+        )
 
         # Savollar YARATISHDA olib kelinadi va (auto til bo'lsa) 3 tilga tarjima
         # qilinadi — barcha talaba bir xil (fiksirlangan) to'plamni ko'radi.
@@ -779,7 +792,11 @@ def _admin_exams_create_impl(request):
         # imtihon yaratishda kutadi (bu yerda javob biroz sekinroq bo'lishi mumkin).
         try:
             questions, _meta = fetch_random_imentor_questions(
-                codes, max_questions=bank_count, add_translations=(lang == "auto"),
+                codes,
+                max_questions=bank_count,
+                add_translations=(lang == "auto"),
+                variant_label=selection.get("variant_label") or None,
+                topic_code=selection.get("topic_code") or None,
             )
         except Exception as ex:
             from apps.api.imentor_client import IMentorApiError

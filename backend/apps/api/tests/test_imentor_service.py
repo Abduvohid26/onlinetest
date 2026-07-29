@@ -101,10 +101,11 @@ class IMentorServiceTests(TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["code"], "fiziologiya")
 
+    @mock.patch("apps.api.imentor_service.imentor_published_test_count", return_value=0)
     @mock.patch("apps.api.imentor_service._build_subject_registry")
     @mock.patch("apps.api.imentor_service.imentor_configured", return_value=True)
     @mock.patch("apps.api.imentor_service.imentor_collect_department_subjects")
-    def test_subjects_for_department_merges_test_count(self, mock_collect, _cfg, mock_registry):
+    def test_subjects_for_department_merges_test_count(self, mock_collect, _cfg, mock_registry, _pub):
         mock_collect.return_value = (
             {"code": "fiziologiya", "name": "Fiziologiya kafedrasi"},
             [
@@ -190,6 +191,8 @@ class IMentorServiceTests(TestCase):
             "ANAT",
             syllabus_id=None,
             department_code="ANAT",
+            variant_label=None,
+            topic_code=None,
             min_questions=10,
             max_questions=30,
         )
@@ -220,8 +223,42 @@ class IMentorServiceTests(TestCase):
             "ANAT",
             syllabus_id=None,
             department_code="ANAT",
+            variant_label=None,
+            topic_code=None,
             min_questions=10,
             max_questions=30,
         )
         mock_get.assert_called_with(7, question_limit=None)
         self.assertEqual(len(qs), 1)
+
+    @mock.patch("apps.api.imentor_service.imentor_published_test_count", return_value=0)
+    @mock.patch("apps.api.imentor_service._build_subject_registry")
+    @mock.patch("apps.api.imentor_service.imentor_configured", return_value=True)
+    @mock.patch("apps.api.imentor_service.imentor_collect_department_subjects")
+    def test_subjects_for_department_includes_variants(self, mock_collect, _cfg, mock_registry, _pub):
+        mock_collect.return_value = (
+            {"code": "fiziologiya", "name": "Fiziologiya kafedrasi"},
+            [
+                {
+                    "subject_code": "fiziologiya__anatomiya",
+                    "subject_name": "Anatomiya",
+                    "variants_count": 1,
+                    "topics_count": 1,
+                    "variants": [
+                        {
+                            "label": "PI",
+                            "topics": [{"id": "M1", "title": "Yurak"}],
+                        }
+                    ],
+                }
+            ],
+        )
+        mock_registry.return_value = {
+            "fiziologiya__anatomiya": {
+                "subject_code": "fiziologiya__anatomiya",
+                "test_count": 2,
+            }
+        }
+        _dept, subjects = subjects_for_department("fiziologiya")
+        self.assertEqual(subjects[0]["variants"][0]["label"], "PI")
+        self.assertEqual(subjects[0]["variants"][0]["topics"][0]["code"], "m1")

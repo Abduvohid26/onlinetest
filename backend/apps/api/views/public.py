@@ -123,6 +123,9 @@ def public_verify_certificate_pdf(request, result_id: str):
     )
     if not se:
         return HttpResponse("Not found", status=404)
+    from apps.api.views.student_results import _upgrade_ai_summary_if_needed
+
+    _upgrade_ai_summary_if_needed(se, request)
     if se.session_questions_json:
         questions = safe_json_loads(se.session_questions_json, [])
     else:

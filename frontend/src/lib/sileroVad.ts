@@ -53,32 +53,20 @@ const CONTEXT = 64;
  * hisoblash uchun pastroq. Bitta chegara bo'lsa, chegara atrofidagi ehtimollik
  * signalni tinimsiz yoqib-o'chirardi.
  */
-const SPEECH_START_PROB = 0.7;
-const SPEECH_STOP_PROB = 0.5;
+// Biroz qattiqroq — nafas/klaviatura/ventilyator soxta ijobiylarni kamaytiradi.
+const SPEECH_START_PROB = 0.78;
+const SPEECH_STOP_PROB = 0.55;
 
 /**
  * SEZGIRLIK KALITI — nutq shuncha kadr UZLUKSIZ davom etsagina tasdiqlanadi
- * (1 kadr = 32ms, ya'ni 12 kadr ≈ 384ms).
+ * (1 kadr = 32ms, ya'ni 16 kadr ≈ 512ms).
  *
- * Nega kerak: ilgari bitta kadr yetardi (32ms). Model bir kadrda adashishi
- * mumkin, va real maishiy shovqinda bu tez-tez sodir bo'ladi. 124 ta real
- * shovqin klipida o'lchangan (`docs/VAD_BENCHMARK.md`):
- *
- *   uzluksiz talab   soxta signal   real ovozni aniqlash
- *   ---------------  ------------   --------------------
- *    32ms (1 kadr)        13.7%            100%
- *   128ms                  4.8%            100%
- *   256ms                  0.8%            100%
- *   384ms                  0.0%            100%   <= tanlangan
- *
- * Ya'ni 384ms talab soxta signalni butunlay yo'q qiladi va real gapirishni
- * aniqlashga umuman ta'sir qilmaydi — har qanday haqiqiy gap 0.4s dan uzun.
- *
- * Sezgirlikni yana kamaytirish kerak bo'lsa — shu sonni oshiring (16 = 512ms).
- * Oshirish kerak bo'lsa — kamaytiring, lekin 8 (256ms) dan pastda soxta
- * signallar qayta paydo bo'ladi.
+ * Benchmark (`docs/VAD_BENCHMARK.md`): 384ms da soxta signal ~0%. Productionda
+ * ba'zi mikrofonlar (notebook built-in + AGC) tinch xonada ham qisqa spike
+ * berardi — 512ms + yuqoriroq ehtimollik chegarasi bu holatlarni yumshatadi.
+ * Haqiqiy gapirish hali ham aniq ushlanadi (so'z ≥0.5s).
  */
-const SPEECH_MIN_FRAMES = 12;
+const SPEECH_MIN_FRAMES = 16;
 
 /**
  * Navbat cho'zilib ketsa (sekin qurilma) eng eski kadrlarni tashlaymiz — real-time

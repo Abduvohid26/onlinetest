@@ -114,12 +114,23 @@ def imentor_catalog_departments() -> dict:
     return data if isinstance(data, dict) else {"count": 0, "results": []}
 
 
+def imentor_catalog_department_detail(department_code: str) -> dict:
+    """
+    Tavsiya etilgan 2-qadam: kafedra + barcha fanlar, yo'nalish va mavzular
+    bitta javobda (GET .../catalog/departments/<code>/).
+    """
+    code = urllib.parse.quote(str(department_code or "").strip(), safe="")
+    data = imentor_request(f"/v1/external/catalog/departments/{code}/")
+    return data if isinstance(data, dict) else {}
+
+
 def imentor_catalog_department_subjects(
     department_code: str,
     *,
     page: int = 1,
     page_size: int = 200,
 ) -> dict:
+    """Eski/ixtiyoriy: sahifalangan summary (variants/topics'siz)."""
     code = urllib.parse.quote(str(department_code or "").strip(), safe="")
     data = imentor_request(
         f"/v1/external/catalog/departments/{code}/subjects/",
@@ -129,12 +140,31 @@ def imentor_catalog_department_subjects(
 
 
 def imentor_collect_department_subjects(department_code: str, *, max_pages: int = 10) -> tuple[dict, list[dict]]:
-    """Kafedra fanlari (sahifalab) + department meta."""
+    """
+    Kafedra fanlari + department meta.
+    Avvalo to'liq detail endpoint (variants[].topics[] bilan); bo'sh/xato bo'lsa
+    eski sahifalangan summary ga fallback.
+    """
+    code = str(department_code or "").strip()
+    try:
+        detail = imentor_catalog_department_detail(code)
+        subjects = detail.get("subjects") if isinstance(detail, dict) else None
+        if isinstance(subjects, list) and subjects:
+            dept_meta = {
+                "code": str(detail.get("code") or code).strip(),
+                "name": str(detail.get("name") or code).strip(),
+                "sort_order": int(detail.get("sort_order") or 0),
+                "subjects_count": int(detail.get("subjects_count") or len(subjects)),
+            }
+            return dept_meta, [s for s in subjects if isinstance(s, dict)]
+    except IMentorApiError:
+        pass
+
     dept_meta: dict = {}
     out: list[dict] = []
     page = 1
     while page <= max_pages:
-        data = imentor_catalog_department_subjects(department_code, page=page, page_size=200)
+        data = imentor_catalog_department_subjects(code, page=page, page_size=200)
         if isinstance(data.get("department"), dict):
             dept_meta = data["department"]
         batch = data.get("results") or []
@@ -154,6 +184,8 @@ def imentor_list_tests(
     subject_code: str | None = None,
     syllabus_id: int | None = None,
     department_code: str | None = None,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
     page: int = 1,
     page_size: int = 50,
     min_questions: int | None = None,
@@ -166,6 +198,10 @@ def imentor_list_tests(
         params["syllabus_id"] = int(syllabus_id)
     if department_code:
         params["department_code"] = department_code
+    if variant_label:
+        params["variant_label"] = str(variant_label).strip()
+    if topic_code:
+        params["topic_code"] = str(topic_code).strip().lower()
     if min_questions is not None:
         params["min_questions"] = int(min_questions)
     if max_questions is not None:
@@ -179,15 +215,21 @@ def imentor_published_test_count(
     subject_code: str | None = None,
     syllabus_id: int | None = None,
     department_code: str | None = None,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
 ) -> int:
     """E'lon qilingan testlar soni (savol chegarasisiz — faqat count)."""
     best = 0
     queries: list[dict[str, Any]] = []
+    filters = {
+        "variant_label": (variant_label or "").strip() or None,
+        "topic_code": (topic_code or "").strip().lower() or None,
+    }
     if subject_code:
-        queries.append({"subject_code": subject_code})
+        queries.append({"subject_code": subject_code, **filters})
     if syllabus_id:
-        queries.append({"syllabus_id": syllabus_id})
-    if department_code:
+        queries.append({"syllabus_id": syllabus_id, **filters})
+    if department_code and not variant_label and not topic_code:
         queries.append({"department_code": department_code})
         queries.append({"subject_code": department_code})
     if not queries:
@@ -252,13 +294,17 @@ def imentor_collect_tests_for_subject(
     *,
     syllabus_id: int | None = None,
     department_code: str | None = None,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
     max_pages: int = 10,
     min_questions: int | None = IMENTOR_QUESTION_LIMIT_MIN,
     max_questions: int | None = None,
 ) -> list[dict]:
-    """Fan bo'yicha e'lon qilingan testlar (subject_code va/yoki syllabus_id)."""
+    """Fan (+ ixtiyoriy yo'nalish/mavzu) bo'yicha e'lon qilingan testlar."""
     seen: set[int] = set()
     out: list[dict] = []
+    v_label = str(variant_label or "").strip() or None
+    t_code = str(topic_code or "").strip().lower() or None
 
     def collect(**list_kwargs: Any) -> None:
         nonlocal out
@@ -269,6 +315,8 @@ def imentor_collect_tests_for_subject(
                 page_size=200,
                 min_questions=min_questions,
                 max_questions=max_questions,
+                variant_label=v_label,
+                topic_code=t_code,
                 **list_kwargs,
             )
             batch = data.get("results") or []
@@ -289,6 +337,15 @@ def imentor_collect_tests_for_subject(
 
     code = str(subject_code or "").strip()
     dept = str(department_code or "").strip()
+    # Yo'nalish/mavzu tanlanganda faqat subject_code (+ syllabus) — aniqroq.
+    if v_label or t_code:
+        if code:
+            collect(subject_code=code)
+        sid = int(syllabus_id) if syllabus_id else 0
+        if sid > 0:
+            collect(syllabus_id=sid)
+        return out
+
     # Avval kafedra (legacy testlar ko'pincha shu yerda), keyin katalog fan kodi.
     if dept:
         collect(department_code=dept)

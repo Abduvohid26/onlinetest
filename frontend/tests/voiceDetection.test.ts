@@ -32,7 +32,7 @@ describe('odam ovozini ANIQLAYDI', () => {
 
   it("sekin/uzoqdagi ovoz — TASHQI odam kadr tashqarisidan gapirsa ham", () => {
     assert.equal(isVoice(F.voicedSpeech(0.045, 130)), true, 'sekin ovoz');
-    assert.equal(isVoice(F.voicedSpeech(0.025, 150)), true, 'juda sekin ovoz');
+    assert.equal(isVoice(F.voicedSpeech(0.03, 150)), true, 'juda sekin ovoz');
   });
 
   it('devor ortidan / boshqa xonadan (bo\'g\'iq) ovoz', () => {

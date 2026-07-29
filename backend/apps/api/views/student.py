@@ -722,9 +722,12 @@ def student_exams_start(request, pk: int):
         else:
             # Eski (ushbu o'zgarishdan oldin yaratilgan) imtihonlar — questions_json
             # bo'sh, shu sabab avvalgidek har talaba uchun jonli olib kelinadi.
-            from apps.api.imentor_service import fetch_random_imentor_questions
+            from apps.api.imentor_service import fetch_random_imentor_questions, parse_imentor_selection
 
-            codes = safe_json_loads(getattr(exam, "imentor_subject_codes", None) or "[]", [])
+            selection = parse_imentor_selection(
+                safe_json_loads(getattr(exam, "imentor_subject_codes", None) or "[]", [])
+            )
+            codes = selection.get("subject_codes") or []
             if not isinstance(codes, list) or not codes:
                 return Response({"error": "Invalid iMentor exam configuration"}, status=500)
             max_q = int(exam.bank_question_count or 0)
@@ -733,6 +736,8 @@ def student_exams_start(request, pk: int):
                     codes,
                     max_questions=max_q,
                     add_translations=False,
+                    variant_label=selection.get("variant_label") or None,
+                    topic_code=selection.get("topic_code") or None,
                 )
             except Exception as ex:
                 from apps.api.imentor_client import IMentorApiError

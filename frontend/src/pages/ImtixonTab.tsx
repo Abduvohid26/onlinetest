@@ -31,6 +31,8 @@ type ImentorDepartment = {
   sort_order?: number;
   subjects_count?: number;
 };
+type ImentorTopic = { code: string; id?: string; title: string };
+type ImentorVariant = { label: string; file_name?: string; topics: ImentorTopic[] };
 type ImentorSubject = {
   subject_code: string;
   subject_name: string;
@@ -40,6 +42,8 @@ type ImentorSubject = {
   questions_total?: number;
   variants_count?: number;
   topics_count?: number;
+  variant_labels?: string[];
+  variants?: ImentorVariant[];
 };
 
 function toIsoOrNull(localValue: string): string | null {
@@ -79,6 +83,8 @@ export function ImtixonTab({
   const [responsibleStaffId, setResponsibleStaffId] = useState('');
   const [selDepartment, setSelDepartment] = useState('');
   const [selSubject, setSelSubject] = useState('');
+  const [selVariant, setSelVariant] = useState('');
+  const [selTopic, setSelTopic] = useState('');
   const [imentorMaxQ, setImentorMaxQ] = useState(0);
   const [imentorQLimits, setImentorQLimits] = useState({ min: 10, max: 30 });
   const [subjectsLoading, setSubjectsLoading] = useState(false);
@@ -155,12 +161,23 @@ export function ImtixonTab({
 
   useEffect(() => {
     setSelSubject('');
+    setSelVariant('');
+    setSelTopic('');
     if (selDepartment) {
       loadDepartmentSubjects(selDepartment);
     } else {
       setImentorSubjects([]);
     }
   }, [selDepartment, loadDepartmentSubjects]);
+
+  useEffect(() => {
+    setSelVariant('');
+    setSelTopic('');
+  }, [selSubject]);
+
+  useEffect(() => {
+    setSelTopic('');
+  }, [selVariant]);
 
   const onDepartmentChange = (code: string) => {
     setSelDepartment(code);
@@ -170,6 +187,27 @@ export function ImtixonTab({
     () => imentorSubjects.filter((s) => (s.test_count ?? 0) > 0),
     [imentorSubjects],
   );
+
+  const selectedSubject = useMemo(
+    () => imentorSubjects.find((s) => s.subject_code === selSubject) || null,
+    [imentorSubjects, selSubject],
+  );
+
+  const subjectVariants = useMemo(() => {
+    const vars = selectedSubject?.variants;
+    if (Array.isArray(vars) && vars.length > 0) return vars;
+    const labels = selectedSubject?.variant_labels || [];
+    return labels.map((label) => ({ label, topics: [] as ImentorTopic[] }));
+  }, [selectedSubject]);
+
+  const selectedVariant = useMemo(
+    () => subjectVariants.find((v) => v.label === selVariant) || null,
+    [subjectVariants, selVariant],
+  );
+
+  const subjectTopics = useMemo(() => selectedVariant?.topics || [], [selectedVariant]);
+
+  const catalogStep = !selDepartment ? 1 : !selSubject ? 2 : !selVariant && subjectVariants.length > 0 ? 3 : 4;
 
   const openExceptions = async () => {
     if (selGroups.length === 0) {
@@ -230,6 +268,8 @@ export function ImtixonTab({
     if (!selSubject) return t.imentorPickSubject;
     const picked = imentorSubjects.find((s) => s.subject_code === selSubject);
     if (!picked || (picked.test_count ?? 0) < 1) return t.imentorNoSubjects;
+    if (subjectVariants.length > 0 && !selVariant) return t.imentorPickVariant;
+    if (subjectTopics.length > 0 && !selTopic) return t.imentorPickTopic;
     if (imentorMaxQ !== 0 && (imentorMaxQ < imentorQLimits.min || imentorMaxQ > imentorQLimits.max)) {
       return t.imentorQuestionLimitInvalid;
     }
@@ -266,6 +306,8 @@ export function ImtixonTab({
         technical_retakes_allowed: Math.max(0, Math.min(20, technicalRetakesAllowed)),
         proctor_profile: proctorProfile,
       };
+      if (selVariant) body.imentor_variant_label = selVariant;
+      if (selTopic) body.imentor_topic_code = selTopic;
       if (responsibleStaffId.trim()) body.teacher_id = responsibleStaffId.trim();
 
       const res = await fetch(apiUrl('/api/admin/exams'), {
@@ -288,6 +330,8 @@ export function ImtixonTab({
       setResponsibleStaffId('');
       setSelDepartment('');
       setSelSubject('');
+      setSelVariant('');
+      setSelTopic('');
       setSelGroups([]);
       setExMap({});
       setStartLocal(defaultExamStartLocal());
@@ -351,7 +395,40 @@ export function ImtixonTab({
               </AdminField>
             </div>
 
-            <div className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 sm:p-5 space-y-4">
+              <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium">
+                {[
+                  { n: 1, label: t.imentorStepDepartment },
+                  { n: 2, label: t.imentorStepSubject },
+                  { n: 3, label: t.imentorStepVariant },
+                  { n: 4, label: t.imentorStepTopic },
+                ].map((step) => {
+                  const done =
+                    (step.n === 1 && !!selDepartment) ||
+                    (step.n === 2 && !!selSubject) ||
+                    (step.n === 3 && (!!selVariant || subjectVariants.length === 0)) ||
+                    (step.n === 4 && (!!selTopic || subjectTopics.length === 0 || !selVariant));
+                  const active = catalogStep === step.n;
+                  return (
+                    <div key={step.n} className="flex items-center gap-2">
+                      <span
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] ${
+                          done
+                            ? 'bg-blue-600 text-white'
+                            : active
+                              ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-300'
+                              : 'bg-slate-200 text-slate-500'
+                        }`}
+                      >
+                        {done ? '✓' : step.n}
+                      </span>
+                      <span className={active || done ? 'text-slate-700' : 'text-slate-400'}>{step.label}</span>
+                      {step.n < 4 && <span className="text-slate-300 mx-1">→</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
               <AdminField label={t.imentorDepartmentLabel} required>
                 <AdminSelect
                   value={selDepartment}
@@ -390,17 +467,65 @@ export function ImtixonTab({
                       const hasTests = (s.test_count ?? 0) > 0;
                       const testLabel =
                         lang === 'ru' ? 'тест' : lang === 'en' ? 'tests' : 'test';
+                      const meta = [
+                        hasTests ? `${s.test_count} ${testLabel}` : t.imentorSubjectNoTests,
+                        s.variants_count ? `${s.variants_count} ${t.imentorVariantShort}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · ');
                       return (
                         <option key={s.subject_code} value={s.subject_code} disabled={!hasTests}>
                           {s.subject_name}
-                          {hasTests
-                            ? ` (${s.test_count} ${testLabel})`
-                            : ` — ${t.imentorSubjectNoTests}`}
+                          {meta ? ` (${meta})` : ''}
                         </option>
                       );
                     })}
                   </AdminSelect>
                   <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorSubjectsHint}</p>
+                </AdminField>
+              )}
+
+              {selSubject && subjectVariants.length > 0 && (
+                <AdminField label={t.imentorVariantLabel} required>
+                  <div className="flex flex-wrap gap-2">
+                    {subjectVariants.map((v) => {
+                      const active = selVariant === v.label;
+                      return (
+                        <button
+                          key={v.label}
+                          type="button"
+                          onClick={() => setSelVariant(v.label)}
+                          className={`px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors ${
+                            active
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 hover:bg-blue-50'
+                          }`}
+                        >
+                          {v.label}
+                          {v.topics?.length ? (
+                            <span className={`ml-1.5 text-[11px] ${active ? 'text-blue-100' : 'text-slate-400'}`}>
+                              {v.topics.length}
+                            </span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorVariantHint}</p>
+                </AdminField>
+              )}
+
+              {selVariant && subjectTopics.length > 0 && (
+                <AdminField label={t.imentorTopicLabel} required>
+                  <AdminSelect value={selTopic} onChange={(e) => setSelTopic(e.target.value)}>
+                    <option value="">{t.imentorPickTopic}</option>
+                    {subjectTopics.map((topic) => (
+                      <option key={topic.code} value={topic.code}>
+                        {topic.title} ({topic.code})
+                      </option>
+                    ))}
+                  </AdminSelect>
+                  <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorTopicHint}</p>
                 </AdminField>
               )}
 

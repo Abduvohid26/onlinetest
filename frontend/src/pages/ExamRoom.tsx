@@ -9,6 +9,7 @@ import {
   LIVE_SIGNAL_CONFIRM_MS,
   LIVE_SIGNAL_ESCALATE_MS,
   TALK_SIGNAL_ESCALATE_MS,
+  TALK_SIGNAL_CONFIRM_MS,
   liveSignalViolationType,
 } from '../lib/realtimeProctor';
 import { SmallWarningLedger, SMALL_WARNINGS_BEFORE_FORMAL } from '../lib/smallWarningLedger';
@@ -1452,11 +1453,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!analyser) return;
     if (!voiceTrackerRef.current) voiceTrackerRef.current = new VoiceActivityTracker();
     if (!ambientTrackerRef.current) ambientTrackerRef.current = new AmbientNoiseTracker();
-    // Ovoz (gapirish): grace 700ms — so'zlar orasidagi qisqa pauzani ko'prik qiladi.
-    if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(700);
-    // Shovqin: grace QISQA (300ms) — bir martalik "taq"lar orasidagi tanaffus ko'prik
+    // Ovoz (gapirish): grace 400ms — so'zlar orasidagi pauza ko'prik, lekin
+    // tinch xonadagi qisqa spike'lar uzoq "uzluksiz" hisoblanmasin (ilgari 700ms).
+    if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(400);
+    // Shovqin: grace QISQA (250ms) — bir martalik "taq"lar orasidagi tanaffus ko'prik
     // qilinmasin, faqat HAQIQATAN uzluksiz shovqin (musiqa/TV) to'planib rasmiy bo'lsin.
-    if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(300);
+    if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(250);
     const id = window.setInterval(() => {
       if (bannedRef.current || !analyserRef.current) return;
       // Modal ochiq — nazorat muzlagan: audio hisobini butunlay to'xtatamiz.
@@ -1510,17 +1512,21 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         }).catch(() => {});
       }
 
-      // Gapirish (odam ovozi) — MAXSUS tez qoida: kichik ogohlantirish DARHOL
-      // (aniqlanishi bilanoq), rasmiy 2s. Sabab: tashqaridan gapirib turgan odam
-      // bir necha soniyada javobni aytib ulguradi — kutib bo'lmaydi. Chip faqat
-      // vizual (backendga hech narsa ketmaydi), shu sabab darhol ko'rsatish xavfsiz;
-      // `speechMs > 0` = kamida bitta freymda inson ovozi topildi (tracker grace
-      // 700ms so'zlar orasidagi pauzada chipni o'chirib-yoqmaydi).
-      // Shovqin (ambient) esa umumiy qonunda qoladi: 1.5s kichik, 4s rasmiy.
-      // Ovoz shovqindan muhimroq, shu sabab chipda birinchi o'rinda turadi.
-      // Kichik ogohlantirish epizodlari sanaladi ("3 kichik → 4-si rasmiy").
-      const speechSmall = speechMs > 0;
-      const ambientSmall = ambientMs >= LIVE_SIGNAL_CONFIRM_MS;
+      // Gapirish: kichik ogohlantirish ~0.9s uzluksiz nutqdan keyin (ilgari 0ms —
+      // bitta freym ham modal ochardi → tinch o'tirganda soxta signal). Rasmiy ~2.5s.
+      // DSP zaxira (Silero yo'q) da biroz qattiqroq — DSP soxta ijobiyga moyil.
+      // Shovqin (ambient): 2s kichik, 5s rasmiy — oddiy xona shovqini kamroq bezovta qilsin.
+      const speechConfirmMs = silero?.ready
+        ? TALK_SIGNAL_CONFIRM_MS
+        : Math.max(TALK_SIGNAL_CONFIRM_MS, 1400);
+      const speechEscalateMs = silero?.ready
+        ? TALK_SIGNAL_ESCALATE_MS
+        : Math.max(TALK_SIGNAL_ESCALATE_MS, 3000);
+      const ambientConfirmMs = Math.max(LIVE_SIGNAL_CONFIRM_MS, 2000);
+      const ambientEscalateMs = Math.max(LIVE_SIGNAL_ESCALATE_MS, 5000);
+
+      const speechSmall = speechMs >= speechConfirmMs;
+      const ambientSmall = ambientMs >= ambientConfirmMs;
       if (speechSmall) noteSmallWarningRef.current(SPEECH_LEDGER_KEY);
       else smallWarningLedgerRef.current.noteCleared(SPEECH_LEDGER_KEY);
       if (ambientSmall) noteSmallWarningRef.current('SUSPICIOUS_AUDIO');
@@ -1541,12 +1547,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         setAudioLiveLabel(null);
       }
 
-      if (ambientMs >= LIVE_SIGNAL_ESCALATE_MS) {
+      if (ambientMs >= ambientEscalateMs) {
         ambientContinuousRef.current!.reset();
         formalIssuedFor('SUSPICIOUS_AUDIO');
         void logViolationRef.current('SUSPICIOUS_AUDIO');
       }
-      if (speechMs >= TALK_SIGNAL_ESCALATE_MS) {
+      if (speechMs >= speechEscalateMs) {
         speechContinuousRef.current!.reset();
         formalIssuedFor(SPEECH_LEDGER_KEY);
         // Talabaning o'z og'zi ham qimirlayotgan bo'lsa — o'zi gapiryapti; aks holda

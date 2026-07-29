@@ -44,7 +44,7 @@ const chairThud: VoiceFrame = {
 };
 
 const ambientTv: VoiceFrame = {
-  rms: 0.18, // AMBIENT_RMS_MIN (0.14) dan baland — haqiqiy baland shovqin
+  rms: 0.24, // AMBIENT_RMS_MIN (0.2) dan baland — haqiqiy baland shovqin
   zcr: 0.14,
   humanVoice: false,
   speechRatio: 0.28,
@@ -72,10 +72,10 @@ describe('AmbientNoiseTracker', () => {
 
   it('flags sustained loud non-speech as active', () => {
     const tracker = new AmbientNoiseTracker();
-    for (let i = 0; i < 50; i++) tracker.push(quiet);
+    for (let i = 0; i < 70; i++) tracker.push(quiet);
     // Birinchi kadr spike-filtr tufayli o'tkazilishi mumkin — bir necha kadr beramiz.
     let saw = false;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       if (tracker.push(ambientTv)) saw = true;
     }
     assert.equal(saw, true);
@@ -85,7 +85,7 @@ describe('AmbientNoiseTracker', () => {
 describe('VoiceActivityTracker', () => {
   it('ignores non-speech loud frames', () => {
     const tracker = new VoiceActivityTracker();
-    for (let i = 0; i < 50; i++) tracker.push(quiet);
+    for (let i = 0; i < 70; i++) tracker.push(quiet);
     for (let i = 0; i < 20; i++) {
       const active = tracker.push({
         rms: 0.2,
@@ -103,7 +103,7 @@ describe('VoiceActivityTracker', () => {
 
   it('ignores chair-like impulse noise', () => {
     const tracker = new VoiceActivityTracker();
-    for (let i = 0; i < 50; i++) tracker.push(quiet);
+    for (let i = 0; i < 70; i++) tracker.push(quiet);
     for (let i = 0; i < 15; i++) {
       assert.equal(tracker.push(chairThud), false);
     }
@@ -111,12 +111,20 @@ describe('VoiceActivityTracker', () => {
 
   it('flags human voice as active', () => {
     const tracker = new VoiceActivityTracker();
-    for (let i = 0; i < 50; i++) tracker.push(quiet);
+    for (let i = 0; i < 70; i++) tracker.push(quiet);
     let saw = false;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 8; i++) {
       if (tracker.push(speech)) saw = true;
     }
     assert.equal(saw, true);
+  });
+
+  it('stays quiet during calibration even if speech frames arrive', () => {
+    const tracker = new VoiceActivityTracker();
+    // Kalibrlash tugamasdan (60 freym) speech kelmasin.
+    for (let i = 0; i < 40; i++) {
+      assert.equal(tracker.push(speech), false);
+    }
   });
 });
 
