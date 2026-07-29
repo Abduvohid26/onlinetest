@@ -307,8 +307,12 @@ export const translations = {
     examPanelWarnings: "Ogohlantirishlar",
     examFullscreenGateTitle: "Butun ekran rejimi talab qilinadi",
     examFullscreenGateBody:
-      "Imtihon davomida butun ekran majburiy. Chiqib ketganingiz qayd etildi — davom etish uchun qayta butun ekranga o'ting.",
+      "Butun ekran rejimidan chiqildi. Davom etish uchun qayta butun ekranga o'ting — bu qoidabuzarlik sifatida qayd etilmaydi.",
     examFullscreenGateBtn: "Butun ekranga o'tish",
+    examFullscreenStartTitle: "Butun ekran rejimini yoqing",
+    examFullscreenStartBody:
+      "Imtihon butun ekran rejimida topshiriladi. Boshlash uchun quyidagi tugmani bosing — bu oddiy tayyorgarlik qadami, qoidabuzarlik emas.",
+    examFullscreenStartBtn: "Boshlash",
     appBrandTitle: "FJSTI onlayn imtihon",
     roleZoneStudent: "Talaba kabineti · mavjud imtihonlar va natijalar",
     roleZoneStaff: "Hodim kabineti · sizga biriktirilgan imtihonlar va jonli nazorat",
@@ -1059,8 +1063,12 @@ export const translations = {
     examPanelWarnings: "Предупреждения",
     examFullscreenGateTitle: "Требуется полноэкранный режим",
     examFullscreenGateBody:
-      "Во время экзамена полный экран обязателен. Выход зафиксирован — чтобы продолжить, снова войдите в полноэкранный режим.",
+      "Вы вышли из полноэкранного режима. Чтобы продолжить, войдите в него снова — это не засчитывается как нарушение.",
     examFullscreenGateBtn: "Перейти в полный экран",
+    examFullscreenStartTitle: "Включите полноэкранный режим",
+    examFullscreenStartBody:
+      "Экзамен проходит в полноэкранном режиме. Нажмите кнопку ниже, чтобы начать — это обычный подготовительный шаг, а не нарушение.",
+    examFullscreenStartBtn: "Начать",
     appBrandTitle: "Онлайн-экзамен FJSTI",
     roleZoneStudent: "Кабинет студента · экзамены и результаты",
     roleZoneStaff: "Кабинет сотрудника · назначенные экзамены и мониторинг",
@@ -1809,8 +1817,12 @@ export const translations = {
     examPanelWarnings: "Warnings",
     examFullscreenGateTitle: "Fullscreen mode required",
     examFullscreenGateBody:
-      "Fullscreen is required for the whole exam. Leaving it was logged — re-enter fullscreen to continue.",
+      "You left fullscreen mode. Re-enter it to continue — this is not recorded as a violation.",
     examFullscreenGateBtn: "Enter fullscreen",
+    examFullscreenStartTitle: "Turn on fullscreen mode",
+    examFullscreenStartBody:
+      "The exam runs in fullscreen. Press the button below to begin — this is a normal setup step, not a violation.",
+    examFullscreenStartBtn: "Start",
     appBrandTitle: "FJSTI online exam",
     roleZoneStudent: "Student portal · exams and results",
     roleZoneStaff: "Staff portal · assigned exams and live monitoring",

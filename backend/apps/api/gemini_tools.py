@@ -1204,11 +1204,48 @@ def paraphrase_medical_mcqs(questions: list[dict], exam_language: str) -> list[d
             ca = str(arr[j].get("ca") or opts[0])
             if ca not in opts and opts:
                 ca = opts[0]
-            out.append({
+            row = {
                 "text": str(arr[j].get("t") or q["text"]),
                 "options": opts,
                 "correctAnswer": ca,
-            })
+            }
+            # Savol matni qayta yozilsa ham MAZMUN o'zgarmaydi — shuning uchun
+            # manba (iMentor API) izohlari va savol id'si saqlanadi. Aks holda
+            # natijada `explanationSource` "api" bo'lmay qolib, tayyor izoh
+            # o'rniga AI qayta yozib berardi.
+            _carry_paraphrase_fields(q, row, len(opts))
+            out.append(row)
         else:
             out.append(dict(q))
     return out if out else questions
+
+
+#: Paraphrase savol matnini o'zgartiradi, lekin bu maydonlar savolga bog'liq
+#: qo'shimcha ma'lumot (id + manba izohlari) — ular ko'chiriladi.
+_PARAPHRASE_KEEP_SCALAR = ("id", "explanation", "explanation_uz", "explanation_ru", "explanation_en")
+_PARAPHRASE_KEEP_LIST = (
+    "optionExplanations",
+    "optionExplanations_uz",
+    "optionExplanations_ru",
+    "optionExplanations_en",
+)
+
+
+def _carry_paraphrase_fields(src: dict, dst: dict, option_count: int) -> None:
+    """Paraphrase natijasiga manba izohlarini ko'chiradi (variant tartibi pozitsion)."""
+    for key in _PARAPHRASE_KEEP_SCALAR:
+        val = src.get(key)
+        if key == "id":
+            if val is not None:
+                dst[key] = val
+        elif str(val or "").strip():
+            dst[key] = str(val).strip()
+    for key in _PARAPHRASE_KEEP_LIST:
+        val = src.get(key)
+        if not isinstance(val, list) or not any(str(x).strip() for x in val):
+            continue
+        # Variantlar pozitsion qayta yoziladi; son o'zgargan bo'lsa moslikni
+        # kafolatlab bo'lmaydi — noto'g'ri izoh berishdan ko'ra tashlab yuborgan afzal.
+        if len(val) != option_count:
+            continue
+        dst[key] = [str(x).strip() for x in val]

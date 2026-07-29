@@ -482,6 +482,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const showSmallWarn = useCallback(
     (graceKey: string, violationType: string, text: string) => {
       if (smallWarnOpenRef.current) return; // bitta modal — biri ochiq bo'lsa yangisi kutadi
+      // Fullscreen gate ekranni qoplab turibdi — talaba bu ogohlantirishni ko'ra
+      // ham, sababini tuzata ham olmaydi (faqat FS tugmasi bosiladi). Ko'rsatmaymiz.
+      if (needsFullscreenRef.current) return;
       if (graceKey === smallWarnKeyRef.current && Date.now() < smallWarnGraceRef.current) return;
       smallWarnKeyRef.current = graceKey;
       smallWarnOpenRef.current = true;
@@ -766,6 +769,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // Majburiy fullscreen (kiosk): sessiya davomida doim fullscreen; chiqilsa gate.
   const [needsFullscreen, setNeedsFullscreen] = useState(false);
+  /** Bu sessiyada fullscreen'ga kamida bir marta kirilganmi. Gate matnini tanlaydi:
+   *  hali kirilmagan bo'lsa — oddiy "yoqing" ko'rsatmasi (talaba hech narsa
+   *  buzmagan); kirib chiqilgan bo'lsa — "qayta kiring". Ilgari ikkala holatda
+   *  ham "chiqib ketganingiz qayd etildi" chiqib, imtihon boshida talabani
+   *  qoidabuzarlikda ayblardi. */
+  const [fullscreenEverEntered, setFullscreenEverEntered] = useState(false);
 
   const getFullscreenElement = useCallback((): Element | null => {
     const doc = document as Document & {
@@ -831,6 +840,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         awayStartedAtRef.current = null;
         blurIgnoreUntilRef.current = Date.now() + 8000;
         fullscreenEnteredRef.current = true;
+        setFullscreenEverEntered(true);
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
@@ -1787,6 +1797,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // (strike/rasmiy hisoblanmaydi). Yagona istisno — yuz almashtirish (identity):
     // bu jiddiy xavfsizlik hodisasi, muzlatib bo'lmaydi.
     if (smallWarnOpenRef.current && !INSTANT_BAN_TYPES.has(type)) return;
+
+    // Fullscreen gate ochiq (imtihon boshida yoki FS dan chiqilganda): ekranni
+    // to'liq modal qoplab turadi — talaba faqat "Butun ekranga o'tish" tugmasini
+    // bosa oladi. Bu paytda yuz/nigoh/ovoz/ob'ekt detektorlari ishlashda davom
+    // etib, talaba tuzata olmaydigan holat uchun RASMIY ogohlantirish yozardi
+    // (imtihon boshida "boshqa ekranga o'tmang" kabi). Gate yopilguncha muzlatamiz.
+    if (needsFullscreenRef.current && !INSTANT_BAN_TYPES.has(type)) return;
 
     // Modal ochiqligida yangi violationlar (IDENTITY_SUBSTITUTION dan tashqari) bloklansn —
     // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.
@@ -2836,14 +2853,18 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
                 <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
               </div>
-              <h2 className="text-xl font-bold text-slate-900">{t.examFullscreenGateTitle}</h2>
-              <p className="mt-2 text-sm text-slate-500 leading-relaxed">{t.examFullscreenGateBody}</p>
+              <h2 className="text-xl font-bold text-slate-900">
+                {fullscreenEverEntered ? t.examFullscreenGateTitle : t.examFullscreenStartTitle}
+              </h2>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">
+                {fullscreenEverEntered ? t.examFullscreenGateBody : t.examFullscreenStartBody}
+              </p>
               <button
                 type="button"
                 onClick={requestExamFullscreen}
                 className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-700 active:scale-[0.98]"
               >
-                {t.examFullscreenGateBtn}
+                {fullscreenEverEntered ? t.examFullscreenGateBtn : t.examFullscreenStartBtn}
               </button>
             </motion.div>
           </motion.div>

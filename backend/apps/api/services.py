@@ -127,13 +127,17 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
     if lang == "auto":
         lang = "uz"
 
-    # API manbasi to'liq bo'lsa — Gemini chaqirmaymiz.
+    # API manbasi to'liq bo'lsa — AI umuman chaqirilmaydi.
     api_ready = all(question_has_api_explanations(q) for q in questions) if questions else False
     if api_ready:
         return build_fallback_ai_summary(questions, answers)
 
+    # Qisman: AI'ga FAQAT izohi yo'q savollar yuboriladi. Ilgari butun ro'yxat
+    # yuborilardi — bitta izohsiz savol tufayli API izohi bor savollar ham
+    # AI'ga ketardi (ortiqcha xarajat + tayyor manbani qayta yozish xavfi).
+    missing = [q for q in questions if not question_has_api_explanations(q)]
     try:
-        ai = generate_exam_ai_summary(questions, answers, lang)
+        ai = generate_exam_ai_summary(missing, answers, lang) if missing else {"items": [], "source": "api"}
     except Exception:
         ai = build_fallback_ai_summary(questions, answers)
 
@@ -584,7 +588,35 @@ def exam_question_with_translations(q: dict, tr: dict, source_lang: str) -> dict
                 "correct_answer_en": str(tr.get("correct_answer_en") or ""),
             }
         )
+    # Manba (iMentor API) izohlari tarjima bosqichida yo'qolmasin — natija
+    # sahifasida tayyor izoh o'rniga AI qayta yozib berardi.
+    _carry_api_explanations(q, out, src)
     return out
+
+
+def _carry_api_explanations(src_q: dict, out: dict, source_lang: str) -> None:
+    """API izohlarini savol dictidan ko'chiradi (manba tili nusxasi bilan birga)."""
+    lang = (source_lang or "uz").lower()
+    if lang not in ("uz", "ru", "en"):
+        lang = "uz"
+    expl = str(src_q.get("explanation") or "").strip()
+    if expl:
+        out["explanation"] = expl
+        out.setdefault(f"explanation_{lang}", expl)
+    for key in ("explanation_uz", "explanation_ru", "explanation_en"):
+        val = str(src_q.get(key) or "").strip()
+        if val:
+            out[key] = val
+
+    opt_expl = src_q.get("optionExplanations")
+    if isinstance(opt_expl, list) and any(str(x).strip() for x in opt_expl):
+        cleaned = [str(x).strip() for x in opt_expl]
+        out["optionExplanations"] = cleaned
+        out.setdefault(f"optionExplanations_{lang}", list(cleaned))
+    for key in ("optionExplanations_uz", "optionExplanations_ru", "optionExplanations_en"):
+        val = src_q.get(key)
+        if isinstance(val, list) and any(str(x).strip() for x in val):
+            out[key] = [str(x).strip() for x in val]
 
 
 def exam_questions_add_translations(questions: list[dict], source_language: str | None = None) -> list[dict]:
