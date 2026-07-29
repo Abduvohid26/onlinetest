@@ -207,7 +207,7 @@ export function ImtixonTab({
 
   const subjectTopics = useMemo(() => selectedVariant?.topics || [], [selectedVariant]);
 
-  const catalogStep = !selDepartment ? 1 : !selSubject ? 2 : !selVariant && subjectVariants.length > 0 ? 3 : 4;
+  const catalogStep = !selDepartment ? 1 : 2;
 
   const openExceptions = async () => {
     if (selGroups.length === 0) {
@@ -268,8 +268,6 @@ export function ImtixonTab({
     if (!selSubject) return t.imentorPickSubject;
     const picked = imentorSubjects.find((s) => s.subject_code === selSubject);
     if (!picked || (picked.test_count ?? 0) < 1) return t.imentorNoSubjects;
-    if (subjectVariants.length > 0 && !selVariant) return t.imentorPickVariant;
-    if (subjectTopics.length > 0 && !selTopic) return t.imentorPickTopic;
     if (imentorMaxQ !== 0 && (imentorMaxQ < imentorQLimits.min || imentorMaxQ > imentorQLimits.max)) {
       return t.imentorQuestionLimitInvalid;
     }
@@ -389,9 +387,6 @@ export function ImtixonTab({
                   <option value="ru">{t.langRussian}</option>
                   <option value="en">{t.langEnglish}</option>
                 </AdminSelect>
-                {language === 'auto' && (
-                  <p className="text-[12px] text-gray-400 mt-1.5">{t.examLanguageAutoHint}</p>
-                )}
               </AdminField>
             </div>
 
@@ -400,14 +395,9 @@ export function ImtixonTab({
                 {[
                   { n: 1, label: t.imentorStepDepartment },
                   { n: 2, label: t.imentorStepSubject },
-                  { n: 3, label: t.imentorStepVariant },
-                  { n: 4, label: t.imentorStepTopic },
                 ].map((step) => {
                   const done =
-                    (step.n === 1 && !!selDepartment) ||
-                    (step.n === 2 && !!selSubject) ||
-                    (step.n === 3 && (!!selVariant || subjectVariants.length === 0)) ||
-                    (step.n === 4 && (!!selTopic || subjectTopics.length === 0 || !selVariant));
+                    (step.n === 1 && !!selDepartment) || (step.n === 2 && !!selSubject);
                   const active = catalogStep === step.n;
                   return (
                     <div key={step.n} className="flex items-center gap-2">
@@ -423,7 +413,7 @@ export function ImtixonTab({
                         {done ? '✓' : step.n}
                       </span>
                       <span className={active || done ? 'text-slate-700' : 'text-slate-400'}>{step.label}</span>
-                      {step.n < 4 && <span className="text-slate-300 mx-1">→</span>}
+                      {step.n < 2 && <span className="text-slate-300 mx-1">→</span>}
                     </div>
                   );
                 })}
@@ -467,12 +457,9 @@ export function ImtixonTab({
                       const hasTests = (s.test_count ?? 0) > 0;
                       const testLabel =
                         lang === 'ru' ? 'тест' : lang === 'en' ? 'tests' : 'test';
-                      const meta = [
-                        hasTests ? `${s.test_count} ${testLabel}` : t.imentorSubjectNoTests,
-                        s.variants_count ? `${s.variants_count} ${t.imentorVariantShort}` : '',
-                      ]
-                        .filter(Boolean)
-                        .join(' · ');
+                      const meta = hasTests
+                        ? `${s.test_count} ${testLabel}`
+                        : t.imentorSubjectNoTests;
                       return (
                         <option key={s.subject_code} value={s.subject_code} disabled={!hasTests}>
                           {s.subject_name}
@@ -486,8 +473,22 @@ export function ImtixonTab({
               )}
 
               {selSubject && subjectVariants.length > 0 && (
-                <AdminField label={t.imentorVariantLabel} required>
+                <AdminField label={t.imentorVariantLabelOptional}>
                   <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelVariant('');
+                        setSelTopic('');
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors ${
+                        !selVariant
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-blue-300 hover:bg-blue-50'
+                      }`}
+                    >
+                      {t.imentorAnyVariant}
+                    </button>
                     {subjectVariants.map((v) => {
                       const active = selVariant === v.label;
                       return (
@@ -516,9 +517,9 @@ export function ImtixonTab({
               )}
 
               {selVariant && subjectTopics.length > 0 && (
-                <AdminField label={t.imentorTopicLabel} required>
+                <AdminField label={t.imentorTopicLabelOptional}>
                   <AdminSelect value={selTopic} onChange={(e) => setSelTopic(e.target.value)}>
-                    <option value="">{t.imentorPickTopic}</option>
+                    <option value="">{t.imentorAnyTopic}</option>
                     {subjectTopics.map((topic) => (
                       <option key={topic.code} value={topic.code}>
                         {topic.title} ({topic.code})
@@ -628,7 +629,6 @@ export function ImtixonTab({
                   onChange={(e) => setTechnicalRetakesAllowed(Number(e.target.value))}
                   className="max-w-[180px]"
                 />
-                <p className="text-[12px] text-gray-400 mt-1.5">{t.technicalRetakesAllowedHint}</p>
               </AdminField>
               <AdminField label={`${t.customRules} (opt.)`}>
                 <AdminTextarea value={customRules} onChange={(e) => setCustomRules(e.target.value)} />
