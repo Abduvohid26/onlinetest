@@ -830,6 +830,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       // Chiqish → faqat majburiy gate (rasmiy ogohlantirish/strike YO'Q).
       // Aks holda "Butun ekran talab qilinadi" bilan birga "1-ogohlantirish" chiqardi.
+      // Brauzer FS chiqishida blur/visibility ham beradi — TAB_SWITCH yozilmasin.
+      awayStartedAtRef.current = null;
+      blurIgnoreUntilRef.current = Date.now() + 8000;
       needsFullscreenRef.current = true;
       setNeedsFullscreen(true);
     };
@@ -858,6 +861,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         return;
       }
       if (!needsFullscreenRef.current) {
+        awayStartedAtRef.current = null;
+        blurIgnoreUntilRef.current = Date.now() + 8000;
         needsFullscreenRef.current = true;
         setNeedsFullscreen(true);
       }
@@ -888,6 +893,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     const markAwayStart = () => {
       if (bannedRef.current || !sessionStartedRef.current) return;
       if (Date.now() < blurIgnoreUntilRef.current) return; // fullscreen so'rovi paytida emas
+      // Fullscreen gate ochiq / FS o'tish — brauzer blur/visibility beradi, TAB emas.
+      if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
       if (awayStartedAtRef.current == null) awayStartedAtRef.current = Date.now();
     };
 
@@ -896,6 +903,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       awayStartedAtRef.current = null;
       if (startedAt == null) return;
       if (bannedRef.current || !sessionStartedRef.current) return;
+      if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
+      if (Date.now() < blurIgnoreUntilRef.current) return;
       if (Date.now() - startedAt >= TAB_AWAY_VIOLATION_MS) {
         void logViolationRef.current('TAB_SWITCH_HARD');
       }
@@ -1691,9 +1700,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       };
 
       for (const type of EVENT_TYPES) consider(type, false);
-      // Tab yashiringan — davomiy holat (poll). blurIgnoreUntil (fullscreen so'rovi) e'tiborsiz.
+      // Tab yashiringan — davomiy holat (poll). Fullscreen gate / FS o'tish — TAB emas.
       const tabHidden =
-        document.visibilityState === 'hidden' && now >= blurIgnoreUntilRef.current;
+        document.visibilityState === 'hidden' &&
+        now >= blurIgnoreUntilRef.current &&
+        !needsFullscreenRef.current &&
+        !fullscreenSuppressRef.current;
       consider('TAB_SWITCH_HARD', tabHidden);
 
       const bestType = best ? (best as { type: string }).type : null;
@@ -1907,7 +1919,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   logViolationRef.current = logViolation;
 
-  // --- Server-side kadr tahlili (har 20s, avtoritativ tasdiq) ---
+  // --- Server-side kadr tahlili (har 15s): yuz + telefon/kitob/noutbuk (Vision) ---
   useServerProctoring({
     examId: exam.id,
     videoRef,
@@ -1915,7 +1927,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     onViolations: (types) => {
       for (const t of types) void logViolationRef.current(t);
     },
-    intervalMs: 20_000,
+    intervalMs: 15_000,
     disabled: banned,
   });
 
@@ -2086,6 +2098,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     const onPageHide = () => {
       if (bannedRef.current || !sessionStartedRef.current) return;
       if (Date.now() < blurIgnoreUntilRef.current) return;
+      if (needsFullscreenRef.current || fullscreenSuppressRef.current) return;
       void logViolationRef.current('TAB_SWITCH_SOFT');
     };
     window.addEventListener('pagehide', onPageHide);
@@ -3023,22 +3036,26 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   {t.examNavPrev}
                 </AdminBtn>
                 <span className="text-[12px] font-medium text-gray-400 tabular-nums shrink-0">{qIndex + 1} / {totalQuestions}</span>
-                {/* Oxirgi savolda "Keyingi" o'rniga "Yakunlash" — o'chiq (disabled)
-                    tugma turishi talabani boshi berk ko'chaga olib borardi: oldinga
-                    yo'l yo'q, yakunlash tugmasi esa o'ng panelda, ko'zga tashlanmaydi. */}
+                {/* Yakunlash FAQAT barcha savollar yechilganda. Oxirgi savolda
+                    hali javobsizlar bo'lsa — oldinga yo'l yo'q, orqaga qaytish mumkin. */}
                 {qIndex >= totalQuestions - 1 ? (
-                  <AdminBtn
-                    variant="blue"
-                    size="md"
-                    loading={submitting}
-                    // Tasdiqlash MAJBURIY: talaba shu tugmani "Keyingi" deb ketma-ket
-                    // bosib kelgan, oxirgi savolda ortiqcha bosish imtihonni
-                    // qaytarib bo'lmaydigan tarzda yakunlab qo'yishi mumkin edi.
-                    onClick={() => setSubmitConfirm(true)}
-                    iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
-                  >
-                    {submitting ? t.submitting : t.submitExam}
-                  </AdminBtn>
+                  answeredCount >= totalQuestions && totalQuestions > 0 ? (
+                    <AdminBtn
+                      variant="blue"
+                      size="md"
+                      loading={submitting}
+                      onClick={() => setSubmitConfirm(true)}
+                      iconRight={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
+                    >
+                      {submitting ? t.submitting : t.submitExam}
+                    </AdminBtn>
+                  ) : (
+                    <span className="text-[11px] sm:text-[12px] font-medium text-amber-700 max-w-[9.5rem] sm:max-w-[11rem] text-right leading-snug">
+                      {t.submitConfirmUnanswered
+                        .replace('{n}', String(Math.max(0, totalQuestions - answeredCount)))
+                        .replace('{total}', String(totalQuestions))}
+                    </span>
+                  )
                 ) : (
                   <AdminBtn
                     variant="blue"
@@ -3208,15 +3225,23 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               </div>
             </div>
             <div className="p-2.5">
-              <AdminBtn
-                variant="blue"
-                size="md"
-                loading={submitting}
-                onClick={() => setSubmitConfirm(true)}
-                className="w-full"
-              >
-                {submitting ? t.submitting : t.submitExam}
-              </AdminBtn>
+              {answeredCount >= totalQuestions && totalQuestions > 0 ? (
+                <AdminBtn
+                  variant="blue"
+                  size="md"
+                  loading={submitting}
+                  onClick={() => setSubmitConfirm(true)}
+                  className="w-full"
+                >
+                  {submitting ? t.submitting : t.submitExam}
+                </AdminBtn>
+              ) : (
+                <p className="text-[11px] text-center text-gray-500 leading-snug px-1">
+                  {t.submitConfirmUnanswered
+                    .replace('{n}', String(Math.max(0, totalQuestions - answeredCount)))
+                    .replace('{total}', String(totalQuestions))}
+                </p>
+              )}
             </div>
           </div>
           </>

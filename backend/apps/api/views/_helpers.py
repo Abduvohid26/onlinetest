@@ -986,12 +986,18 @@ _FORBIDDEN_OBJECT_MAP = {
     "cell_phone": "FORBIDDEN_OBJECT_CELL_PHONE",
     "cellphone": "FORBIDDEN_OBJECT_CELL_PHONE",
     "phone": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "mobile": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "smartphone": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "tablet": "FORBIDDEN_OBJECT_CELL_PHONE",
     "laptop": "FORBIDDEN_OBJECT_LAPTOP",
     "computer": "FORBIDDEN_OBJECT_LAPTOP",
     "book": "FORBIDDEN_OBJECT_BOOK",
     "notes": "FORBIDDEN_OBJECT_BOOK",
     "notebook": "FORBIDDEN_OBJECT_BOOK",
     "paper": "FORBIDDEN_OBJECT_BOOK",
+    "notepad": "FORBIDDEN_OBJECT_BOOK",
+    "copybook": "FORBIDDEN_OBJECT_BOOK",
+    "textbook": "FORBIDDEN_OBJECT_BOOK",
 }
 
 

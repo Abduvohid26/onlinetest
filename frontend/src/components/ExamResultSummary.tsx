@@ -231,13 +231,23 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
         </div>
       )}
 
-      {data.overview?.trim() && !data.ai_summary_pending && data.ai_summary_source === 'ai' && (
+      {data.overview?.trim() && !data.ai_summary_pending && ['ai', 'api', 'mixed'].includes(data.ai_summary_source || '') && (
         <div className="rounded-xl border border-gray-200 bg-white p-5 sm:p-6">
-          <h2 className="text-[15px] font-bold text-slate-900 mb-2 flex items-center gap-2">
+          <h2 className="text-[15px] font-bold text-slate-900 mb-2 flex items-center gap-2 flex-wrap">
             <span className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" /></svg>
             </span>
             {t.resultAiSummaryTitle}
+            {data.ai_summary_source === 'api' && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700">
+                {t.resultAnalysisSourceApi}
+              </span>
+            )}
+            {data.ai_summary_source === 'mixed' && (
+              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md bg-sky-50 text-sky-700">
+                {t.resultAnalysisSourceMixed}
+              </span>
+            )}
           </h2>
           <p className="text-slate-700 leading-relaxed text-sm sm:text-[15px]">{data.overview}</p>
         </div>

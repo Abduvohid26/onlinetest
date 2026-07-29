@@ -1490,7 +1490,13 @@ def student_proctor_frame(request, pk: int):
     if len(frame_b64) > 2_000_000:
         return Response({"error": "frame too large (max ~1.5 MB base64)"}, status=413)
 
-    enrich_objects = str(os.environ.get("PROCTOR_OPENAI_OBJECTS", "0")).strip().lower() in ("1", "true", "yes")
+    # Telefon/kitob/noutbuk — Vision AI. Default YOQILGAN (oldingi "0" tufayli
+    # lokal yuz ishlasa ob'ekt umuman tekshirilmasdi). O'chirish: PROCTOR_OPENAI_OBJECTS=0
+    enrich_objects = str(os.environ.get("PROCTOR_OPENAI_OBJECTS", "1")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     try:
         task = analyze_proctor_frame_task.delay(frame_b64, enrich_objects)

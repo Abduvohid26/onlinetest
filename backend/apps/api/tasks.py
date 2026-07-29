@@ -18,12 +18,22 @@ _FORBIDDEN_OBJECT_MAP = {
     "cell_phone": "FORBIDDEN_OBJECT_CELL_PHONE",
     "cellphone": "FORBIDDEN_OBJECT_CELL_PHONE",
     "phone": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "mobile": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "smartphone": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "tablet": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "iphone": "FORBIDDEN_OBJECT_CELL_PHONE",
+    "android": "FORBIDDEN_OBJECT_CELL_PHONE",
     "laptop": "FORBIDDEN_OBJECT_LAPTOP",
     "computer": "FORBIDDEN_OBJECT_LAPTOP",
+    "notebook_computer": "FORBIDDEN_OBJECT_LAPTOP",
     "book": "FORBIDDEN_OBJECT_BOOK",
     "notes": "FORBIDDEN_OBJECT_BOOK",
     "notebook": "FORBIDDEN_OBJECT_BOOK",
     "paper": "FORBIDDEN_OBJECT_BOOK",
+    "notepad": "FORBIDDEN_OBJECT_BOOK",
+    "copybook": "FORBIDDEN_OBJECT_BOOK",
+    "textbook": "FORBIDDEN_OBJECT_BOOK",
+    "cheat_sheet": "FORBIDDEN_OBJECT_BOOK",
 }
 
 
@@ -49,7 +59,10 @@ def run_proctor_analysis(frame_b64: str, enrich_objects: bool = False) -> dict:
             elif face_count >= 2:
                 violations.append("MULTIPLE_FACES")
             for obj in ai.get("forbidden_objects") or []:
-                vtype = _FORBIDDEN_OBJECT_MAP.get(str(obj).lower().strip())
+                key = str(obj).lower().strip().replace(" ", "_").replace("-", "_")
+                vtype = _FORBIDDEN_OBJECT_MAP.get(key) or _FORBIDDEN_OBJECT_MAP.get(
+                    key.replace("_", "")
+                )
                 if vtype and vtype not in violations:
                     violations.append(vtype)
             if bool(ai.get("looking_away")) and face_count == 1:
@@ -72,12 +85,16 @@ def run_proctor_analysis(frame_b64: str, enrich_objects: bool = False) -> dict:
     violations = list(result.get("violations") or [])
     face_count = int(result.get("face_count") or 0)
 
+    # Lokal OpenCV faqat yuzni biladi — telefon/kitob/noutbuk uchun Vision kerak.
     if enrich_objects:
         ai = analyze_proctor_frame(frame_b64)
         if ai.get("ok"):
             seen = set(violations)
             for obj in ai.get("forbidden_objects") or []:
-                vtype = _FORBIDDEN_OBJECT_MAP.get(str(obj).lower().strip())
+                key = str(obj).lower().strip().replace(" ", "_").replace("-", "_")
+                vtype = _FORBIDDEN_OBJECT_MAP.get(key) or _FORBIDDEN_OBJECT_MAP.get(
+                    key.replace("_", "")
+                )
                 if vtype and vtype not in seen:
                     violations.append(vtype)
                     seen.add(vtype)
@@ -86,7 +103,9 @@ def run_proctor_analysis(frame_b64: str, enrich_objects: bool = False) -> dict:
         "violations": violations,
         "face_count": face_count,
         "skipped": False,
-        "method": result.get("method"),
+        "method": (
+            f"{result.get('method')}+vision_objects" if enrich_objects else result.get("method")
+        ),
         "code": None,
     }
 

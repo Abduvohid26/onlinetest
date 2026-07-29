@@ -180,15 +180,26 @@ def analyze_proctor_frame(frame_b64: str) -> dict:
         pad = len(s) % 4
         if pad:
             s += "=" * (4 - pad)
-        raw_bytes = _resize_image_if_large(base64.b64decode(s), max_kb=150)
+        raw_bytes = _resize_image_if_large(base64.b64decode(s), max_kb=220)
 
         prompt = (
-            "You are an exam proctoring AI. Analyze this webcam frame.\n"
+            "You are an exam proctoring AI. Analyze this webcam frame of a student taking an online exam.\n"
             "Respond ONLY with a single JSON object, no other text:\n"
             '{"face_count": <integer 0/1/2+>, '
-            '"forbidden_objects": [<list of detected: "cell_phone","laptop","book","notes">], '
-            '"looking_away": <true if the person is clearly looking away from screen>}\n'
-            "Be conservative: only report objects you are confident about (>60% certainty)."
+            '"forbidden_objects": [<detected items from the allowed list>], '
+            '"looking_away": <true if clearly looking away from the screen>}\n\n'
+            "Allowed forbidden_objects values (use these exact strings only):\n"
+            '- "cell_phone" — smartphone/mobile/tablet held in hand, on desk, or near face\n'
+            '- "laptop" — a second laptop/computer (not the webcam device itself)\n'
+            '- "book" — printed book or textbook\n'
+            '- "notebook" — notebook, notepad, copybook, daftar\n'
+            '- "notes" — loose notes, cheat sheets, papers with writing used as aid\n'
+            '- "paper" — sheets of paper used as unauthorized material\n\n'
+            "Rules:\n"
+            "- Report an object if it is clearly visible and likely used for cheating aid.\n"
+            "- Do NOT report the monitor/keyboard the student is using for the exam as laptop.\n"
+            "- Empty hands, water bottle, headphones alone are NOT forbidden.\n"
+            "- Be moderately sensitive: if a phone/book/notebook is clearly in frame, include it."
         )
         raw = chat_vision(prompt, [(raw_bytes, _detect_image_mime(raw_bytes))])
         text = (raw or "").strip()
@@ -217,10 +228,10 @@ def _resize_image_if_large(data: bytes, max_kb: int = 100) -> bytes:
         from PIL import Image
         import io
         img = Image.open(io.BytesIO(data))
-        # Max 320x240 — yuz tanish uchun yetarli
-        img.thumbnail((320, 240), Image.LANCZOS)
+        # Ob'ekt (telefon/kitob) aniqlash uchun 480px yetarli; yuz uchun ham yaxshi
+        img.thumbnail((480, 360), Image.LANCZOS)
         buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=70, optimize=True)
+        img.save(buf, format="JPEG", quality=75, optimize=True)
         return buf.getvalue()
     except Exception:
         return data

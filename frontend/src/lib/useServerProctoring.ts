@@ -21,7 +21,7 @@ export function useServerProctoring({
   videoRef,
   guardHeadersFn,
   onViolations,
-  intervalMs = 30_000,
+  intervalMs = 15_000,
   disabled = false,
 }: UseServerProctoringOpts): void {
   const busyRef = useRef(false);
@@ -77,7 +77,7 @@ export function useServerProctoring({
 
       busyRef.current = true;
       try {
-        const dataUrl = compressVideoFrameToJpeg(video, 0.6, 480);
+        const dataUrl = compressVideoFrameToJpeg(video, 0.72, 640);
         if (!dataUrl) return;
         const frameB64 = dataUrl.split(',')[1];
 

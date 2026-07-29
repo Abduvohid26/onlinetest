@@ -444,14 +444,27 @@ def _transform_imentor_questions(raw_questions: list[dict]) -> list[dict]:
         text = str(q.get("question") or "").strip()
         if not text:
             continue
-        out.append(
-            {
-                "id": len(out) + 1,
-                "text": text,
-                "options": opts,
-                "correctAnswer": opts[idx],
-            }
-        )
+        explanation = str(q.get("explanation") or "").strip()
+        raw_oe = q.get("optionExplanations")
+        option_explanations: list[str] = []
+        if isinstance(raw_oe, list):
+            option_explanations = [str(x).strip() for x in raw_oe]
+            # options bilan bir xil uzunlikka keltirish (yetishmasa bo'sh)
+            if len(option_explanations) < len(opts):
+                option_explanations.extend([""] * (len(opts) - len(option_explanations)))
+            elif len(option_explanations) > len(opts):
+                option_explanations = option_explanations[: len(opts)]
+        row = {
+            "id": len(out) + 1,
+            "text": text,
+            "options": opts,
+            "correctAnswer": opts[idx],
+        }
+        if explanation:
+            row["explanation"] = explanation
+        if option_explanations and any(option_explanations):
+            row["optionExplanations"] = option_explanations
+        out.append(row)
     return out
 
 
@@ -533,8 +546,28 @@ def _apply_imentor_builtin_translations(
             row[f"text_{lang}"] = tq.get("text") or ""
             row[f"options_{lang}"] = list(tq.get("options") or [])
             row[f"correct_answer_{lang}"] = tq.get("correctAnswer") or ""
+            if (tq.get("explanation") or "").strip():
+                row[f"explanation_{lang}"] = str(tq.get("explanation") or "").strip()
+            if isinstance(tq.get("optionExplanations"), list) and any(
+                str(x).strip() for x in (tq.get("optionExplanations") or [])
+            ):
+                row[f"optionExplanations_{lang}"] = [
+                    str(x).strip() for x in (tq.get("optionExplanations") or [])
+                ]
             if not (row[f"text_{lang}"] or "").strip() or not row[f"options_{lang}"]:
                 complete = False
+
+        # Manba tilidagi izohlar
+        if (q.get("explanation") or "").strip():
+            row[f"explanation_{src}"] = str(q.get("explanation") or "").strip()
+            row["explanation"] = row[f"explanation_{src}"]
+        if isinstance(q.get("optionExplanations"), list) and any(
+            str(x).strip() for x in (q.get("optionExplanations") or [])
+        ):
+            row[f"optionExplanations_{src}"] = [
+                str(x).strip() for x in (q.get("optionExplanations") or [])
+            ]
+            row["optionExplanations"] = list(row[f"optionExplanations_{src}"])
 
         for lang in ("uz", "ru", "en"):
             if not (row.get(f"text_{lang}") or "").strip():

@@ -34,45 +34,152 @@ def build_student_question_list(full: list[dict]) -> list[dict]:
     return out
 
 
+def _option_explanation_for(q: dict, answer: str) -> str:
+    """Talaba tanlagan variant uchun iMentor optionExplanations dan izoh."""
+    opts = [str(o) for o in (q.get("options") or [])]
+    expls = q.get("optionExplanations")
+    if not isinstance(expls, list) or not opts or not answer:
+        return ""
+    try:
+        idx = opts.index(str(answer))
+    except ValueError:
+        # Qisman moslik (til/format farqi)
+        idx = next((i for i, o in enumerate(opts) if answer in o or o in answer), -1)
+    if idx < 0 or idx >= len(expls):
+        return ""
+    return str(expls[idx] or "").strip()
+
+
+def _api_explanation_pair(q: dict, student_answer: str, *, is_correct: bool) -> tuple[str, str, str]:
+    """
+    API (iMentor) manbasidagi izohlar.
+    Qaytaradi: (commentCorrect, whyStudentWrong, whyCorrectIsRight) — bo'sh bo'lishi mumkin.
+    """
+    explanation = str(q.get("explanation") or "").strip()
+    if is_correct:
+        return (explanation or "Javob to'g'ri tanlangan.", "", "")
+    why_wrong = _option_explanation_for(q, student_answer)
+    why_right = explanation or _option_explanation_for(q, str(q.get("correctAnswer") or ""))
+    return ("", why_wrong, why_right)
+
+
+def question_has_api_explanations(q: dict) -> bool:
+    if str(q.get("explanation") or "").strip():
+        return True
+    oe = q.get("optionExplanations")
+    return isinstance(oe, list) and any(str(x).strip() for x in oe)
+
+
 def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) -> dict:
     items = []
+    used_api = 0
     for q in questions:
         qid = q["id"]
         st = answers.get(str(qid), "") or ""
         ok = st == q.get("correctAnswer")
+        comment, why_wrong, why_right = _api_explanation_pair(q, st, is_correct=ok)
+        if question_has_api_explanations(q) and (comment or why_wrong or why_right):
+            used_api += 1
+        else:
+            comment = "Javob to'g'ri tanlangan." if ok else ""
+            why_wrong = (
+                "" if ok
+                else 'Tanlangan javob ("' + (st or "bo'sh") + '") savolning to\'g\'ri yechimi bilan mos kelmaydi.'
+            )
+            why_right = (
+                "" if ok
+                else 'To\'g\'ri javob "' + str(q.get("correctAnswer") or "") + '" -- savol mazmuniga mos yagona aniq variant.'
+            )
         items.append(
             {
                 "questionId": qid,
                 "isCorrect": ok,
-                "commentCorrect": "Javob to'g'ri tanlangan." if ok else "",
-                "whyStudentWrong": (
-                    "" if ok
-                    else 'Tanlangan javob ("' + (st or "bo'sh") + '") savolning to\'g\'ri yechimi bilan mos kelmaydi.'
-                ),
-                "whyCorrectIsRight": (
-                    "" if ok
-                    else 'To\'g\'ri javob "' + str(q.get("correctAnswer") or "") + '" -- savol mazmuniga mos yagona aniq variant.'
-                ),
+                "commentCorrect": comment,
+                "whyStudentWrong": why_wrong,
+                "whyCorrectIsRight": why_right,
             }
         )
+    if used_api == len(questions) and questions:
+        source = "api"
+    elif used_api > 0:
+        source = "mixed"
+    else:
+        source = "fallback"
     return {
-        "overview": "Quyida har bir savol bo'yicha avtomatik tekshiruv natijalari ko'rsatilgan.",
+        "overview": (
+            "Quyida har bir savol bo'yicha API manbasidagi tahlil ko'rsatilgan."
+            if source == "api"
+            else "Quyida har bir savol bo'yicha avtomatik tekshiruv natijalari ko'rsatilgan."
+        ),
         "items": items,
-        "source": "fallback",
+        "source": source,
     }
 
 
 def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], language: str) -> dict:
-    """AI orqali aniq tushuntirish; kalit yo'q yoki xato bo'lsa fallback."""
+    """Avvalo iMentor/API izohlari; yetishmasa AI. Kalit yo'q yoki xato → fallback."""
     from apps.api.gemini_tools import generate_exam_ai_summary
 
     lang = (language or "uz").lower()
     if lang == "auto":
         lang = "uz"
-    try:
-        return generate_exam_ai_summary(questions, answers, lang)
-    except Exception:
+
+    # API manbasi to'liq bo'lsa — Gemini chaqirmaymiz.
+    api_ready = all(question_has_api_explanations(q) for q in questions) if questions else False
+    if api_ready:
         return build_fallback_ai_summary(questions, answers)
+
+    try:
+        ai = generate_exam_ai_summary(questions, answers, lang)
+    except Exception:
+        ai = build_fallback_ai_summary(questions, answers)
+
+    # AI natijasini API izohlari bilan boyitish (bo'sh joylarni to'ldirish)
+    items_out = []
+    used_api = 0
+    used_ai = 0
+    for q in questions:
+        qid = q["id"]
+        st = answers.get(str(qid), "") or ""
+        ok = st == q.get("correctAnswer")
+        ai_row = next((i for i in (ai.get("items") or []) if i.get("questionId") == qid), {}) or {}
+        c_api, w_api, r_api = _api_explanation_pair(q, st, is_correct=ok)
+        if question_has_api_explanations(q) and (c_api or w_api or r_api):
+            used_api += 1
+            items_out.append(
+                {
+                    "questionId": qid,
+                    "isCorrect": ok,
+                    "commentCorrect": c_api if ok else "",
+                    "whyStudentWrong": "" if ok else (w_api or ai_row.get("whyStudentWrong") or ""),
+                    "whyCorrectIsRight": "" if ok else (r_api or ai_row.get("whyCorrectIsRight") or ""),
+                }
+            )
+        else:
+            used_ai += 1
+            items_out.append(
+                {
+                    "questionId": qid,
+                    "isCorrect": ok,
+                    "commentCorrect": ai_row.get("commentCorrect", "") if ok else "",
+                    "whyStudentWrong": "" if ok else ai_row.get("whyStudentWrong", ""),
+                    "whyCorrectIsRight": "" if ok else ai_row.get("whyCorrectIsRight", ""),
+                }
+            )
+
+    if used_api and not used_ai:
+        source = "api"
+    elif used_api and used_ai:
+        source = "mixed"
+    else:
+        source = ai.get("source") or "ai"
+
+    return {
+        "overview": str(ai.get("overview") or "").strip()
+        or "Quyida har bir savol bo'yicha tahlil natijalari ko'rsatilgan.",
+        "items": items_out,
+        "source": source,
+    }
 
 
 def needs_ai_summary_upgrade(ai: dict) -> bool:
@@ -83,7 +190,13 @@ def needs_ai_summary_upgrade(ai: dict) -> bool:
         return False
     if not ai.get("items"):
         return True
-    if ai.get("source") != "ai":
+    # API manbasi (iMentor explanation) — AI shart emas
+    if ai.get("source") in ("api", "imentor"):
+        return False
+    if ai.get("source") == "mixed":
+        # Aralash: shablon qoldiqlari bo'lsa yangilash mumkin
+        pass
+    elif ai.get("source") != "ai":
         return True
     for item in ai.get("items") or []:
         if item.get("isCorrect"):
@@ -393,6 +506,19 @@ def localize_exam_question(q: dict, lang: str) -> dict:
     out["text"] = text
     out["options"] = opts
     out["correctAnswer"] = ca
+    # iMentor API izohlari — talaba tiliga mos
+    expl = (
+        (q.get(f"explanation_{lang}") or q.get("explanation") or "")
+        if isinstance(q, dict)
+        else ""
+    )
+    expl = str(expl).strip()
+    if expl:
+        out["explanation"] = expl
+    oe_key = f"optionExplanations_{lang}"
+    oe = q.get(oe_key) if isinstance(q.get(oe_key), list) else q.get("optionExplanations")
+    if isinstance(oe, list) and any(str(x).strip() for x in oe):
+        out["optionExplanations"] = [str(x).strip() for x in oe]
     return out
 
 
