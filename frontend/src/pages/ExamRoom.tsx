@@ -2238,9 +2238,23 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Real-time brauzer proctoring (MediaPipe): gaze/bosh burilishi, qimirlash,
   //     qo'l/imo-ishora, ko'p yuz, yuz yo'q, pozitsiya. Server proctoring bilan gibrid ishlaydi. ---
+  /** Imtihon oldi tekshiruvida o'lchangan tabiiy ko'z ochiqligi.
+   *  Nigoh ("pastga qaradi") nazorati shunga NISBATAN ishlaydi — mutlaq
+   *  chegara turli ko'z shakllarida soxta ogohlantirish berardi. */
+  const eyeBaseline = React.useMemo(() => {
+    try {
+      const raw = sessionStorage.getItem(`exam_eye_baseline_${exam.id}`);
+      const v = raw ? Number(raw) : NaN;
+      return Number.isFinite(v) && v > 0 ? v : null;
+    } catch {
+      return null;
+    }
+  }, [exam.id]);
+
   useRealtimeProctoring({
     videoRef,
     streamRevision: proctorStreamRevision,
+    eyeBaseline,
     disabled: banned,
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.

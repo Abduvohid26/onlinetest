@@ -30,8 +30,23 @@ export const BRIGHTNESS_MAX = 225;
 /** Kontrast (standart chetlanish) — bundan past: "yuvilgan" tekis tasvir. */
 export const CONTRAST_MIN = 18;
 
-/** Ko'z ochiqligi (balandlik/kenglik) — qorachiqni ishonchli o'qish uchun. */
-export const EYE_OPEN_RATIO_MIN = 0.18;
+/**
+ * Ko'z ochiqligining MUTLAQ pastki chegarasi.
+ *
+ * DIQQAT: bu qiymat ataylab juda past. Ko'z ochiqligi nisbati odamlar orasida
+ * keskin farq qiladi (ko'z shakli, qovoq burmasi, kamera burchagi, masofa) —
+ * shu sabab "normal ochiq ko'z" uchun umumiy chegara qo'yish MUMKIN EMAS.
+ * Bir talabaning tabiiy nisbati 0.30 bo'lsa, boshqasining 0.14 bo'lishi
+ * mumkin va ikkalasi ham mutlaqo normal.
+ *
+ * Shu chegara faqat "ko'z butunlay yumuq / landmark yaroqsiz" holatni rad
+ * etadi. Haqiqiy nazorat imtihon davomida SHU TALABANING o'z bazaviy
+ * qiymatiga nisbatan qilinadi (`eyeBaselineFrom` + nisbiy taqqoslash).
+ */
+export const EYE_OPEN_ABS_FLOOR = 0.08;
+
+/** Bazaviy qiymatning shu ulushidan past — ko'z toraygan (pastga qaragan). */
+export const EYE_NARROW_BASELINE_RATIO = 0.62;
 
 /** Tarmoq: o'rtacha javob vaqti (ms) bundan yuqori — sekin. */
 export const NET_LATENCY_MAX_MS = 900;
@@ -109,7 +124,24 @@ export function classifyEyeReadability(ratios: (number | null)[]): EyeStatus {
   const vals = (ratios || []).filter((v): v is number => typeof v === 'number' && v > 0);
   if (vals.length === 0) return 'NO_LANDMARKS';
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-  return avg >= EYE_OPEN_RATIO_MIN ? 'OK' : 'EYES_NARROW';
+  return avg >= EYE_OPEN_ABS_FLOOR ? 'OK' : 'EYES_NARROW';
+}
+
+/**
+ * Talabaning BAZAVIY ko'z ochiqligi — imtihon oldi tekshiruvida yig'iladi.
+ *
+ * Median olinadi: ko'z pirillashi (bir necha kadr past qiymat) natijani
+ * buzmasin. Yetarli namuna bo'lmasa `null` — u holda imtihonda nisbiy
+ * taqqoslash o'chadi va faqat bosh pozitsiyasi ishlatiladi (soxta
+ * ogohlantirish berishdan ko'ra shunisi xavfsiz).
+ */
+export function eyeBaselineFrom(samples: (number | null)[], minSamples = 8): number | null {
+  const vals = (samples || [])
+    .filter((v): v is number => typeof v === 'number' && v > 0)
+    .sort((a, b) => a - b);
+  if (vals.length < minSamples) return null;
+  const mid = Math.floor(vals.length / 2);
+  return vals.length % 2 ? vals[mid] : (vals[mid - 1] + vals[mid]) / 2;
 }
 
 export interface NetworkSample {

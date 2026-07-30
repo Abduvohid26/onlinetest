@@ -10,6 +10,7 @@ import { type LivenessAction } from '../lib/livenessChallenge';
 import {
   classifyEyeReadability,
   classifyImageQuality,
+  eyeBaselineFrom,
   classifyNetwork,
   computeImageStats,
   grayscaleFromCanvas,
@@ -136,6 +137,8 @@ export function PreExamCheck({
   const [netStatus, setNetStatus] = useState<NetworkStatus | 'CHECKING'>('CHECKING');
   const [netDetail, setNetDetail] = useState('');
   const [netRetryKey, setNetRetryKey] = useState(0);
+  /** Ko'z ochiqligi namunalari — imtihonga bazaviy qiymat sifatida uzatiladi. */
+  const eyeSamplesRef = useRef<number[]>([]);
   const [positionOk, setPositionOk] = useState(false);
   /** Boshlash bosilganda ochiladigan qoidalar modali. */
   const [showRulesModal, setShowRulesModal] = useState(false);
@@ -416,6 +419,14 @@ export function PreExamCheck({
       (ratio) => {
         if (cancelled) return;
         setEyeStatus(classifyEyeReadability([ratio]));
+        // Talabaning TABIIY ko'z ochiqligini yig'amiz. Imtihonda "ko'z toraydi"
+        // (pastga qarash) shu bazaviy qiymatga NISBATAN aniqlanadi — mutlaq
+        // chegara odamlar orasida ishlamaydi.
+        if (typeof ratio === 'number' && ratio > 0) {
+          const arr = eyeSamplesRef.current;
+          arr.push(ratio);
+          if (arr.length > 60) arr.shift();
+        }
       },
     );
     void checker.init().then((ok) => {
@@ -732,6 +743,19 @@ export function PreExamCheck({
       }
       if (data.deviceToken) {
         setDeviceSessionToken(data.deviceToken);
+      }
+      // Ko'z ochiqligi bazaviy qiymati — imtihonda nigoh nazorati SHUNGA
+      // nisbatan ishlaydi. Yetarli namuna yo'q bo'lsa saqlanmaydi va imtihon
+      // mutlaq chegaraga qaytadi (soxta ogohlantirishdan xavfsizroq).
+      const eyeBaseline = eyeBaselineFrom(eyeSamplesRef.current);
+      try {
+        if (eyeBaseline) {
+          sessionStorage.setItem(`exam_eye_baseline_${exam?.id}`, String(eyeBaseline));
+        } else {
+          sessionStorage.removeItem(`exam_eye_baseline_${exam?.id}`);
+        }
+      } catch {
+        /* sessionStorage o'chirilgan — nisbiy taqqoslash ishlamaydi, xato emas */
       }
       onComplete(
         {

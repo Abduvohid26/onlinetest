@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import {
   BRIGHTNESS_MAX,
   BRIGHTNESS_MIN,
-  EYE_OPEN_RATIO_MIN,
+  EYE_OPEN_ABS_FLOOR,
+  eyeBaselineFrom,
   NET_JITTER_MAX_MS,
   NET_LATENCY_MAX_MS,
   classifyEyeReadability,
@@ -92,13 +93,29 @@ test('buzuq kirishda yiqilmaydi', () => {
 
 // --- Ko'z o'qilishi -------------------------------------------------------
 
-test('ochiq ko\'z — nigoh nazorati ishlaydi', () => {
-  assert.equal(classifyEyeReadability([0.32, 0.30]), 'OK');
-  assert.equal(classifyEyeReadability([EYE_OPEN_RATIO_MIN]), 'OK');
+test('turli ko\'z shakllari — hammasi o\'tadi (soxta blok yo\'q)', () => {
+  // MUHIM: ko'z ochiqligi odamlar orasida keskin farq qiladi. Ilgari 0.18
+  // mutlaq chegara qo'yilgan edi va tabiiy 0.14 li talabani BLOKLARDI.
+  assert.equal(classifyEyeReadability([0.32, 0.30]), 'OK', 'keng ko\'z');
+  assert.equal(classifyEyeReadability([0.14, 0.13]), 'OK', 'tor ko\'z ham normal');
+  assert.equal(classifyEyeReadability([EYE_OPEN_ABS_FLOOR]), 'OK');
 });
 
-test('torgan ko\'z — nigoh nazorati ishonchsiz', () => {
-  assert.equal(classifyEyeReadability([0.10, 0.11]), 'EYES_NARROW');
+test('butunlay yumuq ko\'z rad etiladi', () => {
+  assert.equal(classifyEyeReadability([0.03, 0.02]), 'EYES_NARROW');
+});
+
+test('bazaviy qiymat median bilan olinadi (pirillash buzmaydi)', () => {
+  // 0.30 atrofida 10 namuna + 2 ta pirillash (0.04)
+  const samples = [0.30, 0.31, 0.29, 0.04, 0.30, 0.32, 0.28, 0.30, 0.04, 0.31, 0.29, 0.30];
+  const base = eyeBaselineFrom(samples);
+  assert.ok(base != null && base > 0.25, `median ~0.30 bo'lsin, oldik ${base}`);
+});
+
+test('namuna kam bo\'lsa bazaviy qiymat berilmaydi', () => {
+  assert.equal(eyeBaselineFrom([0.3, 0.3]), null);
+  assert.equal(eyeBaselineFrom([]), null);
+  assert.equal(eyeBaselineFrom([null, null, null, null, null, null, null, null]), null);
 });
 
 test('landmark yo\'q — alohida holat (kamera burchagi yaroqsiz)', () => {

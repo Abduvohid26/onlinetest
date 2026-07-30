@@ -178,6 +178,8 @@ const IRIS_GAZE_X = 0.16;
 const IRIS_GAZE_DOWN = 0.32;
 /** Ko'z ochiqligi (balandlik/kenglik). Bundan past — ko'z yumuq, iris ishonchsiz. */
 const EYE_OPEN_MIN_RATIO = 0.15;
+/** Bazaviy qiymatning shu ulushidan past — qovoq tushgan (pastga qaragan). */
+const EYE_NARROW_BASELINE_RATIO = 0.62;
 
 interface Pt {
   x: number;
@@ -232,7 +234,7 @@ export function computeIrisGaze(lm: Pt[]): { dx: number; dy: number } | null {
  * pirillashi (~200ms) uzluksiz vaqt talabidan (0.4s) qisqa, shuning uchun
  * jazolanmaydi.
  */
-export function eyesTooNarrowForGaze(lm: Pt[]): boolean {
+export function eyesTooNarrowForGaze(lm: Pt[], baseline?: number | null): boolean {
   if (!lm || lm.length <= IRIS_R) return false;
   const ratio = (c1?: Pt, c2?: Pt, top?: Pt, bot?: Pt): number | null => {
     if (!c1 || !c2 || !top || !bot) return null;
@@ -245,6 +247,14 @@ export function eyesTooNarrowForGaze(lm: Pt[]): boolean {
   const vals = [l, r].filter((v): v is number => v != null);
   if (vals.length === 0) return false;   // landmark yo'q — jim o'tamiz
   const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  // Bazaviy qiymat bo'lsa — NISBIY taqqoslash. Ko'z ochiqligi odamlar orasida
+  // keskin farq qiladi (kimningki 0.30, kimningki 0.14 — ikkalasi normal), shu
+  // sabab mutlaq chegara soxta ogohlantirish beradi. Imtihon oldi tekshiruvida
+  // o'lchangan SHU talabaning tabiiy qiymatining 62% dan pastga tushishi —
+  // qovoq tushgani, ya'ni pastga qaragani.
+  if (typeof baseline === 'number' && baseline > 0) {
+    return avg < baseline * EYE_NARROW_BASELINE_RATIO;
+  }
   return avg < EYE_OPEN_MIN_RATIO;
 }
 
@@ -320,9 +330,19 @@ export class RealtimeProctor {
     MULTI_FACE: 0,
   };
 
-  constructor(video: HTMLVideoElement, cb: RealtimeProctorCallbacks) {
+  /** Imtihon oldi tekshiruvida o'lchangan TABIIY ko'z ochiqligi.
+   *  Nigoh ("pastga qaradi") nazorati shunga NISBATAN ishlaydi — mutlaq
+   *  chegara odamlar orasida soxta ogohlantirish berardi. */
+  private eyeBaseline: number | null = null;
+
+  constructor(
+    video: HTMLVideoElement,
+    cb: RealtimeProctorCallbacks,
+    eyeBaseline?: number | null,
+  ) {
     this.video = video;
     this.cb = cb;
+    this.eyeBaseline = typeof eyeBaseline === 'number' && eyeBaseline > 0 ? eyeBaseline : null;
   }
 
   async init(): Promise<boolean> {
@@ -640,7 +660,7 @@ export class RealtimeProctor {
     // Ko'z torayib qorachiq o'qilmasa ham "pastga qaragan" deb hisoblanadi —
     // aks holda pastdagi telefonga qarash umuman aniqlanmasdi (qovoq tushadi,
     // iris `null` bo'ladi va nazorat jim qolardi).
-    const eyesNarrow = eyesTooNarrowForGaze(lm);
+    const eyesNarrow = eyesTooNarrowForGaze(lm, this.eyeBaseline);
     const irisDown = (iris != null && iris.dy >= IRIS_GAZE_DOWN) || eyesNarrow;
 
     const headGazeL = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;

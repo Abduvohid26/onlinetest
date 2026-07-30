@@ -17,6 +17,8 @@ interface UseRealtimeProctoringOpts {
   onSmallWarningStage?: (types: LiveSignalType[]) => void;
   /** Stream tayyor bo'lgani: shu o'zgarganda engine qayta ishga tushadi. */
   streamRevision?: number;
+  /** Imtihon oldi tekshiruvida o'lchangan tabiiy ko'z ochiqligi (nisbiy nigoh nazorati). */
+  eyeBaseline?: number | null;
   disabled?: boolean;
   onReady?: (ok: boolean) => void;
 }
@@ -35,6 +37,7 @@ export function useRealtimeProctoring({
   onMouthActivity,
   onSmallWarningStage,
   streamRevision = 0,
+  eyeBaseline = null,
   disabled = false,
   onReady,
 }: UseRealtimeProctoringOpts): void {
@@ -53,7 +56,7 @@ export function useRealtimeProctoring({
       onSmallWarningStage,
       onReady,
       onStatus: (m) => console.info('[realtime-proctor]', m),
-    });
+    }, eyeBaseline);
 
     void proctor.init().then((ok) => {
       if (cancelled) {
