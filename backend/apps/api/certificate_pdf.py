@@ -55,9 +55,36 @@ def result_questions_to_pdf_rows(questions: list[dict]) -> list[dict]:
             "whyStudentWrong": q.get("whyStudentWrong") or "",
             "whyCorrectIsRight": q.get("whyCorrectIsRight") or "",
             "options": q.get("options") or [],
+            "references": [
+                r
+                for r in (q.get("references") or [])
+                if isinstance(r, dict) and (r.get("title") or r.get("url"))
+            ],
         }
         for i, q in enumerate(questions)
     ]
+
+
+def format_pdf_reference_lines(refs: list[dict], *, pages_suffix: str = "bet") -> list[str]:
+    """UI dagi Manbalar ro'yxati bilan bir xil: [1] Title — pages-bet."""
+    lines: list[str] = []
+    for i, r in enumerate(refs or [], start=1):
+        if not isinstance(r, dict):
+            continue
+        title = str(r.get("title") or r.get("url") or "").strip()
+        if not title:
+            continue
+        pages = str(r.get("pages") or "").strip()
+        meta_parts = []
+        if pages:
+            meta_parts.append(f"{pages}-{pages_suffix}")
+        for field in ("authors", "publisher", "year"):
+            val = str(r.get(field) or "").strip()
+            if val:
+                meta_parts.append(val)
+        meta = " · ".join(meta_parts)
+        lines.append(f"[{i}] {title}" + (f" — {meta}" if meta else ""))
+    return lines
 
 # Kirill (rus) va lotin harflarini to'g'ri chizish uchun Unicode shrift.
 # Standart PDF bazaviy shriftlari (Helvetica) faqat Latin-1 ni qo'llaydi — rus tilidagi
@@ -674,11 +701,21 @@ def build_certificate_pdf(
         if not is_correct and why_right:
             detail_blocks.append((texts.t("why_correct_right"), why_right))
 
+        ref_lines = format_pdf_reference_lines(
+            r.get("references") or [],
+            pages_suffix=texts.t("pages_suffix"),
+        )
+
         block_lines = 0
         for label, body in detail_blocks:
             block_lines += 1 + len(_wrap_text(c, body, FONT_REGULAR, 8, w - 120)[:6])
         if options:
             block_lines += 1 + min(len(options), 8)
+        if ref_lines:
+            # sarlavha + har bir manba (wrap bilan)
+            block_lines += 1
+            for rl in ref_lines[:6]:
+                block_lines += len(_wrap_text(c, rl, FONT_REGULAR, 7.5, w - 120)[:3])
         card_h = 16 + len(q_lines) * 12 + block_lines * 11 + 12
 
         if y - card_h < 70:
@@ -731,6 +768,18 @@ def build_certificate_pdf(
             for bl in _wrap_text(c, body, FONT_REGULAR, 8, w - 120)[:8]:
                 c.drawString(58, cy, bl)
                 cy -= 10
+
+        if ref_lines:
+            c.setFont(FONT_BOLD, 7.5)
+            c.setFillColor(C_MUTED)
+            c.drawString(52, cy, texts.t("references"))
+            cy -= 10
+            c.setFont(FONT_REGULAR, 7.5)
+            c.setFillColor(C_SLATE)
+            for rl in ref_lines[:6]:
+                for bl in _wrap_text(c, rl, FONT_REGULAR, 7.5, w - 120)[:3]:
+                    c.drawString(58, cy, bl)
+                    cy -= 9
 
         y = card_top - card_h - 10
 

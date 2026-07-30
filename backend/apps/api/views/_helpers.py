@@ -92,6 +92,10 @@ from apps.api.services import (
     resolve_student_exam_language,
     shuffle_in_place,
 )
+from apps.api.imentor_service import (
+    enrich_questions_with_imentor_references,
+    sync_ai_summary_item_references,
+)
 from apps.api.vac_settings import (
     exam_min_submit_seconds,
     identity_verify_max_age_seconds,
@@ -932,6 +936,32 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang
         questions = safe_json_loads(se.session_questions_json, [])
     else:
         questions = safe_json_loads(exam.questions_json, [])
+    # iMentor backfill dan keyin eski sessiyalarda references bo'sh qolishi mumkin —
+    # natija ochilganda bir marta boyitib saqlaymiz.
+    if isinstance(questions, list) and questions and any(
+        isinstance(q, dict) and not question_references(q) for q in questions
+    ):
+        try:
+            enriched, n = enrich_questions_with_imentor_references(questions)
+            if n > 0:
+                questions = enriched
+                se.session_questions_json = json.dumps(questions, ensure_ascii=False)
+                fields = ["session_questions_json"]
+                ai_tmp = safe_json_loads(se.ai_summary_json, {})
+                if ai_tmp.get("items"):
+                    se.ai_summary_json = json.dumps(
+                        sync_ai_summary_item_references(ai_tmp, questions),
+                        ensure_ascii=False,
+                    )
+                    fields.append("ai_summary_json")
+                se.save(update_fields=fields)
+        except Exception:
+            logger.warning(
+                "imentor references enrich failed se_id=%s exam_id=%s",
+                se.id,
+                se.exam_id,
+                exc_info=True,
+            )
     answers = norm_answers(safe_json_loads(se.answers_json, {}))
     ai = safe_json_loads(se.ai_summary_json, {})
     if not ai.get("items"):

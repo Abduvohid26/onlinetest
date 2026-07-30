@@ -62,6 +62,30 @@ def public_verify_result(request, result_id: str):
         questions = safe_json_loads(se.session_questions_json, [])
     else:
         questions = safe_json_loads(se.exam.questions_json, [])
+    if isinstance(questions, list) and questions and any(
+        isinstance(q, dict) and not question_references(q) for q in questions
+    ):
+        try:
+            from apps.api.imentor_service import (
+                enrich_questions_with_imentor_references,
+                sync_ai_summary_item_references,
+            )
+
+            enriched, n = enrich_questions_with_imentor_references(questions)
+            if n > 0:
+                questions = enriched
+                se.session_questions_json = json.dumps(questions, ensure_ascii=False)
+                fields = ["session_questions_json"]
+                ai_tmp = safe_json_loads(se.ai_summary_json, {})
+                if ai_tmp.get("items"):
+                    se.ai_summary_json = json.dumps(
+                        sync_ai_summary_item_references(ai_tmp, questions),
+                        ensure_ascii=False,
+                    )
+                    fields.append("ai_summary_json")
+                se.save(update_fields=fields)
+        except Exception:
+            pass
     answers = norm_answers(safe_json_loads(se.answers_json, {}))
     ai = safe_json_loads(se.ai_summary_json, {})
     if not ai.get("items"):
@@ -137,6 +161,30 @@ def public_verify_certificate_pdf(request, result_id: str):
         questions = safe_json_loads(se.session_questions_json, [])
     else:
         questions = safe_json_loads(se.exam.questions_json, [])
+    if isinstance(questions, list) and questions and any(
+        isinstance(q, dict) and not question_references(q) for q in questions
+    ):
+        try:
+            from apps.api.imentor_service import (
+                enrich_questions_with_imentor_references,
+                sync_ai_summary_item_references,
+            )
+
+            enriched, n = enrich_questions_with_imentor_references(questions)
+            if n > 0:
+                questions = enriched
+                se.session_questions_json = json.dumps(questions, ensure_ascii=False)
+                fields = ["session_questions_json"]
+                ai_tmp = safe_json_loads(se.ai_summary_json, {})
+                if ai_tmp.get("items"):
+                    se.ai_summary_json = json.dumps(
+                        sync_ai_summary_item_references(ai_tmp, questions),
+                        ensure_ascii=False,
+                    )
+                    fields.append("ai_summary_json")
+                se.save(update_fields=fields)
+        except Exception:
+            pass
     answers = norm_answers(safe_json_loads(se.answers_json, {}))
     ai = safe_json_loads(se.ai_summary_json, {})
     if not ai.get("items"):

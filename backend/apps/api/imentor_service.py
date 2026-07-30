@@ -15,6 +15,7 @@ from apps.api.imentor_client import (
     imentor_collect_tests_for_subject,
     imentor_configured,
     imentor_get_test,
+    imentor_list_tests,
     imentor_published_test_count,
     imentor_stats,
     parse_question_limit_bounds,
@@ -767,6 +768,135 @@ def fetch_random_imentor_questions(
         ),
     }
     return questions, meta
+
+
+def _normalize_question_text(text: str) -> str:
+    return " ".join(str(text or "").lower().split())
+
+
+def build_imentor_reference_index(
+    *,
+    test_ids: list[int] | None = None,
+    subject_code: str | None = None,
+    max_tests: int = 50,
+) -> dict[str, list[dict]]:
+    """
+    iMentor e'lon qilingan testlardan: savol matni → references.
+    Eski OnlineTest sessiyalariga manba qayta biriktirish uchun.
+    """
+    if not imentor_configured():
+        return {}
+
+    ids: list[int] = []
+    if test_ids:
+        ids = [int(x) for x in test_ids if int(x) > 0]
+    else:
+        try:
+            kwargs: dict[str, Any] = {"page": 1, "page_size": min(200, max(1, max_tests))}
+            if subject_code:
+                kwargs["subject_code"] = subject_code
+            data = imentor_list_tests(**kwargs)
+            for row in data.get("results") or []:
+                if isinstance(row, dict) and int(row.get("id") or 0) > 0:
+                    ids.append(int(row["id"]))
+        except IMentorApiError:
+            return {}
+
+    index: dict[str, list[dict]] = {}
+    for tid in ids[:max_tests]:
+        try:
+            detail = imentor_get_test(tid)
+        except IMentorApiError:
+            continue
+        payload = detail.get("payload") if isinstance(detail.get("payload"), dict) else {}
+        payload_refs = normalize_question_references(payload.get("references"))
+        raw_qs = payload.get("questions") or []
+        if not isinstance(raw_qs, list):
+            continue
+        for q in raw_qs:
+            if not isinstance(q, dict):
+                continue
+            text = str(q.get("question") or q.get("text") or "").strip()
+            if not text:
+                continue
+            refs = normalize_question_references(q.get("references")) or list(payload_refs)
+            if not refs:
+                continue
+            key = _normalize_question_text(text)
+            # Birinchi to'liq manbali nusxa ustun — keyinrogi bo'sh bilan yozib qoymasın.
+            if key not in index:
+                index[key] = refs
+    return index
+
+
+def enrich_questions_with_imentor_references(
+    questions: list[dict],
+    *,
+    test_ids: list[int] | None = None,
+    subject_code: str | None = None,
+    index: dict[str, list[dict]] | None = None,
+) -> tuple[list[dict], int]:
+    """
+    Savollarga iMentor `references` ni matn bo'yicha biriktiradi.
+    Qaytaradi: (yangilangan_savollar, nechta_savol_yangilandi).
+    """
+    if not questions:
+        return questions, 0
+    need = [q for q in questions if isinstance(q, dict) and not q.get("references")]
+    if not need:
+        return questions, 0
+
+    ref_index = index if index is not None else build_imentor_reference_index(
+        test_ids=test_ids,
+        subject_code=subject_code,
+    )
+    if not ref_index:
+        return questions, 0
+
+    patched = 0
+    out: list[dict] = []
+    for q in questions:
+        if not isinstance(q, dict):
+            out.append(q)
+            continue
+        row = dict(q)
+        existing = normalize_question_references(row.get("references"))
+        if existing:
+            row["references"] = existing
+            out.append(row)
+            continue
+        key = _normalize_question_text(str(row.get("text") or ""))
+        refs = ref_index.get(key)
+        if refs:
+            row["references"] = [dict(r) for r in refs]
+            patched += 1
+        out.append(row)
+    return out, patched
+
+
+def sync_ai_summary_item_references(ai_summary: dict, questions: list[dict]) -> dict:
+    """ai_summary.items[].references ni savol manbalari bilan to'ldiradi."""
+    if not isinstance(ai_summary, dict):
+        return {"overview": "", "items": [], "source": "fallback"}
+    out = dict(ai_summary)
+    items = list(out.get("items") or [])
+    by_id = {
+        q.get("id"): normalize_question_references(q.get("references"))
+        for q in questions
+        if isinstance(q, dict)
+    }
+    new_items = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        qid = row.get("questionId")
+        refs = by_id.get(qid) or []
+        if refs and not (isinstance(row.get("references"), list) and row.get("references")):
+            row["references"] = list(refs)
+        new_items.append(row)
+    out["items"] = new_items
+    return out
 
 
 def validate_imentor_subjects(
