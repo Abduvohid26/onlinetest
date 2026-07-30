@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from unittest import mock
 
-from django.test import TestCase
+from django.test import SimpleTestCase
 
 from apps.api.imentor_client import (
     DEFAULT_QUESTION_LIMIT_BOUNDS,
@@ -23,7 +23,7 @@ from apps.api.imentor_service import (
 )
 
 
-class IMentorServiceTests(TestCase):
+class IMentorServiceTests(SimpleTestCase):
     def test_transform_imentor_questions_maps_correct_index(self):
         raw = [
             {
@@ -68,41 +68,30 @@ class IMentorServiceTests(TestCase):
         self.assertEqual(merged[0]["text_en"], "Question en?")
         self.assertEqual(merged[0]["options_ru"], ["А", "Б"])
 
-    @mock.patch("apps.api.imentor_service.exam_questions_add_translations")
-    @mock.patch("apps.api.imentor_service.imentor_get_test")
-    @mock.patch("apps.api.imentor_service.imentor_collect_tests_for_subject")
+    @mock.patch("apps.api.imentor_service.exam_questions_add_translations", side_effect=lambda q, _lang: q)
+    @mock.patch("apps.api.imentor_service.imentor_sample_questions")
     @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
     @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
     @mock.patch("apps.api.imentor_service._build_subject_registry")
-    def test_fetch_uses_imentor_translations_not_ai(
-        self, mock_registry, _bounds, _resolve, mock_collect, mock_get, mock_ai
+    def test_fetch_sample_adds_translations_via_ai(
+        self, mock_registry, _bounds, _resolve, mock_sample, mock_ai
     ):
         mock_registry.return_value = {"ANAT": {"subject_code": "ANAT", "test_count": 1}}
-        mock_collect.return_value = [{"id": 9, "subject_code": "ANAT"}]
-        mock_get.return_value = {
-            "payload": {
-                "questions": [
-                    {"question": "Savol?", "options": ["A", "B"], "correctOptionIndex": 0}
-                ],
-                "translations": {
-                    "ru": {
-                        "questions": [
-                            {"question": "Вопрос?", "options": ["А", "Б"], "correctOptionIndex": 0}
-                        ]
-                    },
-                    "en": {
-                        "questions": [
-                            {"question": "Q?", "options": ["A", "B"], "correctOptionIndex": 0}
-                        ]
-                    },
-                },
-            }
+        mock_sample.return_value = {
+            "subject_code": "ANAT",
+            "count_available": 1,
+            "count_returned": 1,
+            "tests_scanned": 1,
+            "question_limit_bounds": {"min": 10, "max": 30},
+            "questions": [
+                {"question": "Savol?", "options": ["A", "B"], "correctOptionIndex": 0}
+            ],
         }
         qs, meta = fetch_random_imentor_questions(["ANAT"], max_questions=10, add_translations=True)
-        mock_ai.assert_not_called()
-        self.assertEqual(meta["translations_source"], "imentor")
-        self.assertEqual(qs[0]["text_ru"], "Вопрос?")
-        self.assertEqual(qs[0]["text_en"], "Q?")
+        mock_ai.assert_called_once()
+        self.assertEqual(meta["translations_source"], "ai")
+        self.assertTrue(meta.get("imentor_sample"))
+        self.assertEqual(qs[0]["text"], "Savol?")
 
     def test_parse_question_limit_bounds_defaults(self):
         self.assertEqual(parse_question_limit_bounds({}), DEFAULT_QUESTION_LIMIT_BOUNDS)
@@ -225,73 +214,71 @@ class IMentorServiceTests(TestCase):
         self.assertGreaterEqual(total, 3)
 
     @mock.patch("apps.api.imentor_service.exam_questions_add_translations", side_effect=lambda q, _lang: q)
-    @mock.patch("apps.api.imentor_service.imentor_get_test")
-    @mock.patch("apps.api.imentor_service.imentor_collect_tests_for_subject")
+    @mock.patch("apps.api.imentor_service.imentor_sample_questions")
     @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
     @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
     @mock.patch("apps.api.imentor_service._build_subject_registry")
-    def test_fetch_random_uses_api_question_limit(self, mock_registry, _bounds, _resolve, mock_collect, mock_get, _tr):
+    def test_fetch_random_uses_api_question_limit(self, mock_registry, _bounds, _resolve, mock_sample, _tr):
         mock_registry.return_value = {
             "ANAT": {"subject_code": "ANAT", "test_count": 1},
         }
-        mock_collect.return_value = [{"id": 42, "subject_code": "ANAT", "topic": "T"}]
-        mock_get.return_value = {
-            "topic": "T",
+        mock_sample.return_value = {
             "subject_code": "ANAT",
-            "question_limit": 15,
-            "question_count_available": 25,
-            "question_count_returned": 15,
+            "department_code": "ANAT",
+            "count_requested": 15,
+            "count_available": 25,
+            "count_returned": 15,
+            "tests_scanned": 3,
             "question_limit_bounds": {"min": 10, "max": 30},
-            "payload": {
-                "questions": [
-                    {"question": f"Q{i}", "options": ["A", "B"], "correctOptionIndex": 0}
-                    for i in range(15)
-                ],
-            },
+            "questions": [
+                {
+                    "question": f"Q{i}",
+                    "options": ["A", "B"],
+                    "correctOptionIndex": 0,
+                    "references": [{"title": "Kitob", "pages": "1"}],
+                }
+                for i in range(15)
+            ],
         }
         qs, meta = fetch_random_imentor_questions(["ANAT"], max_questions=15, add_translations=False)
-        mock_collect.assert_called_with(
-            "ANAT",
-            syllabus_id=None,
+        mock_sample.assert_called_with(
+            subject_code="ANAT",
             department_code="ANAT",
+            count=15,
             variant_label=None,
             topic_code=None,
-            min_questions=10,
-            max_questions=30,
+            syllabus_id=None,
         )
-        mock_get.assert_called_with(42, question_limit=15)
         self.assertEqual(len(qs), 15)
         self.assertEqual(meta["question_count_returned"], 15)
+        self.assertEqual(meta["tests_scanned"], 3)
+        self.assertEqual(qs[0]["references"][0]["title"], "Kitob")
 
     @mock.patch("apps.api.imentor_service.exam_questions_add_translations", side_effect=lambda q, _lang: q)
-    @mock.patch("apps.api.imentor_service.imentor_get_test")
-    @mock.patch("apps.api.imentor_service.imentor_collect_tests_for_subject")
+    @mock.patch("apps.api.imentor_service.imentor_sample_questions")
     @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
     @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
     @mock.patch("apps.api.imentor_service._build_subject_registry")
-    def test_fetch_random_all_questions_when_zero(self, mock_registry, _bounds, _resolve, mock_collect, mock_get, _tr):
+    def test_fetch_random_all_questions_when_zero(self, mock_registry, _bounds, _resolve, mock_sample, _tr):
         mock_registry.return_value = {
             "ANAT": {"subject_code": "ANAT", "test_count": 1},
         }
-        mock_collect.return_value = [{"id": 7, "subject_code": "ANAT"}]
-        mock_get.return_value = {
-            "payload": {
-                "questions": [
-                    {"question": "Q1", "options": ["A", "B"], "correctOptionIndex": 0},
-                ],
-            },
+        mock_sample.return_value = {
+            "count_available": 1,
+            "count_returned": 1,
+            "questions": [
+                {"question": "Q1", "options": ["A", "B"], "correctOptionIndex": 0},
+            ],
         }
         qs, _meta = fetch_random_imentor_questions(["ANAT"], max_questions=0, add_translations=False)
-        mock_collect.assert_called_with(
-            "ANAT",
-            syllabus_id=None,
+        mock_sample.assert_called_with(
+            subject_code="ANAT",
             department_code="ANAT",
+            count=None,
             variant_label=None,
             topic_code=None,
-            min_questions=10,
-            max_questions=30,
+            syllabus_id=None,
         )
-        mock_get.assert_called_with(7, question_limit=None)
         self.assertEqual(len(qs), 1)
 
     @mock.patch("apps.api.imentor_service.imentor_published_test_count", return_value=0)

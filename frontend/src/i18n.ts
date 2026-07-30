@@ -457,7 +457,7 @@ export const translations = {
     imentorNoDepartments: "iMentor katalogida kafedra topilmadi.",
     imentorSubjectsLabel: "Fan",
     imentorSubjectsHint:
-      "2-qadam: fanni tanlang — ichidan e'lon qilingan test tasodifiy olinadi. Yo'nalish/mavzu shart emas.",
+      "2-qadam: fanni tanlang — shu fan dagi barcha e'lon qilingan testlardan unique savollar aralashtirib olinadi. Yo'nalish/mavzu shart emas.",
     imentorPickSubject: "Fanni tanlang",
     imentorSubjectNoTests: "test yo'q",
     imentorStepDepartment: "Kafedra",
@@ -1237,7 +1237,7 @@ export const translations = {
     imentorNoDepartments: "В каталоге iMentor нет кафедр.",
     imentorSubjectsLabel: "Предмет",
     imentorSubjectsHint:
-      "Шаг 2: выберите предмет — опубликованный тест берётся случайно. Направление/тема не обязательны.",
+      "Шаг 2: выберите предмет — уникальные вопросы перемешиваются из всех опубликованных тестов. Направление/тема не обязательны.",
     imentorPickSubject: "Выберите предмет",
     imentorSubjectNoTests: "нет тестов",
     imentorStepDepartment: "Кафедра",
@@ -2016,7 +2016,7 @@ export const translations = {
     imentorNoDepartments: "No departments found in iMentor catalog.",
     imentorSubjectsLabel: "Subject",
     imentorSubjectsHint:
-      "Step 2: choose a subject — a published test is picked at random. Track/topic are optional.",
+      "Step 2: choose a subject — unique questions are shuffled from all published tests. Track/topic are optional.",
     imentorPickSubject: "Select a subject",
     imentorSubjectNoTests: "no tests",
     imentorStepDepartment: "Department",

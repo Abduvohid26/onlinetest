@@ -7,16 +7,14 @@ from typing import Any
 from apps.api.imentor_client import (
     DEFAULT_QUESTION_LIMIT_BOUNDS,
     IMentorApiError,
-    IMENTOR_QUESTION_LIMIT_MAX,
-    IMENTOR_QUESTION_LIMIT_MIN,
     imentor_catalog_departments,
     imentor_catalog_stats,
     imentor_collect_department_subjects,
-    imentor_collect_tests_for_subject,
     imentor_configured,
     imentor_get_test,
     imentor_list_tests,
     imentor_published_test_count,
+    imentor_sample_questions,
     imentor_stats,
     parse_question_limit_bounds,
     validate_question_limit_value,
@@ -638,13 +636,15 @@ def fetch_random_imentor_questions(
     topic_code: str | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """
-    Tanlangan fanlardan tasodifiy bitta test tanlab savollarni qaytaradi.
-    max_questions=0 bo'lsa API detail cheklovsiz (bazadagi barcha savollar).
-    max_questions>0 bo'lsa question_limit=10..30 API ga uzatiladi.
-    variant_label / topic_code — ixtiyoriy filtrlash (katalog 4–6 qadam).
+    Tanlangan fan(lar) doirasidagi e'lon qilingan testlardan unique savollarni
+    iMentor sample API orqali oladi (aralashtirilgan pool).
 
-    add_translations=True: avvalo iMentor payload.translations ishlatiladi;
-    yetishmasa (eski testlar) AI fallback.
+    max_questions=0 bo'lsa — unique poolning hammasi.
+    max_questions>0 bo'lsa count=10..30 API ga uzatiladi.
+    variant_label / topic_code — ixtiyoriy filtrlash.
+
+    add_translations=True: sample javobida builtin translations yo'q —
+    AI fallback (yoki keyinroq iMentor tarjimasi qo'shilsa).
     """
     bounds = question_limit_bounds()
     question_limit = validate_question_limit_value(int(max_questions or 0), bounds=bounds)
@@ -656,113 +656,102 @@ def fetch_random_imentor_questions(
     except IMentorApiError:
         raise
 
-    # Ro'yxat: kamida 10 savolli testlar (API qoidasi). question_limit faqat detail uchun.
-    list_min = IMENTOR_QUESTION_LIMIT_MIN
-    list_max = IMENTOR_QUESTION_LIMIT_MAX
+    raw_qs: list[dict] = []
+    sample_meta: dict[str, Any] = {}
+    last_error: IMentorApiError | None = None
 
-    pool: list[dict] = []
     for code in codes:
         ctx = _subject_context(code)
         syllabus_id = ctx.get("syllabus_id")
         department_code = str(ctx.get("department_code") or "").strip() or None
         try:
-            batch = imentor_collect_tests_for_subject(
-                code,
-                syllabus_id=syllabus_id,
+            sample = imentor_sample_questions(
+                subject_code=code,
                 department_code=department_code,
+                count=question_limit if question_limit else None,
                 variant_label=v_label,
                 topic_code=t_code,
-                min_questions=list_min,
-                max_questions=list_max,
+                syllabus_id=syllabus_id,
             )
-            if not batch:
-                batch = imentor_collect_tests_for_subject(
-                    code,
-                    syllabus_id=syllabus_id,
-                    department_code=department_code,
-                    variant_label=v_label,
-                    topic_code=t_code,
-                    min_questions=None,
-                    max_questions=None,
-                )
-            pool.extend(batch)
-        except IMentorApiError:
-            continue
+        except IMentorApiError as ex:
+            last_error = ex
+            # Fallback: department-only (legacy subject_code = dept)
+            if department_code and department_code != code:
+                try:
+                    sample = imentor_sample_questions(
+                        department_code=department_code,
+                        count=question_limit if question_limit else None,
+                        variant_label=v_label,
+                        topic_code=t_code,
+                    )
+                except IMentorApiError as ex2:
+                    last_error = ex2
+                    continue
+            else:
+                continue
 
-    if not pool:
+        batch = sample.get("questions") if isinstance(sample, dict) else None
+        if not isinstance(batch, list) or not batch:
+            continue
+        raw_qs.extend([q for q in batch if isinstance(q, dict)])
+        sample_meta = sample if isinstance(sample, dict) else {}
+
+    if not raw_qs:
+        if last_error:
+            raise last_error
         raise IMentorApiError(
             "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test topilmadi "
             "(1 soat kutish talabi bo'lishi mumkin)"
         )
 
-    pick = random.choice(pool)
-    test_id = int(pick.get("id") or 0)
-    if not test_id:
-        raise IMentorApiError("Test ID noto'g'ri")
-
-    detail = imentor_get_test(
-        test_id,
-        question_limit=question_limit if question_limit else None,
-    )
-    payload = detail.get("payload") if isinstance(detail.get("payload"), dict) else {}
-    raw_qs = payload.get("questions") or []
-    if not isinstance(raw_qs, list) or not raw_qs:
-        raise IMentorApiError("Testda savollar yo'q")
+    # Bir nechta fan bo'lsa — matn bo'yicha yana unique + shuffle + limit
+    if len(codes) > 1:
+        seen: set[str] = set()
+        deduped: list[dict] = []
+        for q in raw_qs:
+            key = _normalize_question_text(str(q.get("question") or q.get("text") or ""))
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            deduped.append(q)
+        random.shuffle(deduped)
+        if question_limit:
+            deduped = deduped[:question_limit]
+        raw_qs = deduped
 
     questions = _transform_imentor_questions(raw_qs)
     if not questions:
         raise IMentorApiError("Testdan foydali savol ajratib bo'lmadi")
 
-    # Ba'zi testlarda manbalar savol darajasida emas, test darajasida keladi
-    # (`payload.references`). Savolning o'z ro'yxati bo'lmasa — o'shani beramiz.
-    payload_refs = normalize_question_references(payload.get("references"))
-    if payload_refs:
-        for q in questions:
-            if not q.get("references"):
-                q["references"] = list(payload_refs)
-
     used_builtin = False
     used_ai = False
     if add_translations:
-        merged, complete = _apply_imentor_builtin_translations(
-            questions,
-            payload,
-            source_language=source_language,
-        )
-        if complete:
-            questions = merged
-            used_builtin = True
-        elif merged is not questions and any(
-            (q.get("text_uz") or q.get("text_ru") or q.get("text_en")) for q in merged
-        ):
-            # Qisman iMentor tarjimasi — yetishmaganini AI to'ldiradi
-            from apps.api.services import fill_missing_exam_translations
-
-            questions = fill_missing_exam_translations(merged)
-            used_builtin = True
-            used_ai = True
-        else:
-            questions = exam_questions_add_translations(questions, source_language)
-            used_ai = True
+        # Sample endpoint hozircha translations bermaydi — AI to'ldiradi.
+        questions = exam_questions_add_translations(questions, source_language)
+        used_ai = True
 
     meta = {
-        "imentor_test_id": test_id,
-        "imentor_topic": str(detail.get("topic") or pick.get("topic") or ""),
-        "subject_code": str(detail.get("subject_code") or pick.get("subject_code") or ""),
-        "subject_name": str(detail.get("subject_name") or pick.get("subject_name") or ""),
-        "department_code": str(detail.get("department_code") or pick.get("department_code") or ""),
-        "department_name": str(detail.get("department_name") or pick.get("department_name") or ""),
-        "variant_label": str(detail.get("variant_label") or pick.get("variant_label") or v_label or ""),
-        "topic_code": str(detail.get("topic_code") or pick.get("topic_code") or t_code or ""),
-        "question_count": len(questions),
-        "question_limit": int(detail.get("question_limit") or question_limit or 0),
-        "question_count_available": int(
-            detail.get("question_count_available") or detail.get("question_count") or pick.get("question_count") or 0
+        "imentor_test_id": 0,
+        "imentor_sample": True,
+        "imentor_topic": "",
+        "subject_code": str(sample_meta.get("subject_code") or (codes[0] if codes else "")),
+        "subject_name": "",
+        "department_code": str(
+            sample_meta.get("department_code")
+            or (_subject_context(codes[0]).get("department_code") if codes else "")
+            or ""
         ),
-        "question_count_returned": int(detail.get("question_count_returned") or len(questions)),
-        "question_limit_bounds": parse_question_limit_bounds(detail),
-        "verification_code": str(detail.get("verification_code") or pick.get("verification_code") or ""),
-        "document_id": str(detail.get("document_id") or pick.get("document_id") or ""),
+        "department_name": "",
+        "variant_label": str(sample_meta.get("variant_label") or v_label or ""),
+        "topic_code": str(sample_meta.get("topic_code") or t_code or ""),
+        "question_count": len(questions),
+        "question_limit": int(question_limit or 0),
+        "question_count_available": int(sample_meta.get("count_available") or len(questions)),
+        "question_count_returned": int(sample_meta.get("count_returned") or len(questions)),
+        "question_limit_bounds": parse_question_limit_bounds(sample_meta),
+        "verification_code": "",
+        "document_id": "",
+        "tests_scanned": int(sample_meta.get("tests_scanned") or 0),
         "translations_source": (
             "imentor" if used_builtin and not used_ai else ("mixed" if used_ai and used_builtin else ("ai" if used_ai else "none"))
         ),

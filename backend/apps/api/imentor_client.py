@@ -365,3 +365,36 @@ def imentor_get_test(test_id: int, *, question_limit: int | None = None) -> dict
         params = {"question_limit": int(question_limit)}
     data = imentor_request(f"/v1/external/tests/{int(test_id)}/", params=params)
     return data if isinstance(data, dict) else {}
+
+
+def imentor_sample_questions(
+    *,
+    subject_code: str | None = None,
+    department_code: str | None = None,
+    count: int | None = None,
+    variant_label: str | None = None,
+    topic_code: str | None = None,
+    syllabus_id: int | None = None,
+) -> dict:
+    """
+    Unique aralashtirilgan savollar namunasi:
+    GET /v1/external/questions/sample/
+    count=None/0 → poolning hammasi; aks holda 10–30.
+    """
+    if not (subject_code or department_code):
+        raise IMentorApiError("subject_code yoki department_code kerak", status=400)
+    params: dict[str, Any] = {}
+    if subject_code:
+        params["subject_code"] = str(subject_code).strip()
+    if department_code:
+        params["department_code"] = str(department_code).strip()
+    if variant_label:
+        params["variant_label"] = str(variant_label).strip()
+    if topic_code:
+        params["topic_code"] = str(topic_code).strip().lower()
+    if syllabus_id is not None and int(syllabus_id) > 0:
+        params["syllabus_id"] = int(syllabus_id)
+    if count is not None and int(count) > 0:
+        params["count"] = int(count)
+    data = imentor_request("/v1/external/questions/sample/", params=params)
+    return data if isinstance(data, dict) else {}
