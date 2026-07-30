@@ -117,7 +117,10 @@ export interface ActionSpec {
 export const ACTION_SPECS: Record<LivenessAction, ActionSpec> = {
   // Ko'z qisish: qisqa, lekin "yumildi → ochildi" o'tishi majburiy.
   BLINK: { baselineMs: 250, holdMs: 60, requireRelease: true, timeoutMs: 10_000 },
-  SMILE: { baselineMs: 300, holdMs: 450, requireRelease: false, timeoutMs: 12_000 },
+  // Yumshatilgan: bir zumlik jilmayish yetadi. Baseline 150ms — oldindan
+  // yozilgan doim-tabassumli videoga qarshi minimal himoya qoladi, lekin
+  // haqiqiy talabani qiynamaydi. Hold 150ms — bir marta jilmaydi va o'tadi.
+  SMILE: { baselineMs: 150, holdMs: 150, requireRelease: false, timeoutMs: 12_000 },
   MOUTH_OPEN: { baselineMs: 300, holdMs: 400, requireRelease: false, timeoutMs: 12_000 },
   TURN_LEFT: { baselineMs: 300, holdMs: 400, requireRelease: false, timeoutMs: 12_000 },
   TURN_RIGHT: { baselineMs: 300, holdMs: 400, requireRelease: false, timeoutMs: 12_000 },
@@ -240,9 +243,18 @@ export class LivenessSequence {
   private index = 0;
   private steps: LivenessStep[];
 
-  constructor(actions: LivenessAction[]) {
+  /**
+   * @param timeoutOverrideMs bo'lsa, har bosqichning timeouti shu bilan
+   *   almashtiriladi. `Infinity` — DOIMIY tekshiruv (hech qachon "muvaffaqiyatsiz"
+   *   bo'lmaydi, talaba tayyor bo'lganda bajaradi; imtihon oldi tekshiruvida
+   *   "qayta urinish" tugmasi keraksiz).
+   */
+  constructor(actions: LivenessAction[], timeoutOverrideMs?: number) {
     if (actions.length === 0) throw new Error('liveness: kamida bitta harakat kerak');
-    this.steps = actions.map((a) => new LivenessStep(a));
+    this.steps = actions.map((a) => {
+      if (timeoutOverrideMs == null) return new LivenessStep(a);
+      return new LivenessStep(a, { ...ACTION_SPECS[a], timeoutMs: timeoutOverrideMs });
+    });
   }
 
   get currentAction(): LivenessAction {

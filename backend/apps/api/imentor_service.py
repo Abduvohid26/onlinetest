@@ -700,8 +700,7 @@ def fetch_random_imentor_questions(
         if last_error:
             raise last_error
         raise IMentorApiError(
-            "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test topilmadi "
-            "(1 soat kutish talabi bo'lishi mumkin)"
+            "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test topilmadi"
         )
 
     # Bir nechta fan bo'lsa — matn bo'yicha yana unique + shuffle + limit
@@ -919,5 +918,5 @@ def validate_imentor_subjects(
             ),
         )
     if total_tests < 1:
-        return False, "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test yo'q (yangi testlar 1 soatdan keyin)", 0
+        return False, "Tanlangan fan/yo'nalish/mavzuda e'lon qilingan test yo'q", 0
     return True, "", total_tests

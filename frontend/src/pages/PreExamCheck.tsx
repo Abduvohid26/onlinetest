@@ -569,18 +569,24 @@ export function PreExamCheck({
     setChallengeStep({ action: actions[0], step: 1, total: actions.length });
     setChallengeStatus('running');
 
-    const tracker = new LivenessChallengeTracker(video, actions, {
-      onProgress: (info) => {
-        if (cancelled) return;
-        setChallengeStep({ action: info.action, step: info.step, total: info.total });
+    const tracker = new LivenessChallengeTracker(
+      video,
+      actions,
+      {
+        onProgress: (info) => {
+          if (cancelled) return;
+          setChallengeStep({ action: info.action, step: info.step, total: info.total });
+        },
+        onPassed: () => {
+          if (!cancelled) setChallengeStatus('passed');
+        },
+        // DOIMIY tekshiruv — timeout Infinity, shu sabab onFailed hech qachon
+        // chaqirilmaydi. Talaba tayyor bo'lganda jilmayadi, "qayta urinish"
+        // tugmasi ko'rsatilmaydi.
+        onFailed: () => {},
       },
-      onPassed: () => {
-        if (!cancelled) setChallengeStatus('passed');
-      },
-      onFailed: () => {
-        if (!cancelled) setChallengeStatus('failed');
-      },
-    });
+      Infinity,
+    );
 
     void tracker.init().then((ok) => {
       if (cancelled) {

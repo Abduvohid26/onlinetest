@@ -91,7 +91,7 @@ deactivate
 
 `bootstrap_exam` admin yaratadi: ID odatda `fjstiadmin` (`ADMIN_BOOTSTRAP_ID`). **Production (`DJANGO_DEBUG=0`):** `ADMIN_BOOTSTRAP_PASSWORD` muhitda majburiy va kamida **12** belgi; standart parol ishlatilmaydi. Mahalliy ishlab chiqish (`DEBUG=1`) da parol ixtiyoriy — berilmasa `fjsti123`. `deploy/bootstrap-ubuntu-once.sh` birinchi marta `api.env` da kuchli parol generatsiya qiladi (`/root/onlinetest-admin-once.txt`).
 
-**iMentor integratsiyasi:** `api.env` da `IMENTOR_API_KEY` va ixtiyoriy `IMENTOR_API_BASE_URL` (standart `https://imentor.devflix.uz/api`) ni to‘ldiring. Kalit bo‘lmasa iMentor imtihonlari yaratilmaydi. Yangi testlar iMentor da 1 soatdan keyin e’lon qilinadi.
+**iMentor integratsiyasi:** `api.env` da `IMENTOR_API_KEY` va ixtiyoriy `IMENTOR_API_BASE_URL` (standart `https://imentor.devflix.uz/api`) ni to‘ldiring. Kalit bo‘lmasa iMentor imtihonlari yaratilmaydi. Yangi testlar iMentor da darhol e’lon qilinadi.
 
 **Docker (lokal):** `backend/.env` da `IMENTOR_API_KEY` bo‘lishi kerak. `docker-compose.yml` ichida `environment: IMENTOR_API_KEY: ${IMENTOR_API_KEY:-}` qo‘ymang — bo‘sh qiymat `.env` dagi kalitni container ichida o‘chirib yuboradi.
 

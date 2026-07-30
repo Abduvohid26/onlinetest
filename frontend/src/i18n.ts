@@ -154,7 +154,7 @@ export const translations = {
       "Serverda backend/.env faylida IMENTOR_API_KEY bo'lishi kerak. «Imtihon yaratish» sahifasida yashil xabar: «iMentor ulanishi OK (N ta test)» ko'rinishi kerak. Docker ishlatilsa, compose faylida bo'sh IMENTOR_API_KEY override qo'ymang.",
     adminGuideStep3Title: "3. iMentor imtihon yaratish",
     adminGuideStep3Body:
-      "Kafedra → Fan tanlang (yonda test soni chiqadi). Savollar soni: 0 = testdagi hammasi, yoki 10–30 oralig'ida. Vaqt, davomiylik, guruhlar va PIN ni belgilang. Yangi iMentor testlari e'lon qilinishi uchun 1 soat kutish kerak bo'lishi mumkin.",
+      "Kafedra → Fan tanlang (yonda test soni chiqadi). Savollar soni: 0 = testdagi hammasi, yoki 10–30 oralig'ida. Vaqt, davomiylik, guruhlar va PIN ni belgilang.",
     adminGuideStep4Title: "4. Imtihon va natijalar",
     adminGuideStep4Body:
       "Talaba «Boshlash» bosganda savollar iMentor dan avtomatik yuklanadi. «Imtihonlar ro'yxati»da natijalar, proktor ogohlantirishlari va bloklanganlarni kuzating.",
@@ -478,8 +478,8 @@ export const translations = {
     imentorNotConfigured:
       "iMentor API ulanmagan. backend/.env da IMENTOR_API_KEY ni tekshiring. Docker: environment bo'limida bo'sh IMENTOR_API_KEY qo'ymang — faqat backend/.env ishlatiladi.",
     imentorApiOk: "iMentor ulanishi OK ({n} ta e'lon qilingan test)",
-    imentorApiEmpty: "iMentor ulangan, lekin e'lon qilingan test topilmadi (yangi testlar 1 soatdan keyin)",
-    imentorNoSubjects: "iMentor da e’lon qilingan fan/test topilmadi (yangi testlar 1 soatdan keyin chiqadi).",
+    imentorApiEmpty: "iMentor ulangan, lekin e'lon qilingan test topilmadi",
+    imentorNoSubjects: "iMentor da e’lon qilingan fan/test topilmadi.",
     imentorMaxQuestionsHint: "0 = testdagi barcha savollar. Cheklash uchun {min}–{max} oralig'ida son kiriting.",
     imentorMaxQuestionsLabel: "Savollar soni (ixtiyoriy)",
     imentorQuestionLimitInvalid: "Savollar soni 10 dan 30 gacha bo'lishi kerak (0 = barcha savollar).",
@@ -938,7 +938,7 @@ export const translations = {
       "На сервере в backend/.env должен быть IMENTOR_API_KEY. На странице «Создать экзамен» должно появиться зелёное сообщение «iMentor подключён (N тестов)». В docker-compose не задавайте пустой IMENTOR_API_KEY в environment.",
     adminGuideStep3Title: "3. Создать экзамен iMentor",
     adminGuideStep3Body:
-      "Кафедра → предмет (рядом число тестов). Количество вопросов: 0 = все, или 10–30. Укажите время, длительность, группы и PIN. Новые тесты в iMentor могут появиться через 1 час.",
+      "Кафедра → предмет (рядом число тестов). Количество вопросов: 0 = все, или 10–30. Укажите время, длительность, группы и PIN.",
     adminGuideStep4Title: "4. Экзамены и результаты",
     adminGuideStep4Body:
       "При нажатии «Начать» вопросы загружаются из iMentor автоматически. В «Списке экзаменов» — результаты, предупреждения прокторинга и блокировки.",
@@ -1257,8 +1257,8 @@ export const translations = {
     imentorAnyTopic: "Все (random)",
     imentorNotConfigured: "API iMentor не настроен. Укажите IMENTOR_API_KEY в backend/.env (не пустой override в docker-compose environment).",
     imentorApiOk: "iMentor подключён ({n} опубликованных тестов)",
-    imentorApiEmpty: "iMentor подключён, но опубликованных тестов нет (новые — через 1 час)",
-    imentorNoSubjects: "В iMentor нет опубликованных предметов/тестов (новые тесты появляются через 1 час).",
+    imentorApiEmpty: "iMentor подключён, но опубликованных тестов нет",
+    imentorNoSubjects: "В iMentor нет опубликованных предметов/тестов.",
     imentorMaxQuestionsHint: "0 = все вопросы теста. Для ограничения укажите число от {min} до {max}.",
     imentorMaxQuestionsLabel: "Количество вопросов (необяз.)",
     imentorQuestionLimitInvalid: "Количество вопросов должно быть от 10 до 30 (0 = все вопросы).",
@@ -1717,7 +1717,7 @@ export const translations = {
       "Server backend/.env must include IMENTOR_API_KEY. On «Create exam» you should see a green «iMentor connected (N tests)» banner. Do not set an empty IMENTOR_API_KEY override in docker-compose environment.",
     adminGuideStep3Title: "3. Create iMentor exam",
     adminGuideStep3Body:
-      "Department → subject (test count shown). Question count: 0 = all, or 10–30. Set schedule, duration, groups, and PIN. New iMentor tests may take 1 hour to publish.",
+      "Department → subject (test count shown). Question count: 0 = all, or 10–30. Set schedule, duration, groups, and PIN.",
     adminGuideStep4Title: "4. Exams and results",
     adminGuideStep4Body:
       "When the student clicks Start, questions load from iMentor automatically. Use the exam list for results, proctor warnings, and bans.",
@@ -2036,8 +2036,8 @@ export const translations = {
     imentorAnyTopic: "Any (random)",
     imentorNotConfigured: "iMentor API is not configured. Set IMENTOR_API_KEY in backend/.env (do not override with empty IMENTOR_API_KEY in docker-compose environment).",
     imentorApiOk: "iMentor connected ({n} published tests)",
-    imentorApiEmpty: "iMentor connected but no published tests yet (new tests appear after 1 hour)",
-    imentorNoSubjects: "No published subjects/tests in iMentor (new tests appear after 1 hour).",
+    imentorApiEmpty: "iMentor connected but no published tests yet",
+    imentorNoSubjects: "No published subjects/tests in iMentor.",
     imentorMaxQuestionsHint: "0 = all questions from the test. To cap, enter a number between {min} and {max}.",
     imentorMaxQuestionsLabel: "Question count (optional)",
     imentorQuestionLimitInvalid: "Question count must be between 10 and 30 (0 = all questions).",

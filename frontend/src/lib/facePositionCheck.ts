@@ -112,7 +112,10 @@ export function computeSmileRatio(lm: any[]): number | null {
 }
 
 /** Active liveness challenge — tabassum chegarasi. */
-export const SMILE_RATIO_MIN = 0.46;
+// 0.46 -> 0.40: yengil jilmayish ham o'tadi. Tabiiy neytral yuz odatda
+// 0.30-0.35 atrofida, shu sabab 0.40 soxta o'tkazishga olib kelmaydi,
+// lekin "keng tirjayish" talab qilmaydi.
+export const SMILE_RATIO_MIN = 0.40;
 
 export function isSmiling(lm: any[], minRatio = SMILE_RATIO_MIN): boolean {
   const ratio = computeSmileRatio(lm);
@@ -409,8 +412,11 @@ export class LivenessChallengeTracker {
       onPassed: () => void;
       onFailed: () => void;
     },
+    /** Har bosqich timeouti (ms). `Infinity` — doimiy tekshiruv (timeout yo'q,
+     *  "qayta urinish" chiqmaydi). Berilmasa — modul standarti. */
+    timeoutOverrideMs?: number,
   ) {
-    this.sequence = new LivenessSequence(actions);
+    this.sequence = new LivenessSequence(actions, timeoutOverrideMs);
   }
 
   async init(): Promise<boolean> {
