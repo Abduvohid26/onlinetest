@@ -12,6 +12,14 @@
  * gate'ni o'tkazib yuborishi (skip) kerak, imtihon bloklanmasligi uchun.
  */
 
+import {
+  LivenessSequence,
+  eyesClosed,
+  isMouthOpen,
+  type LivenessAction,
+  type StepPhase,
+} from './livenessChallenge';
+
 export type FacePositionStatus =
   | 'WAITING'
   | 'NO_FACE'
@@ -354,7 +362,6 @@ export class YawChallengeTracker {
   }
 }
 
-export type SmileUpdate = (smiling: boolean) => void;
 
 const SMILE_DETECT_INTERVAL_MS = 120;
 
@@ -362,18 +369,30 @@ const SMILE_DETECT_INTERVAL_MS = 120;
  * Active liveness challenge — tabassum aniqlash (MediaPipe og'iz landmarklari).
  * YawChallengeTracker o'rniga: talaba kameraga qarab jilmayganda tasdiqlanadi.
  */
-export class SmileChallengeTracker {
-  private video: HTMLVideoElement;
-  private onSmile: SmileUpdate;
+export class LivenessChallengeTracker {
   private landmarker: any = null;
   private rafId: number | null = null;
   private timer: number | null = null;
   private running = false;
   private disposed = false;
+  private sequence: LivenessSequence;
 
-  constructor(video: HTMLVideoElement, onSmile: SmileUpdate) {
-    this.video = video;
-    this.onSmile = onSmile;
+  constructor(
+    private video: HTMLVideoElement,
+    private actions: LivenessAction[],
+    private cb: {
+      /** Har kadrda: hozir qaysi harakat so'ralyapti, nechanchi bosqich, bajarilyaptimi. */
+      onProgress: (info: {
+        action: LivenessAction;
+        step: number;
+        total: number;
+        phase: StepPhase;
+      }) => void;
+      onPassed: () => void;
+      onFailed: () => void;
+    },
+  ) {
+    this.sequence = new LivenessSequence(actions);
   }
 
   async init(): Promise<boolean> {
@@ -408,22 +427,59 @@ export class SmileChallengeTracker {
     schedule();
   }
 
+  /** Joriy harakat shu kadrda bajarilyaptimi. */
+  private actionActive(action: LivenessAction, lm: any[]): boolean {
+    switch (action) {
+      case 'BLINK':
+        return eyesClosed(lm);
+      case 'SMILE':
+        return isSmiling(lm);
+      case 'MOUTH_OPEN':
+        return isMouthOpen(lm);
+      case 'TURN_LEFT':
+      case 'TURN_RIGHT': {
+        const yaw = computeYaw(lm);
+        if (yaw === null) return false;
+        return challengeYawMatches(action === 'TURN_LEFT' ? 'left' : 'right', yaw);
+      }
+    }
+  }
+
   private tick(): void {
     const v = this.video;
-    if (!v || v.readyState < 2 || v.videoWidth === 0) {
-      this.onSmile(false);
-      return;
-    }
-    try {
-      const res = this.landmarker.detectForVideo(v, performance.now());
-      const faces = res?.faceLandmarks || [];
-      if (faces.length !== 1) {
-        this.onSmile(false);
-        return;
+    const now = Date.now();
+    const action = this.sequence.currentAction;
+
+    let faceOk = false;
+    let active = false;
+    if (v && v.readyState >= 2 && v.videoWidth > 0) {
+      try {
+        const res = this.landmarker.detectForVideo(v, performance.now());
+        const faces = res?.faceLandmarks || [];
+        // Kadrda AYNAN bitta yuz bo'lishi shart — ikkinchi odam "yordam" bera olmasin.
+        if (faces.length === 1) {
+          faceOk = true;
+          active = this.actionActive(action, faces[0]);
+        }
+      } catch {
+        faceOk = false;
       }
-      this.onSmile(isSmiling(faces[0]));
-    } catch {
-      this.onSmile(false);
+    }
+
+    const status = this.sequence.push(active, now, faceOk);
+    const { step, total } = this.sequence.progress;
+    this.cb.onProgress({
+      action: this.sequence.currentAction,
+      step,
+      total,
+      phase: this.sequence.currentStep.currentPhase,
+    });
+    if (status === 'passed') {
+      this.stop();
+      this.cb.onPassed();
+    } else if (status === 'failed') {
+      this.stop();
+      this.cb.onFailed();
     }
   }
 

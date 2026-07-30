@@ -19,6 +19,7 @@ import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '..
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { ViolationGate } from '../lib/violationGate';
 import { TabSwitchGuard } from '../lib/tabSwitchGuard';
+import { ConsoleProbeDevtoolsDetector, WindowSizeDevtoolsHeuristic } from '../lib/devtoolsDetect';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator } from '../components/Calculator';
 import { createRealtimeSocket, buildRealtimeUrl, type RealtimeSocket } from '../lib/realtimeSocket';
@@ -130,6 +131,19 @@ const IDENTITY_CHECK_MS = 90_000;
  *  Qisqa tasodifiy fokus yo'qolishi (brauzer UI, OS bildirishnomasi) hisoblanmaydi.
  *  "Kichik ogohlantirish" bosqichi YO'Q — talaba boshqa tabda uni ko'ra olmaydi. */
 const TAB_AWAY_VIOLATION_MS = 1200;
+
+/** Fullscreen'dan chiqilgandan keyin shuncha vaqt ichida qaytilmasa — RASMIY
+ *  qoidabuzarlik (FULLSCREEN_EXIT_HARD). Qoplama ekranni to'sib turgani uchun
+ *  bu vaqt ichida boshqa nazorat signallari yozilmaydi; shu sabab "qoplama
+ *  ostida cheksiz o'tirib nazoratni to'xtatib turish" yo'li yopiladi. */
+const FULLSCREEN_GRACE_MS = 10_000;
+
+/** Javob o'zgargandan keyin serverga saqlashgacha kutish (tinch pauza). */
+const AUTOSAVE_DEBOUNCE_MS = 8000;
+/** Oxirgi muvaffaqiyatli saqlashdan keyingi MAKSIMAL kutish — debounce'dan
+ *  qat'i nazar shu vaqt o'tsa darhol saqlanadi. Talaba to'xtovsiz javob
+ *  belgilab tursa ham qoralama eskirib qolmaydi. */
+const AUTOSAVE_MAX_WAIT_MS = 30_000;
 
 /** Fullscreen'ga kirgandan keyin tab-nazorati shuncha vaqt BARQAROR turgach
  *  yoqiladi. Fullscreen o'tishida brauzer beradigan blur/visibility to'lqini
@@ -521,8 +535,6 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Bir marta ochilgach, mid-exam media qayta urinishida savollarni yashirmaymiz. */
   const [startMediaGateDone, setStartMediaGateDone] = useState(false);
   const [cameraErrorHint, setCameraErrorHint] = useState('');
-  const enableSizeHeuristicDevtools =
-    String(import.meta.env.VITE_DEVTOOLS_SIZE_HEURISTIC || '').toLowerCase().trim() === 'true';
   const vacStateRef = useRef({
     seq: Number(exam.sessionSeqStart || 1),
     challengeSeed: exam.sessionChallenge as string | undefined,
@@ -687,10 +699,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     safeLocalSet(`exam_answers_ts_${exam.id}`, String(Date.now()));
   }, [answers, exam.id]);
 
-  useEffect(() => {
-    if (banned) return;
-    const id = window.setTimeout(() => {
-      const body = JSON.stringify({ answers, flaggedQuestions });
+  /** Serverga oxirgi muvaffaqiyatli saqlash vaqti — maksimal kutish uchun. */
+  const lastSavedAtRef = useRef(Date.now());
+
+  const saveProgressNow = useCallback(
+    async (ans: Record<string, string>, fl: number[]) => {
+      const body = JSON.stringify({ answers: ans, flaggedQuestions: fl });
       const attempt = async (n: number): Promise<void> => {
         try {
           const r = await fetch(apiUrl(`/api/student/exams/${exam.id}/save-progress`), {
@@ -703,6 +717,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           });
           syncVacIfOk(r);
           if (r.ok) {
+            lastSavedAtRef.current = Date.now();
             return;
           }
           if (n < 2 && (r.status >= 500 || r.status === 429)) {
@@ -716,10 +731,56 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           }
         }
       };
-      void attempt(0);
-    }, 22000);
+      await attempt(0);
+    },
+    [exam.id, nextGuardHeaders],
+  );
+
+  // Qoralamani serverga saqlash.
+  //
+  // MUHIM: ilgari bu SOF debounce edi (har javobda taymer bekor qilinardi).
+  // Talaba har 20 soniyada javob belgilab tursa, serverga HECH QACHON
+  // saqlanmasdi — faqat u 22 soniya to'xtaganda. Brauzer qulasa yoki qurilma
+  // almashsa, server qoralamasi juda eski bo'lib, avto-yakunlashda ball
+  // yo'qolardi. Endi MAKSIMAL KUTISH chegarasi bor: oxirgi saqlashdan
+  // AUTOSAVE_MAX_WAIT_MS o'tgan bo'lsa, debounce kutilmaydi.
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    const overdue = Date.now() - lastSavedAtRef.current >= AUTOSAVE_MAX_WAIT_MS;
+    const delay = overdue ? 0 : AUTOSAVE_DEBOUNCE_MS;
+    const id = window.setTimeout(() => {
+      void saveProgressNow(answersRef.current, flaggedRef.current);
+    }, delay);
     return () => clearTimeout(id);
-  }, [answers, flaggedQuestions, exam.id, token, banned, nextGuardHeaders]);
+  }, [answers, flaggedQuestions, banned, sessionStarted, saveProgressNow]);
+
+  // Talaba javob bermay uzoq o'tirsa ham (o'qib turibdi) qoralama eskirmasin.
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    const id = window.setInterval(() => {
+      if (Date.now() - lastSavedAtRef.current < AUTOSAVE_MAX_WAIT_MS) return;
+      void saveProgressNow(answersRef.current, flaggedRef.current);
+    }, 10_000);
+    return () => clearInterval(id);
+  }, [banned, sessionStarted, saveProgressNow]);
+
+  // Sahifa yopilishi/yashirilishi — oxirgi holatni ulgurgancha jo'natamiz.
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    const flush = () => {
+      if (submittingRef.current) return;
+      void saveProgressNow(answersRef.current, flaggedRef.current);
+    };
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    document.addEventListener('visibilitychange', onHidden);
+    window.addEventListener('pagehide', flush);
+    return () => {
+      document.removeEventListener('visibilitychange', onHidden);
+      window.removeEventListener('pagehide', flush);
+    };
+  }, [banned, sessionStarted, saveProgressNow]);
 
   useEffect(() => {
     if (banned) return;
@@ -733,7 +794,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         if (res.ok && typeof data.seconds_remaining === 'number') {
           setTimeLeft((prev) => {
             const srv = data.seconds_remaining ?? 0;
-            if (Math.abs(srv - prev) > 120) return srv;
+            // Server — YAGONA haqiqat manbai. Ilgari faqat 120s'dan katta farq
+            // tuzatilardi: talaba brauzer taymerini sekinlashtirib (fon tab,
+            // devtools throttling, tizim soatini o'zgartirish) deyarli 2
+            // daqiqa qo'shimcha vaqt yutishi mumkin edi. Endi tolerans 5s —
+            // faqat tarmoq kechikishi/yaxlitlash uchun.
+            if (Math.abs(srv - prev) > 5) return srv;
             return prev;
           });
         }
@@ -746,7 +812,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
     };
     sync();
-    const iv = window.setInterval(sync, 45000);
+    // 45s → 20s: taymer serverga tez-tez tekshirilsin (klient taymerini
+    // sekinlashtirish orqali vaqt yutish oynasi qisqarsin).
+    const iv = window.setInterval(sync, 20000);
     return () => clearInterval(iv);
   }, [exam.id, token, banned, nextGuardHeaders]);
 
@@ -765,6 +833,16 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Modal/ogohlantirish fullscreen'dan chiqarishi — buni qoidabuzarlik deb hisoblamaymiz */
   const fullscreenSuppressRef = useRef(false);
   const needsFullscreenRef = useRef(false);
+  /** Bloklovchi qoplama ko'rsatilsinmi (render uchun). */
+  const [needsFullscreen, setNeedsFullscreen] = useState(false);
+  /** Bu sessiyada fullscreen'ga kamida bir marta kirilganmi — qoplama matnini
+   *  tanlaydi (birinchi kirish "boshlash", keyingilari "qayting"). */
+  const [fullscreenEverEntered, setFullscreenEverEntered] = useState(false);
+  const fullscreenEverEnteredRef = useRef(false);
+  /** Fullscreen'dan chiqilgan payt — uzoq turib qolsa rasmiy qoidabuzarlik. */
+  const fullscreenLeftAtRef = useRef<number | null>(null);
+  /** Qoplamada ko'rinadigan sanoq (soniya). */
+  const [fullscreenGraceLeft, setFullscreenGraceLeft] = useState(FULLSCREEN_GRACE_MS / 1000);
 
 
   // ── Tab/oyna almashtirish nazorati: "qurollangan" holat ──────────────────
@@ -828,6 +906,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
+        setNeedsFullscreen(false);
+        fullscreenLeftAtRef.current = null;
         // Kirdik — lekin nazorat darhol yoqilmaydi: barqarorlik hisoblagichi
         // (TAB_GUARD_ARM_MS) o'tgach o'zi yoqiladi.
         disarmTabGuard();
@@ -841,6 +921,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         // Sessiya boshlangan bo'lsa — tugma orqali qayta urinish uchun gate.
         if (sessionStartedRef.current) {
           needsFullscreenRef.current = true;
+          setNeedsFullscreen(true);
+          if (fullscreenLeftAtRef.current == null) fullscreenLeftAtRef.current = Date.now();
         }
       });
   }, [getFullscreenElement]);
@@ -860,6 +942,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         fullscreenRequestedRef.current = false;
         fullscreenSuppressRef.current = false;
         needsFullscreenRef.current = false;
+        setNeedsFullscreen(false);
+        fullscreenLeftAtRef.current = null;
+        fullscreenEverEnteredRef.current = true;
+        setFullscreenEverEntered(true);
         return;
       }
 
@@ -879,6 +965,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // yuqorida allaqachon o'chirilgan, shu sabab tartib ahamiyatsiz.
       blurIgnoreUntilRef.current = Date.now() + 8000;
       needsFullscreenRef.current = true;
+      setNeedsFullscreen(true);
+      if (fullscreenLeftAtRef.current == null) fullscreenLeftAtRef.current = Date.now();
     };
 
     onFullscreenChange();
@@ -900,6 +988,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (getFullscreenElement()) {
         if (needsFullscreenRef.current) {
           needsFullscreenRef.current = false;
+          setNeedsFullscreen(false);
+          fullscreenLeftAtRef.current = null;
         }
         return;
       }
@@ -907,6 +997,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         disarmTabGuard();
         blurIgnoreUntilRef.current = Date.now() + 8000;
         needsFullscreenRef.current = true;
+        setNeedsFullscreen(true);
+        if (fullscreenLeftAtRef.current == null) fullscreenLeftAtRef.current = Date.now();
       }
     };
     tick();
@@ -951,6 +1043,37 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       disarmTabGuard();
     };
   }, [sessionStarted, banned, getFullscreenElement, disarmTabGuard]);
+
+  // Fullscreen qoplamasi kuzatuvchisi.
+  //
+  // Qoplama ochiq turganda boshqa nazorat signallari muzlatiladi (talaba
+  // ekranni ko'rmaydi). Bu "bepul to'xtatish" bo'lib qolmasligi uchun:
+  // FULLSCREEN_GRACE_MS ichida qaytilmasa RASMIY qoidabuzarlik yoziladi va
+  // hisoblagich qayta boshlanadi — ya'ni qoplama ostida o'tirish jazolanadi.
+  // Birinchi kirishda (hali fullscreen'ga umuman kirilmagan) jazolanmaydi.
+  useEffect(() => {
+    if (!sessionStarted || banned) {
+      setFullscreenGraceLeft(FULLSCREEN_GRACE_MS / 1000);
+      return;
+    }
+    const tick = () => {
+      const leftAt = fullscreenLeftAtRef.current;
+      if (!needsFullscreenRef.current || leftAt == null) {
+        setFullscreenGraceLeft(FULLSCREEN_GRACE_MS / 1000);
+        return;
+      }
+      const elapsed = Date.now() - leftAt;
+      setFullscreenGraceLeft(Math.max(0, Math.ceil((FULLSCREEN_GRACE_MS - elapsed) / 1000)));
+      if (elapsed < FULLSCREEN_GRACE_MS) return;
+      // Hisoblagichni qayta boshlaymiz — uzoq turib qolsa takror yoziladi.
+      fullscreenLeftAtRef.current = Date.now();
+      if (!fullscreenEverEnteredRef.current) return; // imtihon boshi — jazo yo'q
+      void logViolationRef.current('FULLSCREEN_EXIT_HARD');
+    };
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => clearInterval(id);
+  }, [sessionStarted, banned]);
 
   useEffect(() => {
     const ua = navigator.userAgent || '';
@@ -1222,6 +1345,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     recoverCameraPreview();
     fullscreenSuppressRef.current = true;
     needsFullscreenRef.current = false;
+    setNeedsFullscreen(false);
     void requestExamFullscreen();
   }, [recoverCameraPreview]);
 
@@ -1374,21 +1498,43 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // DevTools o'lcham-evristikasi: ochiq panel — DAVOMIY holat. Tez (500ms) poll qilib
     // darvozaga belgilaymiz; panel ochiq turgan har lahzada marklanadi → 4s uzluksiz
     // bo'lsa qonun bo'yicha rasmiyga o'tadi (bir zumlik o'lcham o'zgarishi jazolanmaydi).
+    // --- DevTools aniqlash (endi STANDART HOLDA YOQILGAN) ---
+    // Ilgari faqat o'lcham evristikasi bor edi va u hech qayerda o'rnatilmagan
+    // `VITE_DEVTOOLS_SIZE_HEURISTIC` bayrog'i ortida turardi — ya'ni devtools
+    // AMALDA UMUMAN ANIQLANMASDI. Endi ikki signal: konsol getter-zondi
+    // (o'lchamga bog'liq emas, doklangan panelda ham ishlaydi) va bazaviy
+    // qiymatga nisbatan o'lcham o'sishi. Ikkalasi ham darvozaga belgilanadi —
+    // rasmiy ogohlantirish faqat 4s uzluksiz davom etsa chiqadi.
     let devtoolsTick: number | null = null;
-    if (enableSizeHeuristicDevtools) {
+    {
+      const probe = new ConsoleProbeDevtoolsDetector();
+      const sizeHeuristic = new WindowSizeDevtoolsHeuristic();
       let consecutiveHits = 0;
       devtoolsTick = window.setInterval(() => {
         if (bannedRef.current || !sessionStartedRef.current) return;
-        if (!getFullscreenElement() || !document.hasFocus()) {
+        // Fokus yo'q / fullscreen yo'q — o'lcham o'lchovi ishonchsiz, baza
+        // qaytadan olinadi. Zond esa fokusdan qat'i nazar ishlaydi.
+        const measurable = Boolean(getFullscreenElement()) && document.hasFocus();
+        if (!measurable) sizeHeuristic.reset();
+
+        const probeHit = probe.check();
+        const sizeHit = measurable
+          ? sizeHeuristic.push(
+              Math.abs((window.outerWidth || 0) - (window.innerWidth || 0)),
+              Math.abs((window.outerHeight || 0) - (window.innerHeight || 0)),
+            )
+          : false;
+
+        // O'lcham evristikasi soxta signalga moyilroq — u uchun ketma-ket
+        // ikkita o'lchov talab qilinadi; zond esa darhol ishonchli.
+        if (probeHit) {
+          markGateEvent('DEVTOOLS_OPEN');
           consecutiveHits = 0;
           return;
         }
-        const dw = Math.abs((window.outerWidth || 0) - (window.innerWidth || 0));
-        const dh = Math.abs((window.outerHeight || 0) - (window.innerHeight || 0));
-        const suspicious = dw > 320 && dh > 180;
-        consecutiveHits = suspicious ? consecutiveHits + 1 : 0;
+        consecutiveHits = sizeHit ? consecutiveHits + 1 : 0;
         if (consecutiveHits >= 2) markGateEvent('DEVTOOLS_OPEN');
-      }, 500);
+      }, 1000);
     }
 
     // Har bir foydalanuvchi harakati — fullscreen'ni AVTOMATIK tiklaydi.
@@ -1830,13 +1976,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     // bu jiddiy xavfsizlik hodisasi, muzlatib bo'lmaydi.
     if (smallWarnOpenRef.current && !INSTANT_BAN_TYPES.has(type)) return;
 
-    // DIQQAT: bu yerda fullscreen holatiga qarab filtr QO'YMAYMIZ.
-    // Ilgari "gate modali ekranni qoplab turibdi" degan sabab bilan
-    // `needsFullscreenRef` bo'yicha hamma narsa muzlatilardi. Bloklovchi modal
-    // olib tashlangach bu filtr butun nazoratni o'chirib qo'yardi: talaba
-    // fullscreen'ga kirmasa yuz/nigoh/ovoz/telefon signallari jimgina
-    // tashlanardi. Fullscreen o'tishidagi soxta TAB signallari esa allaqachon
-    // TabSwitchGuard darajasida to'g'ri ushlanadi — bu yerda takrorlash shart emas.
+    // Fullscreen qoplamasi ekranni to'sib turibdi: talaba savollarni ko'rmaydi
+    // va faqat bitta tugmani bosa oladi — shu holat uchun yuz/nigoh/ovoz
+    // signallari bo'yicha jazolash adolatsiz. Shuning uchun ular muzlatiladi.
+    //
+    // MUHIM (ilgari shu yerda jiddiy xato bo'lgan): bu muzlatish CHEKSIZ EMAS.
+    // Fullscreen'dan chiqib qoplama ostida o'tirib nazoratni to'xtatib turish
+    // mumkin bo'lmasligi uchun FULLSCREEN_GRACE_MS dan keyin rasmiy
+    // FULLSCREEN_EXIT_HARD yoziladi (pastdagi kuzatuvchi effekt), va u shu
+    // filtrdan o'tkaziladi.
+    if (
+      needsFullscreenRef.current &&
+      type !== 'FULLSCREEN_EXIT_HARD' &&
+      !INSTANT_BAN_TYPES.has(type)
+    ) {
+      return;
+    }
 
     // Modal ochiqligida yangi violationlar (IDENTITY_SUBSTITUTION dan tashqari) bloklansn —
     // talaba ogohlantirishni o'qib javob bergandan keyin davom etsin.
@@ -2381,6 +2536,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       // Fullscreen ochilmagan / rad etilgan — darhol gate (imtihon blok).
       if (fullscreenSupportedRef.current && !getFullscreenElement()) {
         needsFullscreenRef.current = true;
+        setNeedsFullscreen(true);
+        if (fullscreenLeftAtRef.current == null) fullscreenLeftAtRef.current = Date.now();
       }
     } catch {
       setStartError(t.preExamNetworkError);
@@ -2862,11 +3019,52 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   return (
     <div className="h-[100dvh] flex flex-col bg-gray-50 overflow-hidden select-none">
-      {/* Fullscreen uchun UI YO'Q — na modal, na chiziq. Talabaning birinchi
-          klik/tugma bosishida `ensureFullscreenOnGesture` uni o'zi yoqadi
-          (brauzer fullscreen'ni faqat foydalanuvchi harakati ichida beradi).
-          Fullscreen yo'q paytda tab-nazorati o'chirilgan turadi — bu holat
-          uchun talabaga hech qanday qoidabuzarlik yozilmaydi. */}
+      {/* ── Majburiy fullscreen qoplamasi ──
+          Savollarni to'sib turadi: fullscreen'siz imtihon davom etmaydi.
+          Matn ikki xil: birinchi kirishda neytral ("boshlash"), keyin esa
+          "qayting" + sanoq. Bu qoplama chiqishining O'ZI qoidabuzarlik
+          EMAS — jazо faqat FULLSCREEN_GRACE_MS ichida qaytilmasa yoziladi. */}
+      <AnimatePresence>
+        {needsFullscreen && !banned && sessionStarted && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[10060] flex items-center justify-center bg-slate-900/95 backdrop-blur-sm px-5"
+            role="dialog"
+            aria-modal="true"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 14 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              transition={{ type: 'spring', stiffness: 320, damping: 26 }}
+              className="w-full max-w-md text-center rounded-2xl bg-white p-7 sm:p-9 shadow-2xl"
+            >
+              <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-100 text-indigo-600">
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" /></svg>
+              </div>
+              <h2 className="text-xl font-bold text-slate-900">
+                {fullscreenEverEntered ? t.examFullscreenBackTitle : t.examFullscreenStartTitle}
+              </h2>
+              <p className="mt-2 text-sm text-slate-500 leading-relaxed">
+                {fullscreenEverEntered ? t.examFullscreenBackBody : t.examFullscreenStartBody}
+              </p>
+              {fullscreenEverEntered && (
+                <p className="mt-3 text-xs font-semibold text-amber-600 tabular-nums">
+                  {t.examFullscreenCountdown.replace('{n}', String(fullscreenGraceLeft))}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={requestExamFullscreen}
+                className="mt-6 w-full rounded-xl bg-indigo-600 py-3.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-700 active:scale-[0.98]"
+              >
+                {fullscreenEverEntered ? t.examFullscreenBackBtn : t.examFullscreenStartBtn}
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Yuqori panel: sarlavha + progress + taymer + topshirish ── */}
       <header className="shrink-0 bg-white border-b border-gray-200 shadow-sm">

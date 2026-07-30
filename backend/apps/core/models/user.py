@@ -70,7 +70,11 @@ class AuditLog(models.Model):
         app_label = "core"
         db_table = "audit_logs"
         ordering = ["-created_at"]
+        # Indeks nomlari ATAYLAB aniq yozilgan: 0018 migratsiyasi ularni shu
+        # nomlar bilan yaratgan. `name=` ko'rsatilmasa Django xesh asosidagi
+        # boshqa nom kutadi va har `makemigrations --check` da ortiqcha
+        # RenameIndex chiqib, CI yiqilardi.
         indexes = [
-            models.Index(fields=["-created_at"]),
-            models.Index(fields=["actor_id"]),
+            models.Index(fields=["-created_at"], name="audit_logs_created_idx"),
+            models.Index(fields=["actor_id"], name="audit_logs_actor_idx"),
         ]

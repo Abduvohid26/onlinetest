@@ -5,7 +5,8 @@ import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
-import { FacePositionChecker, SmileChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
+import { FacePositionChecker, LivenessChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
+import { type LivenessAction } from '../lib/livenessChallenge';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
@@ -30,8 +31,14 @@ const LIVENESS_W = 80;
 const LIVENESS_H = 60;
 
 // Active liveness challenge (tabassum) — passiv piksel-farq tekshiruvidan keyin.
-const SMILE_STREAK_NEEDED = 4; // tabassum barqaror bo'lishi kerak bo'lgan freym soni
-const CHALLENGE_TIMEOUT_MS = 12000;
+/** Harakat → talabaga ko'rsatiladigan ko'rsatma (i18n kaliti). */
+const LIVENESS_PROMPT_KEY = {
+  BLINK: 'preExamChallengeBlink',
+  SMILE: 'preExamChallengeSmile',
+  MOUTH_OPEN: 'preExamChallengeMouth',
+  TURN_LEFT: 'preExamChallengeTurnLeft',
+  TURN_RIGHT: 'preExamChallengeTurnRight',
+} as const satisfies Record<LivenessAction, string>;
 
 /** Kadr yoritilishi/piksel yig'indisi o'zgarishi — foydalanuvchi harakat yoki tabiiy harakat */
 async function samplePassiveFrameMotion(captureFrame: () => number): Promise<boolean> {
@@ -100,11 +107,15 @@ export function PreExamCheck({
   const [livenessFailed, setLivenessFailed] = useState(false);
   /** Passiv piksel-farq tekshiruvi o'tdi — active challenge (tabassum) boshlanadi. */
   const [passiveMotionOk, setPassiveMotionOk] = useState(false);
+  const [challengeStep, setChallengeStep] = useState<{
+    action: LivenessAction;
+    step: number;
+    total: number;
+  } | null>(null);
   const [challengeStatus, setChallengeStatus] = useState<
-    'idle' | 'waiting_smile' | 'passed' | 'failed'
+    'idle' | 'running' | 'passed' | 'failed'
   >('idle');
   const [challengeRetryKey, setChallengeRetryKey] = useState(0);
-  const smileStreakRef = useRef(0);
   /** Pre-exam yuz pozitsiyasi gate (kameraga yaqin + markaz + to'g'ri qaragan). */
   const [positionStatus, setPositionStatus] = useState<FacePositionStatus>('WAITING');
   const [positionOk, setPositionOk] = useState(false);
@@ -440,27 +451,39 @@ export function PreExamCheck({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verified, cameraReady, passiveMotionOk, livenessRetryKey]);
 
-  /** Passiv tekshiruv o'tgandan keyin — active challenge: kameraga qarab tabassum. */
+  /**
+   * Passiv tekshiruvdan keyin — FAOL chaqiriq: TASODIFIY harakatlar ketma-ketligi.
+   *
+   * Ilgari har doim bitta xil harakat ("tabassum qiling") so'ralardi, shu sabab
+   * bir marta yozib olingan video uni cheksiz o'tardi. Endi har urinishda
+   * harakatlar tasodifiy tanlanadi va har biri SO'RALGANDAN KEYIN boshlanishi
+   * shart (mantiq `lib/livenessChallenge.ts` da, testlar bilan qoplangan).
+   */
   useEffect(() => {
     if (!verified || !passiveMotionOk || livenessPassed || !cameraReady) return;
     const video = videoRef.current;
     if (!video) return;
 
     let cancelled = false;
-    let timeoutId: number | null = null;
-    setChallengeStatus('waiting_smile');
-    smileStreakRef.current = 0;
+    // Faqat TABASSUM so'raladi — talaba uchun eng sodda va tushunarli harakat.
+    // (Modul ko'z qisish / og'iz ochish / bosh burishni ham qo'llab-quvvatlaydi
+    //  — kerak bo'lsa shu ro'yxatga qo'shish yoki `pickLivenessActions()` ga
+    //  qaytarish kifoya.)
+    const actions: LivenessAction[] = ['SMILE'];
+    setChallengeStep({ action: actions[0], step: 1, total: actions.length });
+    setChallengeStatus('running');
 
-    const tracker = new SmileChallengeTracker(video, (smiling) => {
-      if (cancelled) return;
-      if (smiling) {
-        smileStreakRef.current += 1;
-        if (smileStreakRef.current >= SMILE_STREAK_NEEDED) {
-          setChallengeStatus('passed');
-        }
-      } else {
-        smileStreakRef.current = 0;
-      }
+    const tracker = new LivenessChallengeTracker(video, actions, {
+      onProgress: (info) => {
+        if (cancelled) return;
+        setChallengeStep({ action: info.action, step: info.step, total: info.total });
+      },
+      onPassed: () => {
+        if (!cancelled) setChallengeStatus('passed');
+      },
+      onFailed: () => {
+        if (!cancelled) setChallengeStatus('failed');
+      },
     });
 
     void tracker.init().then((ok) => {
@@ -470,18 +493,15 @@ export function PreExamCheck({
       }
       if (ok) {
         tracker.start();
-        timeoutId = window.setTimeout(() => {
-          setChallengeStatus((s) => (s === 'passed' ? s : 'failed'));
-        }, CHALLENGE_TIMEOUT_MS);
       } else {
-        // Model yuklanmadi — challenge skip, passiv tekshiruv allaqachon o'tgan.
+        // Model yuklanmadi — chaqiriq o'tkazib yuboriladi (imtihon bloklanmasin);
+        // passiv tekshiruv va serverdagi shaxs tasdiqlash allaqachon o'tgan.
         setChallengeStatus('passed');
       }
     });
 
     return () => {
       cancelled = true;
-      if (timeoutId !== null) window.clearTimeout(timeoutId);
       tracker.dispose();
     };
   }, [verified, passiveMotionOk, livenessPassed, cameraReady, challengeRetryKey]);
@@ -935,11 +955,22 @@ export function PreExamCheck({
                         {t.preExamLivenessRetryBtn}
                       </AdminBtn>
                     )}
-                    {challengeStatus === 'waiting_smile' && (
-                      <p className="font-semibold text-indigo-700 flex items-center gap-1.5">
-                        <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
-                        {t.preExamChallengeSmile}
-                      </p>
+                    {challengeStatus === 'running' && challengeStep && (
+                      <div className="space-y-1">
+                        <p className="font-semibold text-indigo-700 flex items-center gap-1.5">
+                          <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-500 animate-pulse" />
+                          {LIVENESS_PROMPT_KEY[challengeStep.action]
+                            ? t[LIVENESS_PROMPT_KEY[challengeStep.action]]
+                            : ''}
+                        </p>
+                        {challengeStep.total > 1 && (
+                          <p className="text-[11px] text-slate-400 tabular-nums">
+                            {t.preExamChallengeProgress
+                              .replace('{cur}', String(challengeStep.step))
+                              .replace('{total}', String(challengeStep.total))}
+                          </p>
+                        )}
+                      </div>
                     )}
                     {challengeStatus === 'failed' && (
                       <AdminBtn

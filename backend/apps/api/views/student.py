@@ -756,6 +756,30 @@ def student_exams_start(request, pk: int):
                 full_questions = fill_missing_exam_translations(full_questions)
             se.session_questions_json = json.dumps(full_questions)
             se.save(update_fields=["session_questions_json"])
+            # BIR MARTALIK MIGRATSIYA: eski imtihonni "oldindan yuklangan"
+            # holatga o'tkazamiz. Aks holda HAR talaba iMentor'ga jonli so'rov
+            # + AI paraphrase qilardi — imtihon starti 10-30s cho'zilardi va,
+            # eng yomoni, har talabaga BOSHQA savollar tushib, bitta imtihon
+            # ichida tenglik buzilardi. Endi birinchi talaba yuklaydi,
+            # qolganlari o'sha to'plamni oladi.
+            #
+            # Poyga xavfsizligi: imtihon qatori qulflanadi va faqat hali ham
+            # bo'sh bo'lsa yoziladi (ikki talaba bir vaqtda boshlasa —
+            # birinchisining to'plami qoladi).
+            try:
+                with transaction.atomic():
+                    exam_row = (
+                        Exam.objects.select_for_update().filter(pk=exam.id).first()
+                    )
+                    if exam_row and not safe_json_loads(exam_row.questions_json, []):
+                        exam_row.questions_json = json.dumps(full_questions)
+                        exam_row.save(update_fields=["questions_json"])
+            except Exception:
+                logger.warning(
+                    "imentor savollarini imtihonga saqlab bo'lmadi exam_id=%s",
+                    exam.id,
+                    exc_info=True,
+                )
     else:
         full_questions = safe_json_loads(exam.questions_json, [])
         if is_auto_exam:
