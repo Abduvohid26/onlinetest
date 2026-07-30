@@ -500,7 +500,10 @@ def normalize_question_references(raw: Any) -> list[dict]:
         ref = {"title": title}
         if url:
             ref["url"] = url
-        for field in ("authors", "publisher", "year"):
+        # `pages` — darslik betlari ("643" yoki "114-118, 220"). iMentor RAG
+        # manbalarida eng qimmatli maydon: talaba aynan qaysi betga qarashini
+        # biladi. Ilgari bu ro'yxatda yo'q edi va indamay tushib qolardi.
+        for field in ("pages", "authors", "publisher", "year"):
             val = str(item.get(field) or "").strip()[:200]
             if val:
                 ref[field] = val

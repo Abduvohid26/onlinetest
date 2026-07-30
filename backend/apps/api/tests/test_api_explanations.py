@@ -229,6 +229,19 @@ class QuestionReferencesTests(TestCase):
         self.assertEqual(refs[0]["title"], "Nausea and Vomiting of Pregnancy")
         self.assertEqual(refs[0]["year"], "2018")
 
+    def test_keeps_book_pages(self):
+        """`pages` — talaba uchun eng qimmatli maydon (qaysi betga qarash)."""
+        refs = normalize_question_references(
+            [{"title": "Williams obstetrics", "pages": "643"}]
+        )
+        self.assertEqual(refs, [{"title": "Williams obstetrics", "pages": "643"}])
+
+        refs = normalize_question_references(
+            [{"title": "Guyton", "pages": "114-118, 220", "year": "2020"}]
+        )
+        self.assertEqual(refs[0]["pages"], "114-118, 220")
+        self.assertEqual(refs[0]["year"], "2020")
+
     def test_normalize_drops_unsafe_url_but_keeps_title(self):
         refs = normalize_question_references(
             [{"title": "Kitob", "url": "javascript:alert(1)"}]
