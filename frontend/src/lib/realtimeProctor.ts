@@ -76,9 +76,15 @@ export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 export const TALK_SIGNAL_CONFIRM_MS = 800;
 export const TALK_SIGNAL_ESCALATE_MS = 2500;
 
-/** Shu signal turi uchun "kichik ogohlantirish" chegarasi (gapirish tezroq). */
+/** QONUN ISTISNOSI — darhol yorliq beriladigan turlar (0.4s).
+ *  Sabab: gapirish va nigohni chetga olish bir zumda bo'ladi. 1.5s kutish
+ *  talabaga javobni ko'rib olishga yetarli vaqt berardi. */
+export const INSTANT_SIGNAL_CONFIRM_MS = 400;
+
+/** Shu signal turi uchun "kichik ogohlantirish" chegarasi. */
 export function confirmMsFor(type: LiveSignalType): number {
-  return type === 'TALKING' ? TALK_SIGNAL_CONFIRM_MS : LIVE_SIGNAL_CONFIRM_MS;
+  if (type === 'TALKING' || type === 'HEAD_AWAY') return INSTANT_SIGNAL_CONFIRM_MS;
+  return LIVE_SIGNAL_CONFIRM_MS;
 }
 
 /**
@@ -212,6 +218,34 @@ export function computeIrisGaze(lm: Pt[]): { dx: number; dy: number } | null {
   const r = eyeOffset(lm[IRIS_R], lm[EYE_R.out], lm[EYE_R.in], lm[EYE_R.top], lm[EYE_R.bot]);
   if (l && r) return { dx: (l.dx + r.dx) / 2, dy: (l.dy + r.dy) / 2 };
   return l ?? r;
+}
+
+/**
+ * Ko'z shunchalik toraymi/yumuqmi ki, qorachiq o'qib bo'lmaydi.
+ *
+ * MUHIM: aynan shu holat nazoratdagi eng katta teshik edi. Talaba PASTGA
+ * (tizzadagi telefonga) qaraganda qovoq tushadi, ko'z torayadi va
+ * `computeIrisGaze` `null` qaytaradi — natijada nigoh nazorati JIM bo'lib
+ * qolardi. Ya'ni telefonga qarash aniqlanmasdi.
+ *
+ * Endi bu holat o'zi "nigoh chetda" signali sifatida hisoblanadi. Ko'z
+ * pirillashi (~200ms) uzluksiz vaqt talabidan (0.4s) qisqa, shuning uchun
+ * jazolanmaydi.
+ */
+export function eyesTooNarrowForGaze(lm: Pt[]): boolean {
+  if (!lm || lm.length <= IRIS_R) return false;
+  const ratio = (c1?: Pt, c2?: Pt, top?: Pt, bot?: Pt): number | null => {
+    if (!c1 || !c2 || !top || !bot) return null;
+    const w = Math.abs(c2.x - c1.x);
+    if (w < 1e-4) return null;
+    return Math.abs(bot.y - top.y) / w;
+  };
+  const l = ratio(lm[EYE_L.out], lm[EYE_L.in], lm[EYE_L.top], lm[EYE_L.bot]);
+  const r = ratio(lm[EYE_R.out], lm[EYE_R.in], lm[EYE_R.top], lm[EYE_R.bot]);
+  const vals = [l, r].filter((v): v is number => v != null);
+  if (vals.length === 0) return false;   // landmark yo'q — jim o'tamiz
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  return avg < EYE_OPEN_MIN_RATIO;
 }
 
 /** Ko'z chetga/pastga qaraganmi (chegaralar bilan). */
@@ -603,7 +637,11 @@ export class RealtimeProctor {
     // Ko'z yumuq / iris yo'q bo'lsa `iris` = null → faqat bosh-poza ishlaydi.
     const irisLeft = iris != null && iris.dx >= IRIS_GAZE_X;
     const irisRight = iris != null && iris.dx <= -IRIS_GAZE_X;
-    const irisDown = iris != null && iris.dy >= IRIS_GAZE_DOWN;
+    // Ko'z torayib qorachiq o'qilmasa ham "pastga qaragan" deb hisoblanadi —
+    // aks holda pastdagi telefonga qarash umuman aniqlanmasdi (qovoq tushadi,
+    // iris `null` bo'ladi va nazorat jim qolardi).
+    const eyesNarrow = eyesTooNarrowForGaze(lm);
+    const irisDown = (iris != null && iris.dy >= IRIS_GAZE_DOWN) || eyesNarrow;
 
     const headGazeL = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;
     const headGazeR = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX < 0;

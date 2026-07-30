@@ -59,8 +59,9 @@ export const DETECT_INTERVAL_MS = 300;
  */
 export const OBJECT_GRACE_MS = DETECT_INTERVAL_MS * 3 + 100;
 
-/** Kichik ogohlantirish */
-export const OBJECT_CONFIRM_MS = 600;
+/** Kichik ogohlantirish — QONUN ISTISNOSI: darhol (0.4s).
+ *  Telefonni bir zumga ko'tarib javobni ko'rish uchun 1.5s yetarli edi. */
+export const OBJECT_CONFIRM_MS = 400;
 /** Rasmiy */
 export const OBJECT_ESCALATE_MS = 1800;
 

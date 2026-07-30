@@ -14,6 +14,7 @@
 
 import {
   LivenessSequence,
+  averageEar,
   eyesClosed,
   isMouthOpen,
   type LivenessAction,
@@ -150,9 +151,19 @@ export class FacePositionChecker {
   private disposed = false;
   private okStreak = 0;
 
-  constructor(video: HTMLVideoElement, onUpdate: FacePositionUpdate) {
+  /** Ko'z ochiqligi (balandlik/kenglik) — nigoh nazorati shunga bog'liq.
+   *  `null` = landmark o'qilmadi. Qo'shimcha detektor ishga tushirmaslik uchun
+   *  shu bitta o'tishda hisoblanadi. */
+  private onEyeRatio?: (ratio: number | null) => void;
+
+  constructor(
+    video: HTMLVideoElement,
+    onUpdate: FacePositionUpdate,
+    onEyeRatio?: (ratio: number | null) => void,
+  ) {
     this.video = video;
     this.onUpdate = onUpdate;
+    this.onEyeRatio = onEyeRatio;
   }
 
   async init(): Promise<boolean> {
@@ -222,10 +233,17 @@ export class FacePositionChecker {
       return 'WAITING';
     }
 
-    if (faces.length === 0) return 'NO_FACE';
-    if (faces.length >= 2) return 'MULTIPLE_FACES';
+    if (faces.length === 0) {
+      this.onEyeRatio?.(null);
+      return 'NO_FACE';
+    }
+    if (faces.length >= 2) {
+      this.onEyeRatio?.(null);
+      return 'MULTIPLE_FACES';
+    }
 
     const lm = faces[0];
+    this.onEyeRatio?.(averageEar(lm));
     const nose = lm[1];
     const left = lm[234];
     const right = lm[454];

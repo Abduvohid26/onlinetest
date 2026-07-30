@@ -7,6 +7,16 @@ import { examAuthHeaders, setDeviceSessionToken } from '../lib/deviceFingerprint
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { FacePositionChecker, LivenessChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { type LivenessAction } from '../lib/livenessChallenge';
+import {
+  classifyEyeReadability,
+  classifyImageQuality,
+  classifyNetwork,
+  computeImageStats,
+  grayscaleFromCanvas,
+  type EyeStatus,
+  type NetworkStatus,
+  type QualityStatus,
+} from '../lib/mediaQualityCheck';
 import { IdentityVerifiedSuccess } from '../components/IdentityVerifiedSuccess';
 import { AdminBtn, AdminAlert, AdminInput } from './admin/ui';
 import { Check } from 'lucide-react';
@@ -118,6 +128,14 @@ export function PreExamCheck({
   const [challengeRetryKey, setChallengeRetryKey] = useState(0);
   /** Pre-exam yuz pozitsiyasi gate (kameraga yaqin + markaz + to'g'ri qaragan). */
   const [positionStatus, setPositionStatus] = useState<FacePositionStatus>('WAITING');
+  /** Nigoh nazorati ishlashi uchun ko'z qorachig'i o'qilishi shart. */
+  const [eyeStatus, setEyeStatus] = useState<EyeStatus>('NO_LANDMARKS');
+  /** Tasvir tiniqligi va yorug'ligi. */
+  const [imageQuality, setImageQuality] = useState<QualityStatus>('OK');
+  /** Internet barqarorligi (imtihon davomida har 15s rasm yuboriladi). */
+  const [netStatus, setNetStatus] = useState<NetworkStatus | 'CHECKING'>('CHECKING');
+  const [netDetail, setNetDetail] = useState('');
+  const [netRetryKey, setNetRetryKey] = useState(0);
   const [positionOk, setPositionOk] = useState(false);
   /** Boshlash bosilganda ochiladigan qoidalar modali. */
   const [showRulesModal, setShowRulesModal] = useState(false);
@@ -388,11 +406,18 @@ export function PreExamCheck({
     const video = videoRef.current;
     if (!video) return;
     let cancelled = false;
-    const checker = new FacePositionChecker(video, (status, okSustained) => {
-      if (cancelled) return;
-      setPositionStatus(status);
-      setPositionOk(okSustained);
-    });
+    const checker = new FacePositionChecker(
+      video,
+      (status, okSustained) => {
+        if (cancelled) return;
+        setPositionStatus(status);
+        setPositionOk(okSustained);
+      },
+      (ratio) => {
+        if (cancelled) return;
+        setEyeStatus(classifyEyeReadability([ratio]));
+      },
+    );
     void checker.init().then((ok) => {
       if (cancelled) {
         checker.dispose();
@@ -450,6 +475,66 @@ export function PreExamCheck({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verified, cameraReady, passiveMotionOk, livenessRetryKey]);
+
+  /**
+   * Tasvir sifati — tiniqlik va yorug'lik. Nigoh nazorati qorachiqni o'qishga
+   * tayanadi: xira yoki qorong'i kadrda u ishlamaydi va talaba pastga qarab
+   * telefondan javob ko'rishi mumkin. Shu sabab imtihon oldidan tekshiriladi.
+   */
+  useEffect(() => {
+    if (!cameraReady) return;
+    const id = window.setInterval(() => {
+      const video = videoRef.current;
+      const canvas = livenessCanvasRef.current;
+      if (!video || !canvas || !video.videoWidth) return;
+      if (canvas.width !== LIVENESS_W) canvas.width = LIVENESS_W;
+      if (canvas.height !== LIVENESS_H) canvas.height = LIVENESS_H;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, LIVENESS_W, LIVENESS_H);
+      const gray = grayscaleFromCanvas(ctx, LIVENESS_W, LIVENESS_H);
+      if (!gray) return;
+      setImageQuality(classifyImageQuality(computeImageStats(gray, LIVENESS_W, LIVENESS_H)));
+    }, 1200);
+    return () => clearInterval(id);
+  }, [cameraReady]);
+
+  /**
+   * Internet barqarorligi. Imtihon davomida har 15s shaxs tekshiruvi va har 15s
+   * kadr tahlili rasm yuboradi — beqaror ulanishda nazorat uzilib qoladi.
+   * Shuning uchun boshlashdan oldin bir necha o'lchov olinadi.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    setNetStatus('CHECKING');
+    setNetDetail('');
+    (async () => {
+      const samples: { ms: number | null }[] = [];
+      for (let i = 0; i < 6 && !cancelled; i += 1) {
+        const t0 = performance.now();
+        try {
+          const res = await fetch(apiUrl(`/api/health?probe=${Date.now()}-${i}`), {
+            cache: 'no-store',
+          });
+          samples.push({ ms: res.ok ? Math.round(performance.now() - t0) : null });
+        } catch {
+          samples.push({ ms: null });
+        }
+        if (!cancelled && i < 5) await new Promise((r) => setTimeout(r, 250));
+      }
+      if (cancelled) return;
+      const stats = classifyNetwork(samples);
+      setNetStatus(stats.status);
+      setNetDetail(
+        stats.status === 'OK'
+          ? `${stats.medianMs} ms`
+          : `${stats.medianMs} ms · ±${stats.jitterMs} ms · ${stats.failures}/${stats.samples}`,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [netRetryKey]);
 
   /**
    * Passiv tekshiruvdan keyin — FAOL chaqiriq: TASODIFIY harakatlar ketma-ketligi.
@@ -748,6 +833,9 @@ export function PreExamCheck({
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
+  if (eyeStatus !== 'OK') blocked.push(t.preExamBlockedEyes);
+  if (imageQuality !== 'OK') blocked.push(t.preExamBlockedQuality);
+  if (netStatus !== 'OK') blocked.push(t.preExamBlockedNetwork);
   const canStart = blocked.length === 0;
 
   const studentDisplayName = (user.name || user.id || '').toString().trim();
@@ -993,6 +1081,74 @@ export function PreExamCheck({
                     )}
                   </div>
                 )}
+
+                {/* ── Nazorat sifati: ko'z / tasvir / internet ──
+                    Nigoh nazorati qorachiqni o'qishga tayanadi, shaxs tekshiruvi
+                    va kadr tahlili esa har 15s rasm yuboradi. Ikkisi ham imtihon
+                    boshlangandan keyin tuzatilmaydi — shu sabab shart. */}
+                <div className="mt-3 pt-3 border-t border-gray-100 space-y-2 text-[12.5px]">
+                  {[
+                    {
+                      title: t.preExamEyesTitle,
+                      ok: eyeStatus === 'OK',
+                      msg: {
+                        OK: t.preExamEyesOk,
+                        EYES_NARROW: t.preExamEyesNarrow,
+                        NO_LANDMARKS: t.preExamEyesNoLandmarks,
+                      }[eyeStatus],
+                      extra: '',
+                    },
+                    {
+                      title: t.preExamQualityTitle,
+                      ok: imageQuality === 'OK',
+                      msg: {
+                        OK: t.preExamQualityOk,
+                        BLURRY: t.preExamQualityBlurry,
+                        TOO_DARK: t.preExamQualityDark,
+                        TOO_BRIGHT: t.preExamQualityBright,
+                        LOW_CONTRAST: t.preExamQualityLowContrast,
+                      }[imageQuality],
+                      extra: '',
+                    },
+                    {
+                      title: t.preExamNetworkTitle,
+                      ok: netStatus === 'OK',
+                      msg: {
+                        CHECKING: t.preExamNetworkChecking,
+                        OK: t.preExamNetworkOk,
+                        SLOW: t.preExamNetworkSlow,
+                        UNSTABLE: t.preExamNetworkUnstable,
+                        OFFLINE: t.preExamNetworkOffline,
+                      }[netStatus],
+                      extra: netDetail,
+                    },
+                  ].map((row) => (
+                    <div key={row.title} className="flex items-start gap-2">
+                      <span
+                        className={`mt-[3px] h-2 w-2 shrink-0 rounded-full ${
+                          row.ok ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'
+                        }`}
+                      />
+                      <span className="min-w-0">
+                        <span className="text-gray-400">{row.title}: </span>
+                        <span className={row.ok ? 'text-emerald-700 font-medium' : 'text-amber-800'}>
+                          {row.msg}
+                        </span>
+                        {row.extra ? <span className="text-gray-400"> · {row.extra}</span> : null}
+                      </span>
+                    </div>
+                  ))}
+                  {netStatus !== 'OK' && netStatus !== 'CHECKING' && (
+                    <AdminBtn
+                      variant="ghost"
+                      size="sm"
+                      className="w-full mt-1"
+                      onClick={() => setNetRetryKey((k) => k + 1)}
+                    >
+                      {t.preExamNetworkRetryBtn}
+                    </AdminBtn>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="p-3 border border-red-200 bg-red-50 rounded-lg text-red-700 text-[12.5px] font-medium">

@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeIrisGaze, isIrisGazeAway } from '../src/lib/realtimeProctor.ts';
+import { computeIrisGaze, eyesTooNarrowForGaze, isIrisGazeAway } from '../src/lib/realtimeProctor.ts';
 
 const IRIS_L = 468;
 const IRIS_R = 473;
@@ -78,5 +78,25 @@ describe('computeIrisGaze — qorachiq yo\'nalishi', () => {
     const short = Array.from({ length: 468 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
     assert.equal(computeIrisGaze(short), null);
     assert.equal(isIrisGazeAway(null), false);
+  });
+});
+
+
+describe('eyesTooNarrowForGaze — pastga qarash teshigi', () => {
+  it('ochiq ko\'z — signal bermaydi', () => {
+    assert.equal(eyesTooNarrowForGaze(makeLandmarks(0, 0)), false);
+  });
+
+  it('qovoq tushgan (pastga qaragan) — signal beradi', () => {
+    // MUAMMO: pastga qaraganda qovoq tushadi, computeIrisGaze null qaytaradi
+    // va nigoh nazorati JIM qolardi. Endi bu holat o'zi signal.
+    const narrow = makeLandmarks(0, 0, H * 0.3); // h/w ≈ 0.11 < 0.15
+    assert.equal(computeIrisGaze(narrow), null, 'iris o\'qilmasligi kutilgan');
+    assert.equal(eyesTooNarrowForGaze(narrow), true, 'lekin signal berilishi SHART');
+  });
+
+  it('landmark yetishmasa jim o\'tadi (soxta signal yo\'q)', () => {
+    assert.equal(eyesTooNarrowForGaze([]), false);
+    assert.equal(eyesTooNarrowForGaze(Array.from({ length: 10 }, () => ({ x: 0, y: 0 }))), false);
   });
 });

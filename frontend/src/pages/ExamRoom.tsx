@@ -125,7 +125,9 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
 };
 
 // Identity check: har 3 soniyada (OpenCV SFace lokal, tez ~100ms; throttle 60/min)
-const IDENTITY_CHECK_MS = 90_000;
+// 90s -> 15s: yuz almashtirish oynasi qisqartirildi (server throttle 25/min,
+// 15s = 4/min — chegaraga yetmaydi).
+const IDENTITY_CHECK_MS = 15_000;
 
 /** Tab/oynadan shuncha vaqtdan ko'p ketilsa — RASMIY qoidabuzarlik (TAB_SWITCH_HARD).
  *  Qisqa tasodifiy fokus yo'qolishi (brauzer UI, OS bildirishnomasi) hisoblanmaydi.

@@ -173,6 +173,30 @@ Bu tezlashtirish **faqat shu ikkalasiga** tegishli. Tashqi shovqin (`SUSPICIOUS_
 
 Kod: `TALK_SIGNAL_CONFIRM_MS` / `TALK_SIGNAL_ESCALATE_MS` va `confirmMsFor(type)` — `frontend/src/lib/realtimeProctor.ts`; audio tomoni `frontend/src/pages/ExamRoom.tsx` audio loop’ida. Chip navbatida gapirish shovqindan **ustun** ko‘rsatiladi.
 
+#### Kichik ogohlantirish uchun ISTISNO turlar (0.4s)
+
+Umumiy qonundagi 1.5s **kichik** ogohlantirish uchun uch turda juda sekin ekani amalda aniqlandi: talaba telefonni bir zumga ko‘tarib javobni ko‘rib olardi va ekranda hech narsa chiqmasdi. Shu sabab quyidagilarga **0.4s** qo‘yildi:
+
+| Signal | Kichik ogohlantirish | Rasmiy (o‘zgarmadi) |
+|---|---|---|
+| Telefon / kitob / noutbuk (`FORBIDDEN_OBJECT_*`) | **0.4s** (`OBJECT_CONFIRM_MS`) | 1.8s (`OBJECT_ESCALATE_MS`) |
+| Gapirish (`TALKING`) | **0.4s** (`INSTANT_SIGNAL_CONFIRM_MS`) | 2.5s |
+| Nigoh/bosh chetga (`HEAD_AWAY` — gaze chap/o‘ng/tepa/past) | **0.4s** (`INSTANT_SIGNAL_CONFIRM_MS`) | 4s |
+
+Nega xavfsiz: kichik ogohlantirish — **faqat vizual chip**, backendga yuborilmaydi va strike hisoblanmaydi. Rasmiy ogohlantirish vaqtlari tegilmagan, ya‘ni tasodifiy harakat jazolanmaydi.
+
+Qolgan barcha turlar (pozitsiya, qimirlash, qo‘l, tashqi shovqin, print-screen, clipboard, devtools) umumiy 1.5s da qoladi.
+
+#### Pastga qarash teshigi (tuzatilgan)
+
+Nigoh nazoratida jiddiy teshik bor edi: talaba **pastga** (tizzadagi telefonga) qaraganda qovoq tushadi, ko‘z torayadi va `computeIrisGaze()` `null` qaytaradi — natijada nigoh nazorati **butunlay jim** bo‘lib qolardi. Ya‘ni eng muhim aldash holati aniqlanmasdi.
+
+Endi `eyesTooNarrowForGaze()` shu holatni **o‘zi signal** sifatida hisoblaydi (`gazeDown` ga qo‘shiladi). Ko‘z pirillashi (~200ms) 0.4s uzluksiz talabidan qisqa, shuning uchun jazolanmaydi. Kod: `frontend/src/lib/realtimeProctor.ts`, testlar: `frontend/tests/irisGaze.test.ts`.
+
+#### Shaxsni qayta tekshirish oralig‘i
+
+`IDENTITY_CHECK_MS` = **15s** (avval 90s). 90 soniya yuz almashtirish uchun juda keng oyna edi. Server throttle `face_verify` = 25/min, 15s = 4/min — chegaraga yetmaydi.
+
 **Signal manbalari va ular ushbu qonunni qanday qo‘llaydi:**
 
 - **Video (MediaPipe, `frontend/src/lib/realtimeProctor.ts`)** — yuz yo‘q (`NO_FACE`), ko‘p yuz (`MULTI_FACE`), bosh burilishi/gaze, pozitsiya (uzoq/yaqin/markaz), haddan tashqari qimirlash, qo‘l ko‘tarish, og‘iz harakati. Har biri `trackContinuous` bilan 1.5s/4s. Sariq chip qatori.
