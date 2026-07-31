@@ -164,6 +164,66 @@ def _build_subject_registry() -> dict[str, dict]:
     return canonical
 
 
+#: Fan reestri keshi (soniya). Katalog ma'lumoti kam o'zgaradi, lekin u
+#: imtihon yaratishda 4-6 marta qayta quriladi va har safar 2 ta tashqi HTTP
+#: so'rov ketadi (~0.55s) — yaratish shu sababdan sekin edi.
+_REGISTRY_CACHE_KEY = "imentor:subject_registry:v1"
+
+
+def _registry_cache_seconds() -> int:
+    """Kesh TTL (soniya). 0 = kesh o'chiq.
+
+    Testlarda MAJBURIY 0: har test o'z mock ma'lumotini beradi va oldingi
+    testning keshdagi natijasi keyingisiga oqib o'tishi kerak emas.
+    """
+    import os
+    import sys
+
+    if "test" in sys.argv or os.environ.get("PYTEST_CURRENT_TEST"):
+        return 0
+    try:
+        return max(0, int(os.environ.get("IMENTOR_CATALOG_CACHE_SECONDS", "300")))
+    except (TypeError, ValueError):
+        return 300
+
+
+def _cached_subject_registry() -> dict[str, dict]:
+    """`_build_subject_registry()` natijasi — qisqa muddatli kesh bilan.
+
+    Kesh 0 bo'lsa (yoki cache ishlamasa) — har safar qaytadan quriladi,
+    ya'ni xulq o'zgarmaydi, faqat tezlik yo'qoladi.
+    """
+    ttl = _registry_cache_seconds()
+    if ttl <= 0:
+        return _build_subject_registry()
+    try:
+        from django.core.cache import cache
+
+        cached = cache.get(_REGISTRY_CACHE_KEY)
+        if isinstance(cached, dict) and cached:
+            return cached
+    except Exception:
+        return _build_subject_registry()
+
+    registry = _build_subject_registry()
+    if registry:
+        try:
+            cache.set(_REGISTRY_CACHE_KEY, registry, ttl)
+        except Exception:
+            pass
+    return registry
+
+
+def invalidate_subject_registry_cache() -> None:
+    """Katalog o'zgarganda (admin fanlar ro'yxatini yangilaganda) chaqiriladi."""
+    try:
+        from django.core.cache import cache
+
+        cache.delete(_REGISTRY_CACHE_KEY)
+    except Exception:
+        pass
+
+
 def _subject_stats_index(rows: list[dict] | None = None) -> dict[str, dict]:
     """subject_code ni case-insensitive qidirish."""
     if rows is not None:
@@ -178,7 +238,7 @@ def _subject_stats_index(rows: list[dict] | None = None) -> dict[str, dict]:
         return idx
 
     idx = {}
-    for code, row in _build_subject_registry().items():
+    for code, row in _cached_subject_registry().items():
         idx[code] = row
         idx[code.lower()] = row
         idx[code.upper()] = row
@@ -402,7 +462,7 @@ def subjects_from_stats() -> list[dict]:
     """Eski endpoint: barcha fanlar (katalog + test_count)."""
     if not imentor_configured():
         return []
-    registry = _build_subject_registry()
+    registry = _cached_subject_registry()
     out = list(registry.values())
     out.sort(key=lambda x: (x.get("department_name", "").lower(), x["subject_name"].lower(), x["subject_code"]))
     return out
