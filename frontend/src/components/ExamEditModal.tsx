@@ -43,7 +43,8 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
   const [endLocal, setEndLocal] = useState('');
   const [duration, setDuration] = useState(60);
   const [language, setLanguage] = useState('uz');
-  const [pin, setPin] = useState('');
+  /** Tashqi shovqin nazorati (talabaning o'z nutqiga ta'sir qilmaydi). */
+  const [ambientAudioEnabled, setAmbientAudioEnabled] = useState(true);
   const [customRules, setCustomRules] = useState('');
   const [selectedGroups, setSelectedGroups] = useState<number[]>([]);
   const [questionsJson, setQuestionsJson] = useState('');
@@ -79,7 +80,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         setEndLocal(fromIsoToDatetimeLocal(data.end_time));
         setDuration(Number(data.duration_minutes) || 60);
         setLanguage(data.language || 'uz');
-        setPin(data.pin || '');
+        setAmbientAudioEnabled(data.ambient_audio_enabled !== false);
         setCustomRules(data.custom_rules || '');
         setSelectedGroups(Array.isArray(data.group_ids) ? data.group_ids : []);
         setQuestionsJson(JSON.stringify(data.questions || [], null, 2));
@@ -131,7 +132,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         end_time: endIso,
         duration_minutes: duration,
         language,
-        pin,
+        ambient_audio_enabled: ambientAudioEnabled,
         custom_rules: customRules,
         group_ids: selectedGroups,
       };
@@ -378,8 +379,23 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
                       <option value="en">{t.langEnglish}</option>
                     </AdminSelect>
                   </AdminField>
-                  <AdminField label="PIN (opt.)">
-                    <AdminInput value={pin} onChange={(e) => setPin(e.target.value)} placeholder="—" />
+                  <AdminField label={t.ambientAudioLabel}>
+                    <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={ambientAudioEnabled}
+                        onChange={(e) => setAmbientAudioEnabled(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[13px] font-medium text-gray-800">
+                          {ambientAudioEnabled ? t.ambientAudioOn : t.ambientAudioOff}
+                        </span>
+                        <span className="block text-[12px] text-gray-400 leading-snug mt-0.5">
+                          {t.ambientAudioHint}
+                        </span>
+                      </span>
+                    </label>
                   </AdminField>
                 </div>
 

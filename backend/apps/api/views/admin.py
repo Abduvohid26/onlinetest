@@ -1446,10 +1446,30 @@ def admin_exam_detail(request, pk: int):
     st = parse_iso_datetime(d.get("start_time", e.start_time))
     et = parse_iso_datetime(d.get("end_time", e.end_time))
     dur = int(d.get("duration_minutes", e.duration_minutes))
-    pin = d.get("pin", e.pin)
     rules = d.get("custom_rules", e.custom_rules or "")
     if not title or not st or not et or not dur:
         return Response({"error": "Missing required exam fields"}, status=400)
+    # Vaqt mantiqi: yaratishdagi kabi tekshiruvlar. Ilgari TAHRIRLASHDA umuman
+    # tekshirilmasdi — admin tugash vaqtini boshlanishdan oldin qo'yishi yoki
+    # davomiylikni oynadan katta qilishi mumkin edi, natijada talaba imtihonni
+    # boshlay olmasdi yoki e'lon qilingan vaqtdan kam vaqt olardi.
+    if st >= et:
+        return Response(
+            {"error": "Boshlanish vaqti tugash vaqtidan oldin bo'lishi kerak"}, status=400
+        )
+    window_minutes = int((et - st).total_seconds() // 60)
+    if dur > window_minutes:
+        return Response(
+            {
+                "error": (
+                    f"Imtihon davomiyligi ({dur} daq) vaqt oralig'idan "
+                    f"({window_minutes} daq) katta bo'lishi mumkin emas"
+                )
+            },
+            status=400,
+        )
+    if dur <= 0:
+        return Response({"error": "Imtihon davomiyligi 0 dan katta bo'lishi kerak"}, status=400)
 
     try:
         with transaction.atomic():
@@ -1459,7 +1479,6 @@ def admin_exam_detail(request, pk: int):
             e.duration_minutes = dur
             e.questions_json = questions_json
             e.language = lang
-            e.pin = pin or ""
             e.custom_rules = rules or ""
             e.bank_category_ids = bank_cats_json
             e.bank_question_count = bank_count
@@ -1468,16 +1487,11 @@ def admin_exam_detail(request, pk: int):
                 e.technical_retakes_allowed = max(
                     0, min(20, int(d.get("technical_retakes_allowed") or 0))
                 )
-            if d.get("proctor_profile") is not None:
-                from apps.api.proctor_profiles import normalize_proctor_profile, retake_limits_for_profile
+            # Qoidalar profili tanlovi yo'q — har doim standart, o'zgartirilmaydi.
+            if d.get("ambient_audio_enabled") is not None:
+                from apps.api.views._helpers import _bool_arg
 
-                profile = normalize_proctor_profile(d.get("proctor_profile"))
-                limits = retake_limits_for_profile(profile)
-                e.proctor_profile = profile
-                if d.get("technical_retakes_allowed") is None:
-                    e.technical_retakes_allowed = limits["technical_retakes_allowed"]
-                if d.get("identity_retakes_allowed") is None:
-                    e.identity_retakes_allowed = limits["identity_retakes_allowed"]
+                e.ambient_audio_enabled = _bool_arg(d.get("ambient_audio_enabled"), True)
             if d.get("identity_retakes_allowed") is not None:
                 e.identity_retakes_allowed = max(0, min(5, int(d.get("identity_retakes_allowed") or 0)))
             if "teacher_id" in d:

@@ -316,7 +316,6 @@ def student_exams_list(request):
                 "end_time": e.end_time.isoformat() if e.end_time else None,
                 "duration_minutes": e.duration_minutes,
                 "language": e.language,
-                "has_pin": bool(e.pin),
                 "custom_rules": e.custom_rules,
                 "exam_mode": e.exam_mode,
                 "bank_question_count": e.bank_question_count,
@@ -358,37 +357,13 @@ def student_proctor_config(request):
     )
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
-def student_exams_verify_pin(request, pk: int):
-    """Imtihon boshlashdan oldin PIN tekshiruvi — qoidalar modali ochilishidan avval."""
-    u = request.user
-    if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
-    pin = (request.data or {}).get("pin")
-    exam = Exam.objects.filter(pk=pk).first()
-    if not exam:
-        return Response({"error": "Exam not found"}, status=404)
-    if not ExamGroup.objects.filter(exam_id=pk, group_id=u.group_id).exists():
-        return Response({"error": "Exam not assigned to your group"}, status=403)
-    if not exam.pin:
-        return Response({"ok": True, "pinRequired": False})
-    if exam.pin != pin:
-        return Response({"error": "Invalid PIN", "code": "INVALID_PIN"}, status=403)
-    return Response({"ok": True, "pinRequired": True})
-
-
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
 def student_exams_start(request, pk: int):
     u = request.user
     if not _is_student_user(u):
         return Response({"error": "Forbidden"}, status=403)
-    pin = (request.data or {}).get("pin")
     exam = Exam.objects.filter(pk=pk).first()
     if not exam:
         return Response({"error": "Exam not found"}, status=404)
-    # PIN har safar (retake/qayta kirishda ham) talab qilinadi.
-    if exam.pin and exam.pin != pin:
-        return Response({"error": "Invalid PIN"}, status=403)
     if not ExamGroup.objects.filter(exam_id=pk, group_id=u.group_id).exists():
         return Response({"error": "Exam not assigned to your group"}, status=403)
 
@@ -799,9 +774,10 @@ def student_exams_start(request, pk: int):
         "duration_minutes": exam.duration_minutes,
         "language": ex_lang,
         "language_mode": exam.language,
-        "pin": exam.pin,
-        "has_pin": bool(exam.pin),
         "custom_rules": exam.custom_rules,
+        # Tashqi shovqin nazorati shu imtihonda yoqilganmi (talaba tomonida
+        # faqat SUSPICIOUS_AUDIO ga ta'sir qiladi; gapirish har doim ishlaydi).
+        "ambient_audio_enabled": bool(getattr(exam, "ambient_audio_enabled", True)),
         "exam_mode": exam.exam_mode,
         "questions": shuffled,
         "submission_deadline": deadline.isoformat() if deadline else None,

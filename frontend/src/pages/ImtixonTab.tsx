@@ -76,9 +76,11 @@ export function ImtixonTab({
   const [endLocal, setEndLocal] = useState(() => defaultExamEndLocal(60));
   const [duration, setDuration] = useState(60);
   const [technicalRetakesAllowed, setTechnicalRetakesAllowed] = useState(3);
-  const [proctorProfile, setProctorProfile] = useState<'soft' | 'standard' | 'strict'>('standard');
+  /** Tashqi shovqin nazorati — default YOQILGAN. Institut binosida
+   *  o'tkaziladigan imtihonda o'chiriladi (atrofdagi tabiiy shovqin soxta
+   *  ogohlantirish bermasin). Talabaning o'zi gapirishi bunga bog'liq emas. */
+  const [ambientAudioEnabled, setAmbientAudioEnabled] = useState(true);
   const [language, setLanguage] = useState('auto');
-  const [pin, setPin] = useState('');
   const [customRules, setCustomRules] = useState('');
   const [responsibleStaffId, setResponsibleStaffId] = useState('');
   const [selDepartment, setSelDepartment] = useState('');
@@ -250,6 +252,15 @@ export function ImtixonTab({
     [exMap, t.exceptionsHint],
   );
 
+  /** Boshlanish-tugash oynasi (daqiqa). Uchala vaqt maydoni shu orqali bog'lanadi. */
+  const examWindowMinutes = React.useMemo(() => {
+    const a = toIsoOrNull(startLocal);
+    const b = toIsoOrNull(endLocal);
+    if (!a || !b) return null;
+    const mins = Math.floor((new Date(b).getTime() - new Date(a).getTime()) / 60000);
+    return Number.isFinite(mins) ? mins : null;
+  }, [startLocal, endLocal]);
+
   const validate = (): string | null => {
     if (!title.trim()) return t.title + ' ' + t.examManualEmptyQuestion.toLowerCase();
     if (selGroups.length === 0) return t.examCreateSelectGroup;
@@ -258,6 +269,7 @@ export function ImtixonTab({
     const endIso = toIsoOrNull(endLocal);
     if (!startIso || !endIso) return t.examInvalidDateTime;
     if (new Date(startIso).getTime() >= new Date(endIso).getTime()) return t.examStartMustBeBeforeEnd;
+    if (!Number.isFinite(duration) || duration <= 0) return t.examDurationInvalid;
     const windowMin = Math.floor((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000);
     if (duration > windowMin)
       return t.examDurationExceedsWindow
@@ -294,7 +306,7 @@ export function ImtixonTab({
         end_time: endIso,
         duration_minutes: duration,
         language,
-        pin,
+        ambient_audio_enabled: ambientAudioEnabled,
         custom_rules: customRules,
         group_ids: selGroups,
         exam_exceptions: exceptionsPayload,
@@ -302,7 +314,6 @@ export function ImtixonTab({
         imentor_subject_codes: selSubject ? [selSubject] : [],
         bank_question_count: Math.max(0, imentorMaxQ),
         technical_retakes_allowed: Math.max(0, Math.min(20, technicalRetakesAllowed)),
-        proctor_profile: proctorProfile,
       };
       if (selVariant) body.imentor_variant_label = selVariant;
       if (selTopic) body.imentor_topic_code = selTopic;
@@ -323,7 +334,6 @@ export function ImtixonTab({
 
       setMsg({ type: 'ok', text: t.examCreated });
       setTitle('');
-      setPin('');
       setCustomRules('');
       setResponsibleStaffId('');
       setSelDepartment('');
@@ -597,28 +607,36 @@ export function ImtixonTab({
                   type="number"
                   min={5}
                   value={duration}
-                  onChange={(e) => setDuration(Number(e.target.value))}
+                  onChange={(e) => {
+                    const next = Number(e.target.value);
+                    setDuration(next);
+                    // Uchala maydon bog'liq: davomiylik oynadan katta bo'lib
+                    // qolmasin — tugash vaqti avtomatik cho'ziladi. Aks holda
+                    // admin faqat "Yaratish" bosganda xato ko'rardi.
+                    if (Number.isFinite(next) && next > 0 && isValidDatetimeLocal(startLocal)) {
+                      const minEnd = new Date(startLocal);
+                      minEnd.setMinutes(minEnd.getMinutes() + next);
+                      const curEnd = isValidDatetimeLocal(endLocal) ? new Date(endLocal) : null;
+                      if (!curEnd || curEnd.getTime() < minEnd.getTime()) {
+                        setEndLocal(toDatetimeLocalValue(minEnd));
+                      }
+                    }
+                  }}
                   required
                 />
-              </AdminField>
-              <AdminField label={`${t.pin} (opt.)`}>
-                <AdminInput value={pin} onChange={(e) => setPin(e.target.value)} placeholder="—" />
-              </AdminField>
-              <AdminField label={t.proctorProfileLabel}>
-                <AdminSelect
-                  value={proctorProfile}
-                  onChange={(e) => {
-                    const next = e.target.value as 'soft' | 'standard' | 'strict';
-                    setProctorProfile(next);
-                    const limits = { soft: 5, standard: 3, strict: 1 } as const;
-                    setTechnicalRetakesAllowed(limits[next]);
-                  }}
-                  className="max-w-[220px]"
+                <p
+                  className={`text-[12px] mt-1 ${
+                    examWindowMinutes != null && duration > examWindowMinutes
+                      ? 'text-red-600 font-medium'
+                      : 'text-gray-400'
+                  }`}
                 >
-                  <option value="soft">{t.proctorProfileSoft}</option>
-                  <option value="standard">{t.proctorProfileStandard}</option>
-                  <option value="strict">{t.proctorProfileStrict}</option>
-                </AdminSelect>
+                  {examWindowMinutes == null
+                    ? ''
+                    : t.examWindowHint
+                        .replace('{window}', String(examWindowMinutes))
+                        .replace('{dur}', String(duration))}
+                </p>
               </AdminField>
               <AdminField label={t.technicalRetakesAllowedLabel}>
                 <AdminInput
@@ -629,6 +647,24 @@ export function ImtixonTab({
                   onChange={(e) => setTechnicalRetakesAllowed(Number(e.target.value))}
                   className="max-w-[180px]"
                 />
+              </AdminField>
+              <AdminField label={t.ambientAudioLabel}>
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={ambientAudioEnabled}
+                    onChange={(e) => setAmbientAudioEnabled(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-medium text-gray-800">
+                      {ambientAudioEnabled ? t.ambientAudioOn : t.ambientAudioOff}
+                    </span>
+                    <span className="block text-[12px] text-gray-400 leading-snug mt-0.5">
+                      {t.ambientAudioHint}
+                    </span>
+                  </span>
+                </label>
               </AdminField>
               <AdminField label={`${t.customRules} (opt.)`}>
                 <AdminTextarea value={customRules} onChange={(e) => setCustomRules(e.target.value)} />

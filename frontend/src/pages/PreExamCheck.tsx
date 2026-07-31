@@ -86,24 +86,15 @@ export function PreExamCheck({
 }) {
   // Retake holatini faqat transient prop'dan emas, exam ma'lumotidan ham aniqlaymiz —
   // shunda retake PreExamCheck'da brauzer yangilansa ham (prop yo'qolsa) pozitsiya gate
-  // qayta talab qilinmaydi. DIQQAT: PIN retake'da HAM talab qilinadi (bu faqat pozitsiya
-  // gate uchun); shaxs (identity) va jonlilik ham har safar tekshiriladi.
+  // qayta talab qilinmaydi. Shaxs (identity) va jonlilik har safar tekshiriladi.
   const isRetakeResolved = Boolean(
     isRetake ||
       exam?.session_phase === 'after_retake' ||
       (exam?.technical_retakes_used ?? 0) > 0 ||
       (exam?.identity_retakes_used ?? 0) > 0,
   );
-  // PIN kerakmi — exam obyekti ikki xil shaklda kelishi mumkin: imtihonlar ro'yxati
-  // `has_pin` (bool) beradi, /start javobi esa `pin` (qiymat). Retake "Hozir qayta
-  // boshlash" oqimida activeExam /start shaklida bo'ladi — shu sabab ikkalasini ham
-  // tekshiramiz, aks holda PIN maydoni ko'rinmay qolardi (lekin backend PIN so'raydi).
-  const needsPin = Boolean(exam?.has_pin) || Boolean(exam?.pin);
   const [cameraReady, setCameraReady] = useState(false);
   const [micReady, setMicReady] = useState(false);
-  const [pin, setPin] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [pinChecking, setPinChecking] = useState(false);
   const [error, setError] = useState('');
   const [identityError, setIdentityError] = useState('');
   const [starting, setStarting] = useState(false);
@@ -710,10 +701,6 @@ export function PreExamCheck({
   };
 
   const handleEnter = async () => {
-    if (needsPin && !pin.trim()) {
-      setPinError(t.enterPin);
-      return;
-    }
     setError('');
     setStarting(true);
     try {
@@ -724,7 +711,7 @@ export function PreExamCheck({
           'X-Student-Lang': lang,
           ...examAuthHeaders(token),
         },
-        body: JSON.stringify({ pin, student_lang: lang }),
+        body: JSON.stringify({ student_lang: lang }),
       });
       const data = await readJsonSafe<{
         error?: string;
@@ -738,13 +725,7 @@ export function PreExamCheck({
         deviceToken?: string;
       }>(res);
       if (!res.ok || !data?.exam || data.studentExamId == null) {
-        const msg = data?.error || t.preExamStartError;
-        if (needsPin && (msg === 'Invalid PIN' || data?.code === 'INVALID_PIN')) {
-          setShowRulesModal(false);
-          setPinError(t.invalidPin);
-        } else {
-          setError(msg);
-        }
+        setError(data?.error || t.preExamStartError);
         return;
       }
       if (data.deviceToken) {
@@ -770,7 +751,6 @@ export function PreExamCheck({
           sessionKey: data.sessionKey,
           sessionSeqStart: data.sessionSeqStart,
           sessionChallenge: data.sessionChallenge,
-          preExamPin: pin,
         },
         data.studentExamId,
       );
@@ -782,41 +762,7 @@ export function PreExamCheck({
   };
 
   async function openRulesModal() {
-    if (needsPin && !pin.trim()) {
-      setPinError(t.enterPin);
-      return;
-    }
     setError('');
-    setPinError('');
-
-    if (needsPin) {
-      setPinChecking(true);
-      try {
-        const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/verify-pin`), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...examAuthHeaders(token),
-          },
-          body: JSON.stringify({ pin }),
-        });
-        const data = await readJsonSafe<{ ok?: boolean; error?: string; code?: string }>(res);
-        if (!res.ok || !data?.ok) {
-          setPinError(
-            data?.code === 'INVALID_PIN' || data?.error === 'Invalid PIN'
-              ? t.invalidPin
-              : data?.error || t.preExamStartError
-          );
-          return;
-        }
-      } catch {
-        setPinError(t.preExamNetworkError);
-        return;
-      } finally {
-        setPinChecking(false);
-      }
-    }
-
     setModalRulesScrolledEnd(false);
     setShowRulesModal(true);
   }
@@ -859,7 +805,6 @@ export function PreExamCheck({
   const blocked: string[] = [];
   if (!cameraReady) blocked.push(t.preExamBlockedCamera);
   if (!micReady) blocked.push(t.preExamBlockedMic);
-  if (needsPin && !pin) blocked.push(t.preExamBlockedPin);
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
@@ -1190,40 +1135,6 @@ export function PreExamCheck({
 
         {/* ── Footer action bar (kontent ostida, ortada bo'sh joy yo'q) ── */}
         <div className="shrink-0 rounded-xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3 shadow-[0_-4px_24px_rgba(15,23,42,0.06)]">
-          {needsPin && (
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3 pb-4 border-b border-gray-100">
-              <div className="flex items-center gap-2.5 shrink-0">
-                <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-500">
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" /></svg>
-                </span>
-                <label htmlFor="exam-pin" className="min-w-0">
-                  <span className="block text-[13.5px] font-semibold text-gray-900 leading-tight">{t.enterPin}</span>
-                  <span className="block text-[11.5px] text-gray-500 leading-tight mt-0.5">{t.preExamPinHint}</span>
-                </label>
-              </div>
-              <div className="sm:ml-auto sm:max-w-[280px] w-full space-y-2">
-                <AdminInput
-                  id="exam-pin"
-                  type="password"
-                  inputMode="numeric"
-                  value={pin}
-                  onChange={(e) => {
-                    setPin(e.target.value);
-                    if (pinError) setPinError('');
-                  }}
-                  placeholder="••••••"
-                  className={`text-center text-lg tracking-[0.4em] font-semibold h-11 ${pinError ? 'border-red-300 focus:border-red-500' : ''}`}
-                  autoComplete="off"
-                />
-                {pinError && (
-                  <p className="text-[12px] font-medium text-red-600" role="alert">
-                    {pinError}
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3">
             <div className="flex gap-2 w-full sm:w-auto shrink-0">
               <AdminBtn variant="ghost" size="lg" onClick={onCancel} className="flex-1 sm:flex-none">
@@ -1233,15 +1144,11 @@ export function PreExamCheck({
                 variant="blue"
                 size="lg"
                 onClick={() => void openRulesModal()}
-                disabled={!canStart || starting || pinChecking}
-                loading={pinChecking || (starting && showRulesModal)}
+                disabled={!canStart || starting}
+                loading={starting && showRulesModal}
                 className="flex-1 sm:flex-none sm:px-8"
               >
-                {pinChecking
-                  ? t.preExamPinChecking
-                  : starting && showRulesModal
-                    ? t.preExamStarting
-                    : t.preExamEnterExam}
+                {starting && showRulesModal ? t.preExamStarting : t.preExamEnterExam}
               </AdminBtn>
             </div>
           </div>

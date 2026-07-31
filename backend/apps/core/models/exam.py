@@ -22,6 +22,13 @@ class Exam(models.Model):
     technical_retakes_allowed = models.PositiveSmallIntegerField(default=3)
     identity_retakes_allowed = models.PositiveSmallIntegerField(default=1)
     proctor_profile = models.CharField(max_length=16, blank=True, default="standard")
+    #: TASHQI shovqin (musiqa, TV, koridor ovozi) nazorati yoqilganmi.
+    #: Institut binosida imtihon o'tkazilganda atrofdagi tabiiy shovqin soxta
+    #: ogohlantirish beradi — shunda admin buni o'chiradi. Uyda topshirilsa
+    #: yoqib qo'yiladi. DIQQAT: bu FAQAT tashqi shovqinga tegishli. Talabaning
+    #: o'zi gapirishi (og'iz harakati + nutq) HAR DOIM aniqlanadi va bu
+    #: sozlama unga ta'sir qilmaydi.
+    ambient_audio_enabled = models.BooleanField(default=True)
 
     class Meta:
         app_label = "core"

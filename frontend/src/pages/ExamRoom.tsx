@@ -1766,6 +1766,13 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   // Qonun (README.md "Proctoring eskalatsiya qoidasi") bilan bir xil ikki bosqich:
   // 1.5s uzluksiz — kamera panelida kichik yorliq, 4s — rasmiy ogohlantirish.
+  /** Tashqi shovqin (SUSPICIOUS_AUDIO) nazorati shu imtihonda yoqilganmi.
+   *  Server bermasa — YOQILGAN (xavfsiz standart). */
+  const ambientEnabledRef = useRef(true);
+  useEffect(() => {
+    ambientEnabledRef.current = exam.ambient_audio_enabled !== false;
+  }, [exam.ambient_audio_enabled]);
+
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
   const ambientTrackerRef = useRef<AmbientNoiseTracker | null>(null);
   const speechContinuousRef = useRef<ContinuousSignalTracker | null>(null);
@@ -1822,7 +1829,11 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const ambientEscalateMs = Math.max(LIVE_SIGNAL_ESCALATE_MS, 5000);
 
       const speechSmall = speechMs >= speechConfirmMs;
-      const ambientSmall = ambientMs >= ambientConfirmMs;
+      // TASHQI shovqin nazorati imtihon sozlamasida o'chirilgan bo'lishi
+      // mumkin (institut binosida tabiiy shovqin soxta ogohlantirish beradi).
+      // DIQQAT: bu FAQAT tashqi shovqinga tegishli — talabaning o'zi gapirishi
+      // (og'iz harakati + nutq) sozlamadan qat'i nazar HAR DOIM aniqlanadi.
+      const ambientSmall = ambientEnabledRef.current && ambientMs >= ambientConfirmMs;
 
       // Modal ochiq — yangi kichik modal OCHILMAYDI, lekin hisob DAVOM ETADI
       // (object-proctor telefon ogohlantirishi ovozni "o'ldirmasin").
@@ -1850,7 +1861,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         }
       }
 
-      if (ambientMs >= ambientEscalateMs) {
+      if (ambientEnabledRef.current && ambientMs >= ambientEscalateMs) {
         ambientContinuousRef.current!.reset();
         formalIssuedFor('SUSPICIOUS_AUDIO');
         void logViolationRef.current('SUSPICIOUS_AUDIO');
@@ -2548,7 +2559,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         seq: Number(data.sessionSeqStart || 1),
         challengeSeed: data.sessionChallenge,
       };
-      setTimeLeft(merged.duration_minutes * 60);
+      // MUHIM: `duration_minutes` emas, SERVER bergan `submission_deadline`.
+      // Server chegarasi = min(exam.end_time, boshlangan_vaqt + davomiylik).
+      // Talaba imtihon oynasi tugashiga 10 daqiqa qolganda kirsa, unga 10
+      // daqiqa qoladi — ilgari bu yerda 60:00 ko'rsatilib, keyin taymer
+      // serverga sinxronlanganda keskin sakrab tushardi.
+      setTimeLeft(initialSecondsLeft(merged));
       // Fullscreen ochilmagan / rad etilgan — darhol gate (imtihon blok).
       if (fullscreenSupportedRef.current && !getFullscreenElement()) {
         needsFullscreenRef.current = true;

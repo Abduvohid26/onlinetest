@@ -704,7 +704,6 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "duration_minutes": e.duration_minutes,
         "questions_json": e.questions_json,
         "language": e.language,
-        "pin": e.pin,
         "custom_rules": e.custom_rules,
         "exam_mode": e.exam_mode,
         "bank_category_ids": e.bank_category_ids,
@@ -713,8 +712,18 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "technical_retakes_allowed": int(getattr(e, "technical_retakes_allowed", 3) or 3),
         "identity_retakes_allowed": int(getattr(e, "identity_retakes_allowed", 1) or 1),
         "proctor_profile": str(getattr(e, "proctor_profile", "") or "standard"),
+        "ambient_audio_enabled": bool(getattr(e, "ambient_audio_enabled", True)),
         "languages_ready": _exam_languages_ready(e),
     }
+
+def _bool_arg(raw, default: bool) -> bool:
+    """Form-data ham, JSON ham keladi: "false"/"0"/False hammasi False."""
+    if raw is None or raw == "":
+        return default
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() not in ("0", "false", "no", "off")
+
 
 def _bank_pool_check(cat_ids: list, need_bank: int) -> tuple[bool, int]:
     pool_len = TestBankQuestion.objects.filter(category_id__in=cat_ids).count()
@@ -863,10 +872,17 @@ def _admin_exams_create_impl(request):
         return Response({"error": "Invalid datetime"}, status=400)
     if st >= et:
         return Response({"error": "Boshlanish vaqti tugash vaqtidan oldin bo'lishi kerak"}, status=400)
-    dur = int(duration_minutes)
-    from apps.api.proctor_profiles import normalize_proctor_profile, retake_limits_for_profile
+    try:
+        dur = int(duration_minutes)
+    except (TypeError, ValueError):
+        return Response({"error": "Imtihon davomiyligi noto'g'ri"}, status=400)
+    if dur <= 0:
+        return Response({"error": "Imtihon davomiyligi 0 dan katta bo'lishi kerak"}, status=400)
+    # Qoidalar profili tanlovi olib tashlandi — har doim standart profil.
+    # Retake chegaralari shundan olinadi (admin ularni alohida o'zgartira oladi).
+    from apps.api.proctor_profiles import DEFAULT_PROCTOR_PROFILE, retake_limits_for_profile
 
-    profile = normalize_proctor_profile(d.get("proctor_profile"))
+    profile = DEFAULT_PROCTOR_PROFILE
     profile_limits = retake_limits_for_profile(profile)
     violation_retakes = max(0, min(20, int(d.get("technical_retakes_allowed") or profile_limits["technical_retakes_allowed"])))
     identity_retakes = max(0, min(5, int(d.get("identity_retakes_allowed") or profile_limits["identity_retakes_allowed"])))
@@ -899,7 +915,6 @@ def _admin_exams_create_impl(request):
             duration_minutes=dur,
             questions_json=json.dumps(questions),
             language=lang,
-            pin=d.get("pin") or "",
             custom_rules=d.get("custom_rules") or "",
             exam_mode=mode,
             bank_category_ids=bank_cats_json,
@@ -908,6 +923,8 @@ def _admin_exams_create_impl(request):
             technical_retakes_allowed=violation_retakes,
             identity_retakes_allowed=identity_retakes,
             proctor_profile=profile,
+            # Tashqi shovqin nazorati — default YOQILGAN.
+            ambient_audio_enabled=_bool_arg(d.get("ambient_audio_enabled"), True),
         )
         ExamGroup.objects.bulk_create([ExamGroup(exam_id=ex.id, group_id=gid) for gid in gids])
         eid = ex.id

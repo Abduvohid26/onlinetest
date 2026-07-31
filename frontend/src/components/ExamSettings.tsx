@@ -45,7 +45,6 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [title, setTitle] = useState('');
   const [language, setLanguage] = useState('uz');
-  const [pin, setPin] = useState('');
   const [customRules, setCustomRules] = useState('');
   const [bankQuestionCount, setBankQuestionCount] = useState(20);
   const [submitting, setSubmitting] = useState(false);
@@ -54,7 +53,6 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
 
   const resetForm = useCallback(() => {
     setTitle('');
-    setPin('');
     setCustomRules('');
     setStartLocal(defaultExamStartLocal);
     setEndLocal(defaultExamEndLocal(60));
@@ -92,7 +90,6 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
     const fd = new FormData();
     fd.set('title', title);
     fd.set('language', language);
-    fd.set('pin', pin);
     fd.set('custom_rules', customRules);
     fd.set('start_time', startLocal);
     fd.set('end_time', endLocal);
@@ -242,9 +239,6 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                   onChange={(e) => setDurationMinutes(Number(e.target.value))}
                   required
                 />
-              </AdminField>
-              <AdminField label={`${t.pin} (opt.)`}>
-                <AdminInput value={pin} onChange={(e) => setPin(e.target.value)} type="text" placeholder="1234" />
               </AdminField>
               <AdminField label={`${t.customRules} (opt.)`}>
                 <AdminInput

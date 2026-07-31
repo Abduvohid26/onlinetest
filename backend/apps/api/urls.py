@@ -13,7 +13,6 @@ urlpatterns = [
     path("student/exams/<int:pk>/clock", views.student_exam_clock),
     path("student/exams/<int:pk>/draft", views.student_exam_draft),
     path("student/exams/<int:pk>/save-progress", views.student_exam_save_progress),
-    path("student/exams/<int:pk>/verify-pin", views.student_exams_verify_pin),
     path("student/exams/<int:pk>/start", views.student_exams_start),
     path("student/proctor-config", views.student_proctor_config),
     path("student/exams/<int:pk>/submit", views.student_exams_submit),

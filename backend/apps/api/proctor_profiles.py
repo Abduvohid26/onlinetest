@@ -1,4 +1,10 @@
-"""Imtihon yaratishda qoidalar profili (yumshoq / standart / qattiq)."""
+"""Qoidalar profili — retake chegaralari uchun.
+
+DIQQAT: imtihon yaratishda profil TANLOVI olib tashlandi. Har doim
+`DEFAULT_PROCTOR_PROFILE` (standart) ishlatiladi; admin retake sonlarini
+alohida maydonlar orqali o'zgartira oladi. Modul saqlanmoqda, chunki mavjud
+imtihonlarda `proctor_profile` qiymati bor va chegaralar shundan o'qiladi.
+"""
 from __future__ import annotations
 
 PROCTOR_PROFILE_SOFT = "soft"
@@ -19,6 +25,10 @@ PROCTOR_PROFILES: dict[str, dict[str, int]] = {
         "identity_retakes_allowed": 0,
     },
 }
+
+
+#: Yagona ishlatiladigan profil (tanlov yo'q).
+DEFAULT_PROCTOR_PROFILE = PROCTOR_PROFILE_STANDARD
 
 
 def normalize_proctor_profile(raw: str | None) -> str:
