@@ -19,6 +19,8 @@ interface Props {
 export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Props) {
   const t = translations[lang];
   const h = { Authorization: `Bearer ${token}` };
+  const trackLabel = (track?: string | null) =>
+    track === 'residency' ? t.trackResidency : track === 'master' ? t.trackMaster : t.trackBachelor;
 
   const [levels, setLevels] = useState<Level[]>([]);
   const [directions, setDirections] = useState<Direction[]>([]);
@@ -196,9 +198,9 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
             <div className="grid grid-cols-2 gap-3">
               <AdminField label={t.programTrack}>
                 <AdminSelect value={newTrack} onChange={(e) => setNewTrack(e.target.value)}>
-                  <option value="bachelor">bachelor</option>
-                  <option value="residency">residency</option>
-                  <option value="master">master</option>
+                  <option value="bachelor">{t.trackBachelor}</option>
+                  <option value="residency">{t.trackResidency}</option>
+                  <option value="master">{t.trackMaster}</option>
                 </AdminSelect>
               </AdminField>
               <AdminField label={t.academicYear}>
@@ -287,7 +289,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
                       <div className="flex-1 min-w-[130px] min-w-0">
                         <p className="font-semibold text-gray-900 text-[14px] sm:text-[15px] truncate">{g.name}</p>
                         <p className="text-[12px] sm:text-[13px] text-gray-400 mt-0.5 truncate">
-                          {g.level_name}{g.direction_name ? ` · ${g.direction_name}` : ''} · {g.program_track || 'bachelor'}
+                          {g.level_name}{g.direction_name ? ` · ${g.direction_name}` : ''} · {trackLabel(g.program_track)}
                           {g.academic_year != null ? ` · ${g.academic_year}-yil` : ''}
                           {sc > 0 && (
                             <span className="ml-2 font-medium text-indigo-600">{sc} {t.kontingentStudents}</span>

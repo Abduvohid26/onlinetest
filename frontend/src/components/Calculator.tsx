@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Calculator as CalcIcon, X } from 'lucide-react';
+import { translations, Language } from '../i18n';
 
-export function Calculator() {
+export function Calculator({ lang }: { lang: Language }) {
+  const t = translations[lang];
   const [isOpen, setIsOpen] = useState(false);
   const [display, setDisplay] = useState('0');
   const [equation, setEquation] = useState('');
@@ -30,7 +32,7 @@ export function Calculator() {
       setDisplay(String(result));
       setEquation('');
     } catch (e) {
-      setDisplay('Error');
+      setDisplay(t.calculatorError);
     }
   };
 
@@ -60,7 +62,7 @@ export function Calculator() {
             className="fixed bottom-24 right-6 w-72 bg-white/90 backdrop-blur-xl border border-white/50 shadow-2xl rounded-3xl overflow-hidden z-50 cursor-move"
           >
             <div className="p-4 bg-gray-50/50 border-b border-gray-200/50 flex justify-between items-center">
-              <span className="font-semibold text-gray-700">Calculator</span>
+              <span className="font-semibold text-gray-700">{t.calculatorTitle}</span>
               <button onClick={() => setIsOpen(false)} className="text-gray-500 hover:text-gray-800">
                 <X className="w-5 h-5" />
               </button>

@@ -18,7 +18,7 @@ export function StaffDashboard({ token, lang }: { token: string; lang: Language 
           <p className="text-[13px] text-gray-500 mt-0.5 leading-relaxed">{t.staffPortalSubtitle}</p>
         </div>
         <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-md">
-          Staff
+          {t.staffBadge}
         </span>
       </motion.div>
 

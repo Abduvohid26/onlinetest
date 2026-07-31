@@ -3598,7 +3598,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         </aside>
         </div>
       </div>
-      <Calculator />
+      <Calculator lang={lang} />
 
       {/* Kichik ogohlantirish (3 tadan) — RASMIY modaldan atayin KICHIK va FARQLI
           ko'rinishda (chalkashmasin: kattasi jiddiyroq). QO'SHIMCHA qatlam

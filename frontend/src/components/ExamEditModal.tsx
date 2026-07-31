@@ -358,11 +358,11 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <AdminField label={t.startTime} required>
                     <DateTimeField value={startLocal} onChange={setStartLocal}
-                      dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
+                      dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} hint={t.dateTimeHint24h} />
                   </AdminField>
                   <AdminField label={t.endTime} required>
                     <DateTimeField value={endLocal} onChange={setEndLocal}
-                      min={startLocal || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
+                      min={startLocal || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} hint={t.dateTimeHint24h} />
                   </AdminField>
                 </div>
 
@@ -511,11 +511,11 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
                     </AdminField>
                     <AdminField label={t.startTime}>
                       <DateTimeField value={rtStart} onChange={setRtStart}
-                        dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
+                        dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} hint={t.dateTimeHint24h} />
                     </AdminField>
                     <AdminField label={t.endTime}>
                       <DateTimeField value={rtEnd} onChange={setRtEnd}
-                        min={rtStart || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
+                        min={rtStart || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} hint={t.dateTimeHint24h} />
                     </AdminField>
                   </div>
                   <AdminBtn type="button" variant="ghost" size="sm" loading={exBusy} onClick={addRetake}>

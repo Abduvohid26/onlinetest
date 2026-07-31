@@ -587,6 +587,7 @@ export function ImtixonTab({
                   }}
                   dateLabel={t.examDateLabel}
                   timeLabel={t.examTimeLabel}
+                  hint={t.dateTimeHint24h}
                 />
                 <p className="text-[12px] text-gray-400 mt-1">{t.examDateTimeHint}</p>
               </AdminField>
@@ -597,6 +598,7 @@ export function ImtixonTab({
                   min={startLocal || undefined}
                   dateLabel={t.examDateLabel}
                   timeLabel={t.examTimeLabel}
+                  hint={t.dateTimeHint24h}
                 />
               </AdminField>
             </div>

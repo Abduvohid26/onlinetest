@@ -71,7 +71,7 @@ function UserRow({ u, lang, pwdHook, isAdmin = false, deleteConfirmId, deletingI
           <div className="flex items-center gap-2">
             <p className="font-semibold text-gray-900 text-[14px] sm:text-[15px] truncate">{u.name}</p>
             {isAdmin && (
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700 shrink-0">ADMIN</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700 shrink-0">{t.adminRoleBadge}</span>
             )}
           </div>
           <div className="flex items-center gap-2 mt-0.5">

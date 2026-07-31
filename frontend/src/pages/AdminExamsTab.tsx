@@ -34,6 +34,13 @@ export function AdminExamsTab({
   const [editingExamId, setEditingExamId] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const t = translations[lang];
+  const statusLabel = (status?: string | null) =>
+    status === 'Completed' ? t.examStatusCompleted
+      : status === 'Banned' ? t.examStatusBanned
+      : status === 'Failed' ? t.examStatusFailed
+      : status === 'In Progress' ? t.examStatusInProgress
+      : status === 'Pending' ? t.examStatusPending
+      : (status || '');
   const examsListUrl = apiVariant === 'staff' ? '/api/staff/exams' : '/api/admin/exams';
   const resultsUrl = (examId: number) => apiVariant === 'staff' ? `/api/staff/exams/${examId}/results` : `/api/admin/exams/${examId}/results`;
   const isStaffPortal = apiVariant === 'staff';
@@ -378,16 +385,16 @@ export function AdminExamsTab({
                             <h3 className="font-semibold text-gray-900 text-[15px]">{r.name}</h3>
                             <p className="text-[13px] text-gray-400 font-mono">{r.student_id}</p>
                             <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                              {r.recommended_review && <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 font-semibold">Review</span>}
-                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">Risk: {r.risk_score ?? 0}</span>
+                              {r.recommended_review && <span className="text-[11px] px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200 font-semibold">{t.reviewBadge}</span>}
+                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">{t.riskLabel}: {r.risk_score ?? 0}</span>
                               <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium uppercase ${r.highest_priority === 'critical' ? 'bg-red-50 border-red-200 text-red-700' : r.highest_priority === 'high' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-blue-50 border-blue-200 text-blue-700'}`}>
-                                {r.highest_priority || 'medium'}
+                                {r.highest_priority === 'critical' ? t.priorityCritical : r.highest_priority === 'high' ? t.priorityHigh : r.highest_priority === 'low' ? t.priorityLow : t.priorityMedium}
                               </span>
                             </div>
                           </div>
                         </div>
                         <span className={`px-3 py-1 rounded-full text-[12px] font-semibold shrink-0 border ${r.status === 'Completed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : r.status === 'Banned' ? 'bg-red-50 text-red-700 border-red-200' : 'bg-amber-50 text-amber-700 border-amber-200'}`}>
-                          {r.status}
+                          {statusLabel(r.status)}
                         </span>
                       </div>
 

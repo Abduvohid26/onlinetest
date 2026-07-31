@@ -198,6 +198,8 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
 export function TestBankTab({ token, lang }: { token: string; lang: Language }) {
   const t = translations[lang];
   const h = { Authorization: `Bearer ${token}` };
+  const trackLabel = (track?: string | null) =>
+    track === 'residency' ? t.trackResidency : track === 'master' ? t.trackMaster : t.trackBachelor;
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [pageMsg, setPageMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -469,7 +471,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                             <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{c.source_language.toUpperCase()}</span>
                           )}
                           {c.program_track && c.program_track !== 'any' && (
-                            <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{c.program_track}</span>
+                            <span className="text-[11px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-medium">{trackLabel(c.program_track)}</span>
                           )}
                           {c.academic_year && (
                             <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">

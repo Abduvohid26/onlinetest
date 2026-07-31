@@ -10,6 +10,7 @@ type DateTimeFieldProps = {
   min?: string;
   defaultTime?: string;
   className?: string;
+  hint?: string;
 };
 
 export function DateTimeField({
@@ -20,6 +21,7 @@ export function DateTimeField({
   min,
   defaultTime = '09:00',
   className,
+  hint,
 }: DateTimeFieldProps) {
   const { date, time } = splitDatetimeLocal(value);
   const { date: minDate, time: minTime } = min ? splitDatetimeLocal(min) : { date: '', time: '' };
@@ -55,7 +57,7 @@ export function DateTimeField({
           onChange={(e) => update(date, e.target.value)}
           className="mt-0.5"
         />
-        <p className="text-[10px] text-gray-400 mt-1">24 soat (09:00 = tong, 21:00 = kech)</p>
+        {hint && <p className="text-[10px] text-gray-400 mt-1">{hint}</p>}
       </div>
     </div>
   );

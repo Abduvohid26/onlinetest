@@ -1,6 +1,16 @@
 import React, { useEffect, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
+import { translations, Language } from '../../i18n';
+
+function detectLang(): Language {
+  try {
+    const raw = (sessionStorage.getItem('lang') || localStorage.getItem('lang') || 'uz').trim();
+    return (raw === 'ru' || raw === 'en' || raw === 'uz') ? raw : 'uz';
+  } catch {
+    return 'uz';
+  }
+}
 
 export type AdminPageMsg = {
   type: 'ok' | 'err' | 'error' | 'success' | 'warning';
@@ -135,7 +145,7 @@ function AdminToastItem({
           type="button"
           onClick={() => removeAdminToast(entry.id)}
           className="shrink-0 -mr-1 -mt-0.5 p-1 rounded-md opacity-70 hover:opacity-100 hover:bg-black/5 transition"
-          aria-label="Close"
+          aria-label={translations[detectLang()].liveMonitorClose}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

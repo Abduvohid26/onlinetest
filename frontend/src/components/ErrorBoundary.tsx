@@ -1,5 +1,15 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { InstituteLogo } from './InstituteLogo';
+import { translations, Language } from '../i18n';
+
+function detectLang(): Language {
+  try {
+    const raw = (sessionStorage.getItem('lang') || localStorage.getItem('lang') || 'uz').trim();
+    return (raw === 'ru' || raw === 'en' || raw === 'uz') ? raw : 'uz';
+  } catch {
+    return 'uz';
+  }
+}
 
 interface Props {
   children?: ReactNode;
@@ -26,6 +36,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
+      const t = translations[detectLang()];
       return (
         <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6">
           <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 text-center border border-gray-100">
@@ -37,9 +48,9 @@ export class ErrorBoundary extends Component<Props, State> {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-4">Oops! Something went wrong.</h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">{t.errorBoundaryTitle}</h1>
             <p className="text-gray-500 mb-8">
-              An unexpected error occurred in the application. Our team has been notified.
+              {t.errorBoundaryBody}
             </p>
             <button
               onClick={() => {
@@ -48,7 +59,7 @@ export class ErrorBoundary extends Component<Props, State> {
               }}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-6 rounded-full transition-colors"
             >
-              Return to Home
+              {t.errorBoundaryReturnHome}
             </button>
             {process.env.NODE_ENV !== 'production' && this.state.error && (
               <div className="mt-6 text-left bg-gray-100 p-4 rounded-xl overflow-auto text-xs text-gray-700 max-h-40">

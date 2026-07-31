@@ -224,10 +224,10 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <AdminField label={t.startTime} required>
-                <DateTimeField value={startLocal} onChange={setStartLocal} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
+                <DateTimeField value={startLocal} onChange={setStartLocal} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} hint={t.dateTimeHint24h} />
               </AdminField>
               <AdminField label={t.endTime} required>
-                <DateTimeField value={endLocal} onChange={setEndLocal} min={startLocal || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} />
+                <DateTimeField value={endLocal} onChange={setEndLocal} min={startLocal || undefined} dateLabel={t.examDateLabel} timeLabel={t.examTimeLabel} hint={t.dateTimeHint24h} />
               </AdminField>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
