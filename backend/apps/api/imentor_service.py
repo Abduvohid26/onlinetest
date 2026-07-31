@@ -74,6 +74,7 @@ def _subject_context(subject_code: str) -> dict[str, Any]:
             "department_code": dept,
             "syllabus_id": int(row.get("syllabus_id") or 0) or None,
             "test_count": int(row.get("test_count") or 0),
+            "has_own_tests": bool(row.get("has_own_tests")),
         }
     dept = _derive_department_code(token)
     return {
@@ -81,6 +82,7 @@ def _subject_context(subject_code: str) -> dict[str, Any]:
         "department_code": dept,
         "syllabus_id": None,
         "test_count": 0,
+        "has_own_tests": False,
     }
 
 
@@ -142,6 +144,10 @@ def _build_subject_registry() -> dict[str, dict]:
                 )
                 canonical[code]["test_count"] = int(row.get("test_count") or 0)
                 canonical[code]["questions_total"] = int(row.get("questions_total") or 0)
+                # Shu KOD ostida haqiqatan test e'lon qilinganmi. Quyida kafedra
+                # hisobi fanlarga tarqatiladi va bu farq yo'qoladi — shuning
+                # uchun aynan shu yerda belgilab qo'yamiz.
+                canonical[code]["has_own_tests"] = int(row.get("test_count") or 0) > 0
         except IMentorApiError:
             pass
 
@@ -724,14 +730,23 @@ def fetch_random_imentor_questions(
         ctx = _subject_context(code)
         syllabus_id = ctx.get("syllabus_id")
         department_code = str(ctx.get("department_code") or "").strip() or None
+
+        # TARTIB MUHIM (tezlik uchun): agar shu fan kodi ostida test e'lon
+        # QILINMAGAN bo'lsa (testlar kafedra kodi ostida turadi — katalogda
+        # "kafedra__fan" ko'rinishidagi fanlarda odatiy hol), darhol kafedra
+        # bilan so'raymiz. Aks holda avval bo'sh javob keladi va faqat keyin
+        # zaxira yo'l ishlaydi — bu bekorga bir necha soniya yo'qotardi.
+        prefer_department = bool(
+            department_code and department_code != code and not ctx.get("has_own_tests")
+        )
         try:
             sample = imentor_sample_questions(
-                subject_code=code,
+                subject_code=None if prefer_department else code,
                 department_code=department_code,
                 count=question_limit if question_limit else None,
                 variant_label=v_label,
                 topic_code=t_code,
-                syllabus_id=syllabus_id,
+                syllabus_id=None if prefer_department else syllabus_id,
             )
         except IMentorApiError as ex:
             last_error = ex
@@ -751,6 +766,26 @@ def fetch_random_imentor_questions(
                 continue
 
         batch = sample.get("questions") if isinstance(sample, dict) else None
+
+        # MUHIM: API xato QAYTARMASDAN bo'sh javob berishi mumkin.
+        # Katalogda kafedra ostida bir nechta fan bor, lekin testlar ko'pincha
+        # KAFEDRA kodi ostida e'lon qilinadi. "kafedra__fan" kodi bilan so'ralsa
+        # API 200 + 0 savol qaytaradi. Ilgari zaxira yo'l faqat `except`
+        # ichida edi, ya'ni bo'sh javobda ishlamasdi va imtihon yaratish
+        # "test topilmadi" deb yiqilardi (ro'yxatda esa "1 test" ko'rinardi).
+        if (not isinstance(batch, list) or not batch) and department_code and department_code != code:
+            try:
+                sample = imentor_sample_questions(
+                    department_code=department_code,
+                    count=question_limit if question_limit else None,
+                    variant_label=v_label,
+                    topic_code=t_code,
+                )
+                batch = sample.get("questions") if isinstance(sample, dict) else None
+            except IMentorApiError as ex3:
+                last_error = ex3
+                batch = None
+
         if not isinstance(batch, list) or not batch:
             continue
         raw_qs.extend([q for q in batch if isinstance(q, dict)])
