@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { translations, Language } from '../i18n';
 import { motion, AnimatePresence } from 'motion/react';
@@ -47,7 +48,7 @@ export function AdminExamsTab({
 
   const fetchExams = useCallback(async (manual = false) => {
     if (manual) setRefreshing(true);
-    const res = await fetch(apiUrl(examsListUrl), { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(apiUrl(examsListUrl), { headers: authHeaders(token, lang) });
     if (!checkAdminAuthResponse(res)) { if (manual) setRefreshing(false); return; }
     if (res.ok) { const raw = await readJsonSafe<unknown>(res); setExams(Array.isArray(raw) ? raw : []); }
     if (manual) setRefreshing(false);
@@ -55,7 +56,7 @@ export function AdminExamsTab({
 
   const fetchGroups = useCallback(async () => {
     if (isStaffPortal) return;
-    const res = await fetch(apiUrl('/api/admin/groups'), { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(apiUrl('/api/admin/groups'), { headers: authHeaders(token, lang) });
     if (!checkAdminAuthResponse(res)) return;
     if (res.ok) { const raw = await readJsonSafe<unknown>(res); setGroups(Array.isArray(raw) ? raw : []); }
   }, [token, isStaffPortal]);
@@ -63,7 +64,7 @@ export function AdminExamsTab({
   useEffect(() => { void fetchExams(); void fetchGroups(); }, [fetchExams, fetchGroups]);
 
   const viewResults = async (examId: number) => {
-    const res = await fetch(apiUrl(resultsUrl(examId)), { headers: { Authorization: `Bearer ${token}` } });
+    const res = await fetch(apiUrl(resultsUrl(examId)), { headers: authHeaders(token, lang) });
     if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       const raw = await readJsonSafe<unknown>(res);
@@ -77,7 +78,7 @@ export function AdminExamsTab({
 
   const allowRetake = async (studentExamId: number) => {
     const retakeRes = await fetch(apiUrl(`/api/admin/student_exams/${studentExamId}/retake`), {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      method: 'POST', headers: authHeaders(token, lang),
     });
     if (!checkAdminAuthResponse(retakeRes)) return;
     if (selectedExam != null) viewResults(selectedExam);
@@ -195,7 +196,7 @@ export function AdminExamsTab({
                 <p className="text-[12px] text-gray-400 mt-0.5">
                   {filteredExams.length}
                   {examListFilter !== 'All' ? ` / ${exams.length}` : ''}{' '}
-                  {lang === 'ru' ? 'экзамен' : lang === 'en' ? 'exams' : 'imtihon'}
+                  {t.examsCountLabel}
                 </p>
               </div>
             </div>
@@ -290,7 +291,7 @@ export function AdminExamsTab({
                       </div>
                       {(e.exam_mode === 'bank_mixed' || e.exam_mode === 'imentor_mixed') && e.bank_question_count > 0 && (
                         <div className="bg-indigo-50 rounded-lg px-2.5 py-1.5 border border-indigo-100">
-                          <span className="text-[12px] text-indigo-700 font-semibold">{e.bank_question_count} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}</span>
+                          <span className="text-[12px] text-indigo-700 font-semibold">{e.bank_question_count} {t.questionsShort}</span>
                         </div>
                       )}
                     </div>
@@ -351,7 +352,7 @@ export function AdminExamsTab({
                       {['score', 'name', 'risk_score'].map((key) => (
                         <button key={key} type="button" onClick={() => handleSort(key)}
                           className={`px-2.5 py-1 text-[12px] font-semibold rounded-lg transition-colors ${sortConfig?.key === key ? 'bg-indigo-600 text-white' : 'hover:bg-gray-100 text-gray-600'}`}>
-                          {key === 'risk_score' ? t.examResultRisk : key === 'score' ? t.examResultScore : lang === 'ru' ? 'Имя' : lang === 'en' ? 'Name' : 'Ism'}
+                          {key === 'risk_score' ? t.examResultRisk : key === 'score' ? t.examResultScore : t.nameColumn}
                           {sortConfig?.key === key && (sortConfig.direction === 'asc' ? ' ↑' : ' ↓')}
                         </button>
                       ))}

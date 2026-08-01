@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
@@ -13,8 +14,8 @@ interface Props { token: string; lang: Language; }
 
 type Msg = { type: 'ok' | 'err'; text: string };
 
-function usePasswordChange(token: string) {
-  const h = { Authorization: `Bearer ${token}` };
+function usePasswordChange(token: string, lang: Language) {
+  const h = authHeaders(token, lang);
   const [pwdId, setPwdId] = useState<string | null>(null);
   const [pwdValue, setPwdValue] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
@@ -174,7 +175,7 @@ function UserRow({ u, lang, pwdHook, isAdmin = false, deleteConfirmId, deletingI
 
 export function StaffPage({ token, lang }: Props) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
 
   const [staffList, setStaffList] = useState<StudentRow[]>([]);
   const [adminList, setAdminList] = useState<StudentRow[]>([]);
@@ -187,8 +188,8 @@ export function StaffPage({ token, lang }: Props) {
   const [staffFormKey, setStaffFormKey] = useState(0);
   const [adminFormKey, setAdminFormKey] = useState(0);
 
-  const staffPwd = usePasswordChange(token);
-  const adminPwd = usePasswordChange(token);
+  const staffPwd = usePasswordChange(token, lang);
+  const adminPwd = usePasswordChange(token, lang);
 
   const reload = useCallback(async () => {
     const [rS, rA] = await Promise.all([
@@ -271,8 +272,8 @@ export function StaffPage({ token, lang }: Props) {
     { id: 'admin' as const, label: t.adminAdminTab, count: adminList.length },
   ];
 
-  const namePlaceholder = lang === 'ru' ? 'Иван Иванов' : lang === 'en' ? 'John Doe' : 'To\'liq ism';
-  const pwdPlaceholder = lang === 'ru' ? 'мин. 10 символов' : lang === 'en' ? 'min. 10 chars' : 'kamida 10 belgi';
+  const namePlaceholder = t.namePlaceholderExample;
+  const pwdPlaceholder = t.pwdMinPlaceholder;
 
   return (
     <div className="space-y-3">

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { createRealtimeSocket, buildRealtimeUrl } from '../lib/realtimeSocket';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { checkAdminAuthResponse } from '../lib/http';
 import { translations, Language } from '../i18n';
 import { AdminBtn } from '../pages/admin/ui';
@@ -47,7 +48,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...authHeaders(token, lang),
         },
         body: JSON.stringify({ can_retake: canRetake }),
       });
@@ -74,7 +75,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...authHeaders(token, lang),
         },
         body: JSON.stringify({}),
       });
@@ -101,7 +102,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
+          ...authHeaders(token, lang),
         },
         body: JSON.stringify({}),
       });
@@ -219,7 +220,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
               </svg>
-              {lang === 'uz' ? 'Orqaga' : lang === 'ru' ? 'Назад' : 'Back'}
+              {t.goBack}
             </button>
 
             <div className="h-4 w-px bg-gray-200 shrink-0" />
@@ -244,7 +245,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
             )}
             {activeAlerts.length > 0 && (
               <span className="inline-flex items-center h-7 px-2.5 rounded-full bg-red-50 border border-red-200 text-red-700 text-[12px] font-semibold">
-                {activeAlerts.length} {lang === 'uz' ? 'bloklandi' : lang === 'ru' ? 'блок.' : 'banned'}
+                {activeAlerts.length} {t.bannedShort}
               </span>
             )}
           </div>
@@ -354,7 +355,7 @@ export function LiveMonitor({ examId, token, lang, onClose }: LiveMonitorProps) 
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                 </svg>
-                {lang === 'uz' ? 'Orqaga qaytish' : lang === 'ru' ? 'Вернуться назад' : 'Go back'}
+                {t.goBackLong}
               </button>
             </div>
           </div>

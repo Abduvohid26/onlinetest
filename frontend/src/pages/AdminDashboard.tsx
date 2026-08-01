@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useNavigate as useRRNavigate, useLocation } from 'react-router-dom';
 import { translations, Language } from '../i18n';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { ImtixonTab } from './ImtixonTab';
 import { AdminExamsTab } from './AdminExamsTab';
@@ -138,7 +139,7 @@ export function AdminDashboard({
   }, [location.pathname, rrNavigate]);
 
   useEffect(() => {
-    fetch(apiUrl('/api/admin/stats'), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl('/api/admin/stats'), { headers: authHeaders(token, lang) })
       .then(async (res) => {
         if (!checkAdminAuthResponse(res) || !res.ok) return;
         const j = await readJsonSafe<{ bannedUsers?: number }>(res);
@@ -161,7 +162,7 @@ export function AdminDashboard({
   const navGroups: { label: string; items: { id: AdminPage; label: string; color?: string }[] }[] = [
     {
       label: '',
-      items: [{ id: 'overview', label: lang === 'ru' ? 'Главная' : lang === 'en' ? 'Dashboard' : 'Asosiy panel' }],
+      items: [{ id: 'overview', label: t.navOverview }],
     },
     {
       label: t.sidebarStudentsSection,

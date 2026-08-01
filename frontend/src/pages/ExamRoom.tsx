@@ -2927,7 +2927,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   const res = await fetch(apiUrl(`/api/student/ban-report.pdf?exam_id=${exam.id}`), {
                     headers: { ...examAuthHeaders(token), 'X-Student-Lang': langRef.current },
                   });
-                  if (!res.ok) throw new Error('yuklab bo\'lmadi');
+                  if (!res.ok) throw new Error(t.pdfDownloadFailed);
                   const blob = await res.blob();
                   const url = window.URL.createObjectURL(blob);
                   const a = document.createElement('a');
@@ -3041,9 +3041,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     MULTIPLE_FACES: { label: EXAM_L[lang].faceMulti,   border: 'border-red-500',    bg: 'bg-red-600/90',    text: 'text-white', icon: '⚠' },
     TOO_FAR:        { label: EXAM_L[lang].faceTooFar,  border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '↔' },
     TOO_CLOSE:      { label: EXAM_L[lang].faceTooClose, border: 'border-amber-400', bg: 'bg-amber-500/90',  text: 'text-white', icon: '↔' },
-    OFF_CENTER:     { label: 'Markazga o\'ting',   border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '⊕' },
-    TURNED:         { label: 'Kameraga qarang',    border: 'border-orange-400', bg: 'bg-orange-500/90', text: 'text-white', icon: '↻' },
-    GAZE_AWAY:      { label: 'Kameraga qarang',    border: 'border-orange-400', bg: 'bg-orange-500/90', text: 'text-white', icon: '👁' },
+    OFF_CENTER:     { label: EXAM_L[lang].liveOffCenter, border: 'border-amber-400',  bg: 'bg-amber-500/90',  text: 'text-white', icon: '⊕' },
+    TURNED:         { label: EXAM_L[lang].liveHeadAway,  border: 'border-orange-400', bg: 'bg-orange-500/90', text: 'text-white', icon: '↻' },
+    GAZE_AWAY:      { label: EXAM_L[lang].liveHeadAway,  border: 'border-orange-400', bg: 'bg-orange-500/90', text: 'text-white', icon: '👁' },
   };
 
   const toggleFlag = (qId: number) => {

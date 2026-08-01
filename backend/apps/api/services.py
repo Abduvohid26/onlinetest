@@ -480,21 +480,27 @@ def _coerce_exam_options(opts_raw: list, opts_en: list) -> list[str]:
     return out
 
 
+def resolve_ui_language(request) -> str:
+    """UI tili — X-Student-Lang / X-UI-Lang / body.lang (ogohlantirish/API xatolari)."""
+    for meta_key in ("HTTP_X_STUDENT_LANG", "HTTP_X_UI_LANG"):
+        header = str(request.META.get(meta_key) or "").lower().strip()[:2]
+        if header in ("uz", "ru", "en"):
+            return header
+    body = getattr(request, "data", None)
+    if isinstance(body, dict):
+        for key in ("student_lang", "lang", "ui_lang"):
+            sl = str(body.get(key) or "").lower().strip()[:2]
+            if sl in ("uz", "ru", "en"):
+                return sl
+    return "uz"
+
+
 def resolve_student_exam_language(request, exam) -> str:
     """Imtihon `auto` bo'lsa — talaba UI tili (header/body), aks holda imtihon tili."""
     exam_lang = (getattr(exam, "language", None) or "uz").lower()
     if exam_lang in ("uz", "ru", "en"):
         return exam_lang
-    header = str(request.META.get("HTTP_X_STUDENT_LANG") or "").lower().strip()[:2]
-    if header in ("uz", "ru", "en"):
-        return header
-    body = getattr(request, "data", None)
-    if isinstance(body, dict):
-        for key in ("student_lang", "lang"):
-            sl = str(body.get(key) or "").lower().strip()[:2]
-            if sl in ("uz", "ru", "en"):
-                return sl
-    return "uz"
+    return resolve_ui_language(request)
 
 
 def effective_exam_language(exam, student_lang: str) -> str:

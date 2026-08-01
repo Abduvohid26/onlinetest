@@ -68,7 +68,10 @@ def admin_users(request):
     if role not in ("admin", "student", "staff"):
         return Response({"error": "Role must be admin, student, or staff"}, status=400)
     if role == "student" and (not profile_image or len(str(profile_image)) < 50):
-        return Response({"error": "Talaba uchun profil rasmi majburiy"}, status=400)
+        return Response(
+            {"error": admin_api_msg("student_photo_required", resolve_ui_language(request))},
+            status=400,
+        )
     if profile_image:
         img_err = validate_profile_image_b64(profile_image)
         if img_err:
@@ -177,19 +180,34 @@ def admin_users_unban(request, user_id: str):
         return Response({"error": "Unban reason is required (min 8 chars)"}, status=400)
     ev = request.FILES.get("evidence")
     if not ev:
-        return Response({"error": "JPG yoki PDF evidence fayli majburiy"}, status=400)
+        return Response(
+            {"error": admin_api_msg("evidence_file_required", resolve_ui_language(request))},
+            status=400,
+        )
     mime = (getattr(ev, "content_type", "") or "").lower()
     ok_mime = mime in ("application/pdf", "image/jpeg")
     if not ok_mime:
-        return Response({"error": "Faqat JPG yoki PDF qabul qilinadi"}, status=400)
+        return Response(
+            {"error": admin_api_msg("evidence_mime_only", resolve_ui_language(request))},
+            status=400,
+        )
     raw = ev.read()
     if not raw or len(raw) > 5 * 1024 * 1024:
-        return Response({"error": "Evidence fayl hajmi 5MB dan oshmasin"}, status=400)
+        return Response(
+            {"error": admin_api_msg("evidence_too_large", resolve_ui_language(request))},
+            status=400,
+        )
     ext = os.path.splitext(getattr(ev, "name", "") or "")[1].lower()
     if mime == "application/pdf" and ext != ".pdf":
-        return Response({"error": "PDF fayl yuklang"}, status=400)
+        return Response(
+            {"error": admin_api_msg("evidence_pdf_ext", resolve_ui_language(request))},
+            status=400,
+        )
     if mime == "image/jpeg" and ext not in (".jpg", ".jpeg"):
-        return Response({"error": "JPG fayl yuklang"}, status=400)
+        return Response(
+            {"error": admin_api_msg("evidence_jpg_ext", resolve_ui_language(request))},
+            status=400,
+        )
     with transaction.atomic():
         AppUser.objects.filter(pk=user_id).update(status="Active")
         StudentExam.objects.filter(student_id=user_id, status="Banned").update(
@@ -527,7 +545,10 @@ def admin_levels(request):
         return Response({"error": "Name required"}, status=400)
     name = str(name).strip()[:200]
     if Level.objects.filter(name__iexact=name).exists():
-        return Response({"error": "Bu nomdagi level allaqachon bor"}, status=400)
+        return Response(
+            {"error": admin_api_msg("level_name_exists", resolve_ui_language(request))},
+            status=400,
+        )
     lv = Level.objects.create(name=name)
     audit(request, "create_level", "level", lv.id, lv.name)
     return Response({"id": lv.id, "name": lv.name})
@@ -540,7 +561,10 @@ def admin_level_detail(request, pk: int):
         return Response({"error": "Forbidden"}, status=403)
     lv = Level.objects.filter(pk=pk).first()
     if not lv:
-        return Response({"error": "Level topilmadi"}, status=404)
+        return Response(
+            {"error": admin_api_msg("level_not_found", resolve_ui_language(request))},
+            status=404,
+        )
     if request.method == "GET":
         group_count = Group.objects.filter(level_id=pk).count()
         return Response({"id": lv.id, "name": lv.name, "group_count": group_count})
@@ -551,7 +575,10 @@ def admin_level_detail(request, pk: int):
         old_name = lv.name
         name = str(name).strip()[:200]
         if Level.objects.filter(name__iexact=name).exclude(pk=pk).exists():
-            return Response({"error": "Bu nomdagi daraja allaqachon bor"}, status=400)
+            return Response(
+                {"error": admin_api_msg("level_name_exists_alt", resolve_ui_language(request))},
+                status=400,
+            )
         lv.name = name
         lv.save()
         audit(request, "rename_level", "level", lv.id, lv.name, f"{old_name!r} → {lv.name!r}")
@@ -560,7 +587,11 @@ def admin_level_detail(request, pk: int):
         group_count = Group.objects.filter(level_id=pk).count()
         if group_count > 0:
             return Response(
-                {"error": f"Bu darajada {group_count} ta guruh bor. Avval guruhlarni o'chirib yuboring."},
+                {
+                    "error": admin_api_msg(
+                        "level_has_groups", resolve_ui_language(request), n=group_count
+                    )
+                },
                 status=400,
             )
         audit(request, "delete_level", "level", lv.id, lv.name)
@@ -580,7 +611,10 @@ def admin_directions(request):
         return Response({"error": "Name required"}, status=400)
     name = str(name).strip()[:200]
     if Direction.objects.filter(name__iexact=name).exists():
-        return Response({"error": "Bu nomdagi yo'nalish allaqachon bor"}, status=400)
+        return Response(
+            {"error": admin_api_msg("direction_name_exists", resolve_ui_language(request))},
+            status=400,
+        )
     dr = Direction.objects.create(name=name)
     audit(request, "create_direction", "direction", dr.id, dr.name)
     return Response({"id": dr.id, "name": dr.name})
@@ -593,7 +627,10 @@ def admin_direction_detail(request, pk: int):
         return Response({"error": "Forbidden"}, status=403)
     dr = Direction.objects.filter(pk=pk).first()
     if not dr:
-        return Response({"error": "Yo'nalish topilmadi"}, status=404)
+        return Response(
+            {"error": admin_api_msg("direction_not_found", resolve_ui_language(request))},
+            status=404,
+        )
     if request.method == "GET":
         group_count = Group.objects.filter(direction_id=pk).count()
         return Response({"id": dr.id, "name": dr.name, "group_count": group_count})
@@ -604,7 +641,10 @@ def admin_direction_detail(request, pk: int):
         old_name = dr.name
         name = str(name).strip()[:200]
         if Direction.objects.filter(name__iexact=name).exclude(pk=pk).exists():
-            return Response({"error": "Bu nomdagi yo'nalish allaqachon bor"}, status=400)
+            return Response(
+                {"error": admin_api_msg("direction_name_exists", resolve_ui_language(request))},
+                status=400,
+            )
         dr.name = name
         dr.save()
         audit(request, "rename_direction", "direction", dr.id, dr.name, f"{old_name!r} → {dr.name!r}")
@@ -613,7 +653,11 @@ def admin_direction_detail(request, pk: int):
         group_count = Group.objects.filter(direction_id=pk).count()
         if group_count > 0:
             return Response(
-                {"error": f"Bu yo'nalishda {group_count} ta guruh bor. Avval guruhlarni boshqa yo'nalishga o'tkazing yoki o'chiring."},
+                {
+                    "error": admin_api_msg(
+                        "direction_has_groups", resolve_ui_language(request), n=group_count
+                    )
+                },
                 status=400,
             )
         audit(request, "delete_direction", "direction", dr.id, dr.name)
@@ -727,7 +771,10 @@ def admin_group_detail(request, pk: int):
             try:
                 g.academic_year = int(v)
             except (TypeError, ValueError):
-                return Response({"error": "academic_year noto‘g‘ri"}, status=400)
+                return Response(
+                    {"error": admin_api_msg("academic_year_invalid", resolve_ui_language(request))},
+                    status=400,
+                )
         uf.append("academic_year")
     if not uf:
         return Response({"error": "No fields to update"}, status=400)
@@ -854,7 +901,10 @@ def admin_test_bank_import_smart(request):
         text = str(d["raw_text"])
     text = (text or "").strip()
     if not text and not raw_doc:
-        return Response({"error": "raw_text yoki file kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("raw_text_or_file", resolve_ui_language(request))},
+            status=400,
+        )
     if len(text) > 400_000:
         text = text[:400_000]
     source_language = language if language in ("en", "uz", "ru") else detect_question_language(text)
@@ -959,7 +1009,10 @@ def admin_test_bank_import_smart(request):
         if target_cat_id:
             fixed_cat = TestBankCategory.objects.filter(pk=target_cat_id).first()
             if not fixed_cat:
-                return Response({"error": "Tanlangan kategoriya topilmadi"}, status=400)
+                return Response(
+                    {"error": admin_api_msg("category_not_found", resolve_ui_language(request))},
+                    status=400,
+                )
             uf = ["source_language"]
             pt = d.get("category_program_track")
             if isinstance(pt, str) and pt.strip():
@@ -1185,7 +1238,10 @@ def admin_imentor_department_subjects(request, department_code: str):
             status=502,
         )
     if department is None:
-        return Response({"error": "Kafedra topilmadi"}, status=404)
+        return Response(
+            {"error": admin_api_msg("department_not_found", resolve_ui_language(request))},
+            status=404,
+        )
     return Response(
         {
             "configured": True,
@@ -1396,7 +1452,10 @@ def admin_exam_detail(request, pk: int):
         if cat_ids is None:
             cat_ids = safe_json_loads(e.bank_category_ids, [])
         if not isinstance(cat_ids, list) or not cat_ids:
-            return Response({"error": "Select at least one test bank category"}, status=400)
+            return Response(
+                {"error": admin_api_msg("bank_category_required", resolve_ui_language(request))},
+                status=400,
+            )
         n = max(1, min(200, int(d.get("bank_question_count") or e.bank_question_count or 20)))
         need_bank = n
         ok, pool_len = _bank_pool_check(cat_ids, need_bank)
@@ -1455,21 +1514,27 @@ def admin_exam_detail(request, pk: int):
     # boshlay olmasdi yoki e'lon qilingan vaqtdan kam vaqt olardi.
     if st >= et:
         return Response(
-            {"error": "Boshlanish vaqti tugash vaqtidan oldin bo'lishi kerak"}, status=400
+            {"error": admin_api_msg("start_before_end", resolve_ui_language(request))},
+            status=400,
         )
     window_minutes = int((et - st).total_seconds() // 60)
     if dur > window_minutes:
         return Response(
             {
-                "error": (
-                    f"Imtihon davomiyligi ({dur} daq) vaqt oralig'idan "
-                    f"({window_minutes} daq) katta bo'lishi mumkin emas"
+                "error": admin_api_msg(
+                    "duration_exceeds_window",
+                    resolve_ui_language(request),
+                    dur=dur,
+                    window=window_minutes,
                 )
             },
             status=400,
         )
     if dur <= 0:
-        return Response({"error": "Imtihon davomiyligi 0 dan katta bo'lishi kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("duration_positive", resolve_ui_language(request))},
+            status=400,
+        )
 
     try:
         with transaction.atomic():
@@ -1508,7 +1573,10 @@ def admin_exam_detail(request, pk: int):
                     [ExamGroup(exam_id=pk, group_id=gid) for gid in gids]
                 )
     except ValueError:
-        return Response({"error": "Select at least one group"}, status=400)
+        return Response(
+            {"error": admin_api_msg("group_required", resolve_ui_language(request))},
+            status=400,
+        )
     audit(request, "update_exam", "exam", pk, e.title)
     return Response({"success": True})
 @api_view(["GET"])
@@ -1602,7 +1670,10 @@ def admin_exam_exceptions(request, pk: int):
         return Response({"error": "Exam not found"}, status=404)
     items = (request.data or {}).get("items")
     if not isinstance(items, list):
-        return Response({"error": "items[] kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("items_required", resolve_ui_language(request))},
+            status=400,
+        )
     with transaction.atomic():
         ExamStudentException.objects.filter(exam_id=pk).delete()
         for item in items:
@@ -1640,11 +1711,20 @@ def admin_exam_retake_windows(request, pk: int):
     ws = parse_iso_datetime(d.get("window_start"))
     we = parse_iso_datetime(d.get("window_end"))
     if not sid or not ws or not we:
-        return Response({"error": "student_id, window_start, window_end kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("retake_fields_required", resolve_ui_language(request))},
+            status=400,
+        )
     if ws >= we:
-        return Response({"error": "Vaqt oralig‘i noto‘g‘ri"}, status=400)
+        return Response(
+            {"error": admin_api_msg("retake_window_invalid", resolve_ui_language(request))},
+            status=400,
+        )
     if not AppUser.objects.filter(pk=sid, role="student").exists():
-        return Response({"error": "Talaba topilmadi"}, status=404)
+        return Response(
+            {"error": admin_api_msg("student_not_found", resolve_ui_language(request))},
+            status=404,
+        )
     note = str(d.get("note") or "")[:2000]
     w = ExamRetakeWindow.objects.create(
         exam_id=pk, student_id=sid, window_start=ws, window_end=we, note=note

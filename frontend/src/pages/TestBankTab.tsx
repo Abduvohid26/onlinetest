@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
 import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, AdminPageMessageStack, PlusIcon } from './admin/ui';
 
 /* ── Types ── */
@@ -74,7 +75,7 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
   useEffect(() => {
     setLoading(true);
     fetch(apiUrl(`/api/admin/test-bank/questions?category_id=${catId}`), {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(token, lang),
     })
       .then(async (r) => {
         if (!checkAdminAuthResponse(r)) { setLoading(false); return; }
@@ -83,7 +84,7 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, [catId, token]);
+  }, [catId, token, lang]);
 
   const getText = (q: Question) => {
     if (lang === 'uz' && q.text_uz) return q.text_uz;
@@ -133,7 +134,7 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
         <AdminInput
           value={searchQ}
           onChange={(e) => setSearchQ(e.target.value)}
-          placeholder={lang === 'ru' ? 'Поиск по тексту…' : lang === 'en' ? 'Search questions…' : 'Savol bo\'yicha qidirish…'}
+          placeholder={t.searchQuestions}
           className="h-8 text-[12px] max-w-sm"
         />
         <span className="ml-3 text-[12px] text-gray-400 tabular-nums">
@@ -197,7 +198,7 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
 /* ── Main component ── */
 export function TestBankTab({ token, lang }: { token: string; lang: Language }) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
   const trackLabel = (track?: string | null) =>
     track === 'residency' ? t.trackResidency : track === 'master' ? t.trackMaster : t.trackBachelor;
 
@@ -273,16 +274,16 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
     if (!name) { setImportMsg({ type: 'err', text: t.testCollectionNameEn }); return; }
     if (!smartFile) { setImportMsg({ type: 'err', text: t.testBankAiNeedPdf }); return; }
     if (sharedImportState.running) {
-      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Предыдущий анализ ещё не завершён.' : lang === 'en' ? 'Previous import still running.' : 'Oldingi tahlil hali tugamagan.' });
+      setImportMsg({ type: 'err', text: t.importStillRunning });
       return;
     }
     const fn = smartFile.name?.toLowerCase() || '';
     if (!fn.endsWith('.pdf') && !fn.endsWith('.docx') && !fn.endsWith('.doc')) {
-      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Допустимые форматы: PDF, DOC, DOCX' : lang === 'en' ? 'Allowed formats: PDF, DOC, DOCX' : 'Ruxsat etilgan formatlar: PDF, DOC, DOCX' });
+      setImportMsg({ type: 'err', text: t.importAllowedFormats });
       return;
     }
     if (smartFile.size > 50 * 1024 * 1024) {
-      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Файл слишком большой (макс. 50 МБ).' : lang === 'en' ? 'File too large (max 50 MB).' : 'Fayl juda katta (maks. 50 MB).' });
+      setImportMsg({ type: 'err', text: t.importFileTooLarge });
       return;
     }
 
@@ -330,10 +331,10 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
         setFormKey((k) => k + 1);
         load();
       } else {
-        setImportMsg({ type: 'err', text: d?.error || d?.detail || (lang === 'ru' ? 'Ошибка импорта' : lang === 'en' ? 'Import error' : 'Import xatosi') });
+        setImportMsg({ type: 'err', text: d?.error || d?.detail || t.importError });
       }
     } catch {
-      setImportMsg({ type: 'err', text: lang === 'ru' ? 'Ошибка сети или таймаут.' : lang === 'en' ? 'Network error or timeout.' : 'Tarmoq xatosi yoki timeout.' });
+      setImportMsg({ type: 'err', text: t.importNetworkError });
     } finally {
       sharedImportState.running = false;
       setSmartBusy(false);
@@ -355,9 +356,9 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         {[
-          { label: lang === 'ru' ? 'Коллекций' : lang === 'en' ? 'Collections' : 'Kolleksiyalar', value: categories.length },
-          { label: lang === 'ru' ? 'Всего вопросов' : lang === 'en' ? 'Total questions' : 'Jami savollar', value: totalQuestions },
-          { label: lang === 'ru' ? 'Языков' : lang === 'en' ? 'Languages' : 'Tillar', value: 3 },
+          { label: t.bankCollections, value: categories.length },
+          { label: t.bankTotalQuestions, value: totalQuestions },
+          { label: t.bankLanguages, value: 3 },
         ].map((s) => (
           <div key={s.label} className="bg-white border border-gray-200 rounded-lg px-4 py-3.5">
             <p className="text-[26px] font-semibold text-gray-900 leading-none tabular-nums">{s.value}</p>
@@ -380,20 +381,20 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                 <AdminInput
                   value={collectionName}
                   onChange={(e) => setCollectionName(e.target.value)}
-                  placeholder={lang === 'ru' ? 'Внутренняя медицина — 2025' : lang === 'en' ? 'Internal Medicine — 2025' : 'Ichki kasalliklar — 2025'}
+                  placeholder={t.bankCategoryPlaceholder}
                   required
                   disabled={smartBusy}
                 />
               </AdminField>
 
-              <AdminField label={lang === 'ru' ? 'Язык документа' : lang === 'en' ? 'Document language' : 'Hujjat tili'}>
+              <AdminField label={t.bankDocLanguage}>
                 <AdminSelect value={sourceLanguage} onChange={(e) => setSourceLanguage(e.target.value)} disabled={smartBusy}>
                   {SOURCE_LANGUAGE_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{getLangLabel(opt, lang)}</option>
                   ))}
                 </AdminSelect>
                 <p className="text-[12px] text-gray-400 mt-1">
-                  {lang === 'ru' ? 'Авто: система определит язык сама' : lang === 'en' ? 'Auto: system detects language' : "Avtomatik: tizim o'zi aniqlaydi"}
+                  {t.bankAutoDetect}
                 </p>
               </AdminField>
 
@@ -403,9 +404,11 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                   accept=".pdf,.doc,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                   onChange={(e) => setSmartFile(e.target.files?.[0] ?? null)}
                   disabled={smartBusy}
+                  buttonText={t.filePick}
+                  placeholder={t.fileNone}
                 />
                 <p className="text-[12px] text-gray-400 mt-1">
-                  PDF, DOCX, DOC · {lang === 'ru' ? 'Макс. 50 МБ' : lang === 'en' ? 'Max 50 MB' : 'Maks. 50 MB'}
+                  PDF, DOCX, DOC · {t.bankMaxSize}
                 </p>
               </AdminField>
 
@@ -436,7 +439,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                   </div>
                   <div className="flex items-center gap-2 text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2">
                     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                    {lang === 'ru' ? 'Не закрывайте страницу' : lang === 'en' ? "Don't close this page" : "Sahifani yopmang"}
+                    {t.bankDontClose}
                   </div>
                 </div>
               )}
@@ -451,7 +454,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
               <AdminEmpty
                 icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>}
                 title={t.testBankNoQuestions}
-                subtitle={lang === 'ru' ? 'Загрузите PDF или DOCX файл слева' : lang === 'en' ? 'Upload a PDF or DOCX file on the left' : 'Chap tomonda PDF yoki DOCX fayl yuklang'}
+                subtitle={t.bankUploadHint}
               />
             ) : categories.map((c, i) => {
               const isDeleteConfirm = deleteConfirmId === c.id;
@@ -465,7 +468,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                         <p className="font-semibold text-gray-900 text-[15px] leading-tight">{c.name}</p>
                         <div className="flex flex-wrap items-center gap-1.5 mt-2">
                           <span className="text-[12px] font-semibold text-gray-600 bg-gray-100 px-2.5 py-0.5 rounded-md">
-                            {c.question_count ?? 0} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}
+                            {c.question_count ?? 0} {t.questionsShort}
                           </span>
                           {c.source_language && (
                             <span className="text-[11px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{c.source_language.toUpperCase()}</span>
@@ -475,7 +478,7 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
                           )}
                           {c.academic_year && (
                             <span className="text-[11px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">
-                              {c.academic_year}{lang === 'ru' ? ' курс' : lang === 'en' ? 'y' : '-kurs'}
+                              {c.academic_year}{t.bankCourseSuffix}
                             </span>
                           )}
                         </div>

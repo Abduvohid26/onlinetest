@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import { AdminCard, AdminEmpty, AdminInput, AdminSelect, AdminBtn } from './ui';
 
@@ -77,7 +78,7 @@ type Period = '' | 'today' | 'week' | 'month' | 'year';
 
 export function AuditPage({ token, lang }: Props) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);

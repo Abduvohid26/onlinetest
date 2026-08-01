@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import { AdminInput, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminLabel, AdminTextarea, AdminModal, AdminFileInput, AdminPageMessage } from './ui';
 import type { BanAppeal, Group, StudentRow } from './types';
@@ -10,7 +11,7 @@ interface Props { token: string; lang: Language; }
 
 export function BannedPage({ token, lang }: Props) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [banList, setBanList] = useState<StudentRow[]>([]);
@@ -268,7 +269,7 @@ export function BannedPage({ token, lang }: Props) {
                 </div>
                 <div>
                   <AdminLabel required>{t.adminUnbanEvidence} (JPG/PDF)</AdminLabel>
-                  <AdminFileInput accept=".jpg,.jpeg,application/pdf,image/jpeg" required onChange={(e) => setUnbanFile(e.target.files?.[0] || null)} />
+                  <AdminFileInput accept=".jpg,.jpeg,application/pdf,image/jpeg" required onChange={(e) => setUnbanFile(e.target.files?.[0] || null)} buttonText={t.filePick} placeholder={t.fileNone} />
                 </div>
                 <div className="flex justify-end gap-3 pt-2">
                   <AdminBtn variant="ghost" onClick={() => setUnbanUser(null)}>{t.cancel}</AdminBtn>

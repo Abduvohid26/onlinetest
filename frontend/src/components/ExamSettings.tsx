@@ -3,6 +3,7 @@ import { translations, Language } from '../i18n';
 import { motion, AnimatePresence } from 'motion/react';
 import { readJsonSafe } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { defaultExamEndLocal, defaultExamStartLocal, isValidDatetimeLocal } from '../lib/datetimeLocal';
 import { DateTimeField } from './DateTimeField';
 import { GroupMultiSelect } from './GroupMultiSelect';
@@ -65,7 +66,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
   useEffect(() => {
     if (method !== 'bank') return;
     (async () => {
-      const res = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: authHeaders(token, lang) });
       if (res.ok) { const raw = await readJsonSafe<unknown>(res); setBankCategories(Array.isArray(raw) ? raw : []); }
     })();
   }, [method, token]);
@@ -121,7 +122,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
 
     setSubmitting(true);
     try {
-      const res = await fetch(apiUrl('/api/admin/exams'), { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: fd });
+      const res = await fetch(apiUrl('/api/admin/exams'), { method: 'POST', headers: authHeaders(token, lang), body: fd });
       const data = await readJsonSafe<{ error?: string }>(res);
       if (!res.ok) { setMsg({ type: 'err', text: data?.error || t.examCreateFailed }); return; }
       setMsg({ type: 'ok', text: t.examCreatedOk });
@@ -153,7 +154,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
       }
       iconBg="bg-blue-600"
       title={t.addExam}
-      subtitle={lang === 'ru' ? 'Создайте новый экзамен для групп студентов' : lang === 'en' ? 'Create a new exam for student groups' : 'Talabalar guruhlari uchun yangi imtihon yarating'}
+      subtitle={t.examCreateSubtitle}
       borderColor="border-blue-200"
       headerBg="bg-blue-50/40"
     >
@@ -192,7 +193,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
           {/* ── Asosiy ma'lumotlar ── */}
           <div className="p-4 bg-gray-50/60 rounded-xl border border-gray-100 space-y-4">
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-              {lang === 'ru' ? 'Основная информация' : lang === 'en' ? 'Basic info' : 'Asosiy ma\'lumotlar'}
+              {t.examBasicInfo}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-[1fr_180px] gap-4">
               <AdminField label={t.title} required>
@@ -200,7 +201,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   required
-                  placeholder={lang === 'ru' ? 'Анатомия — весенний семестр 2025' : lang === 'en' ? 'Anatomy — Spring 2025' : 'Anatomiya — 2025 bahor semestri'}
+                  placeholder={t.examTitlePlaceholderAnatomy}
                 />
               </AdminField>
               <AdminField label={t.language}>
@@ -220,7 +221,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
           {/* ── Vaqt ── */}
           <div className="p-4 bg-gray-50/60 rounded-xl border border-gray-100 space-y-4">
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-              {lang === 'ru' ? 'Расписание' : lang === 'en' ? 'Schedule' : 'Vaqt jadvali'}
+              {t.examScheduleSection}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <AdminField label={t.startTime} required>
@@ -244,7 +245,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                 <AdminInput
                   value={customRules}
                   onChange={(e) => setCustomRules(e.target.value)}
-                  placeholder={lang === 'ru' ? 'Калькулятор запрещён' : lang === 'en' ? 'No calculator allowed' : "Kalkulyator taqiqlangan"}
+                  placeholder={t.examRulesPlaceholder}
                 />
               </AdminField>
             </div>
@@ -253,7 +254,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
           {/* ── Guruhlar ── */}
           <div className="p-4 bg-gray-50/60 rounded-xl border border-gray-100 space-y-3">
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-              {lang === 'ru' ? 'Группы студентов' : lang === 'en' ? 'Student groups' : 'Talabalar guruhlari'} <span className="text-red-400 normal-case text-[13px]">*</span>
+              {t.examStudentGroups} <span className="text-red-400 normal-case text-[13px]">*</span>
             </p>
             <GroupMultiSelect
               groups={groups}
@@ -266,7 +267,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
           {/* ── Savol usuli ── */}
           <div className="p-4 bg-gray-50/60 rounded-xl border border-gray-100 space-y-4">
             <p className="text-[11px] font-bold text-gray-400 uppercase tracking-widest">
-              {lang === 'ru' ? 'Источник вопросов' : lang === 'en' ? 'Question source' : 'Savollar manbai'}
+              {t.examQuestionSource}
             </p>
             <AnimatePresence mode="wait">
               {method === 'pdf' && (
@@ -279,7 +280,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                       className="h-11 pt-2.5 text-[13px] cursor-pointer"
                     />
                     <p className="text-[12px] text-gray-400 mt-1">
-                      {lang === 'ru' ? 'Формат: 1. Вопрос, A) Правильный, B) Неправильный...' : lang === 'en' ? 'Format: 1. Question, A) Correct, B) Wrong...' : "Format: 1. Savol matni, A) To'g'ri javob, B) Noto'g'ri..."}
+                      {t.examPdfFormatShort}
                     </p>
                   </AdminField>
                 </motion.div>
@@ -305,7 +306,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                               />
                               <span className="text-[14px] text-gray-800 font-medium flex-1 truncate">{c.name}</span>
                               <span className="text-[12px] font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full shrink-0">
-                                {c.question_count ?? 0} {lang === 'ru' ? 'вопр.' : lang === 'en' ? 'qs' : 'savol'}
+                                {c.question_count ?? 0} {t.questionsShort}
                               </span>
                             </label>
                           ))}
@@ -330,14 +331,14 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
               {method === 'manual' && (
                 <motion.div key="manual" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} className="space-y-4">
                   <p className="text-[14px] font-semibold text-gray-700">
-                    {lang === 'ru' ? 'Вопросы' : lang === 'en' ? 'Questions' : 'Savollar'} ({manualQuestions.length})
+                    {t.questionsSectionLabel} ({manualQuestions.length})
                   </p>
                   {manualQuestions.map((q, i) => (
                     <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                       className="border border-gray-200 rounded-2xl p-4 space-y-3 bg-white">
                       <div className="flex items-center justify-between">
                         <span className="text-[13px] font-semibold text-gray-500 uppercase tracking-wide">
-                          {lang === 'ru' ? `Вопрос ${i + 1}` : lang === 'en' ? `Question ${i + 1}` : `${i + 1}-savol`}
+                          {t.questionNumberLabel.replace('{n}', String(i + 1))}
                         </span>
                         {manualQuestions.length > 1 && (
                           <button type="button" onClick={() => removeManualQuestion(i)}
@@ -349,7 +350,7 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                       <AdminInput
                         value={q.text}
                         onChange={(e) => { const n = [...manualQuestions]; n[i].text = e.target.value; setManualQuestions(n); }}
-                        placeholder={lang === 'ru' ? 'Текст вопроса...' : lang === 'en' ? 'Question text...' : 'Savol matni...'}
+                        placeholder={t.questionTextPlaceholder}
                         required
                       />
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -367,8 +368,8 @@ export function ExamSettings({ token, lang, groups, onSuccess }: ExamSettingsPro
                                 setManualQuestions(n);
                               }}
                               placeholder={optIdx === 0
-                                ? (lang === 'ru' ? 'Правильный ответ' : lang === 'en' ? 'Correct answer' : "To'g'ri javob")
-                                : `${String.fromCharCode(65 + optIdx)} ${lang === 'ru' ? 'вариант' : lang === 'en' ? 'option' : 'variant'}`}
+                                ? t.correctAnswerOption
+                                : `${String.fromCharCode(65 + optIdx)} ${t.optionVariantLabel}`}
                               required className="flex-1"
                             />
                           </div>

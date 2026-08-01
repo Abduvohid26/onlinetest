@@ -73,9 +73,15 @@ def student_ban_appeals(request):
     exam_id = d.get("exam_id")
     reason = str(d.get("reason") or "").strip()
     if not exam_id or not reason:
-        return Response({"error": "exam_id and reason are required"}, status=400)
+        return Response(
+            {"error": student_api_msg("appeal_fields_required", resolve_ui_language(request))},
+            status=400,
+        )
     if len(reason) < 12:
-        return Response({"error": "Appeal reason is too short"}, status=400)
+        return Response(
+            {"error": student_api_msg("appeal_reason_short", resolve_ui_language(request))},
+            status=400,
+        )
     try:
         exam_id_int = int(exam_id)
     except (TypeError, ValueError):
@@ -83,9 +89,15 @@ def student_ban_appeals(request):
 
     se = StudentExam.objects.filter(student_id=u.id, exam_id=exam_id_int, status="Banned").first()
     if not se and u.status != "Banned":
-        return Response({"error": "No banned record found for this exam"}, status=400)
+        return Response(
+            {"error": student_api_msg("appeal_no_ban", resolve_ui_language(request))},
+            status=400,
+        )
     if BanAppeal.objects.filter(student_id=u.id, exam_id=exam_id_int, status="Pending").exists():
-        return Response({"error": "Pending appeal already exists for this exam"}, status=400)
+        return Response(
+            {"error": student_api_msg("appeal_pending_exists", resolve_ui_language(request))},
+            status=400,
+        )
 
     evidence_data = str(d.get("evidence_base64") or "")
     evidence_name = str(d.get("evidence_name") or "")[:255]
@@ -160,7 +172,11 @@ def student_results(request):
                 "result_public_id": se.result_public_id,
                 "ban_reason": (getattr(se, "ban_reason", "") or "").strip(),
                 "attempts_count": attempts_count,
-                "attempt_history": build_attempt_history(u.id, se.exam_id) if attempts_count > 1 else [],
+                "attempt_history": (
+                    build_attempt_history(u.id, se.exam_id, lang=resolve_ui_language(request))
+                    if attempts_count > 1
+                    else []
+                ),
                 "absent": is_absent,
             }
         )
@@ -280,7 +296,10 @@ def student_ban_report_pdf(request):
             .first()
         )
     if u.status != "Banned" and (not se or se.status != "Banned"):
-        return Response({"error": "Ban report mavjud emas"}, status=404)
+        return Response(
+            {"error": student_api_msg("ban_report_missing", resolve_ui_language(request))},
+            status=404,
+        )
     ex_id = se.exam_id if se else 0
     verify_token = signing.dumps({"sid": sid, "eid": ex_id}, salt="ban-report")
     base = public_base_url(request)

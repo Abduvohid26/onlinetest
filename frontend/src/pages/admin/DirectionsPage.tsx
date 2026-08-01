@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
@@ -19,7 +20,7 @@ interface Props {
  *  bir xil naqsh (CRUD, inline edit/delete) — faqat entity nomi boshqa. */
 export function DirectionsPage({ token, lang }: Props) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
 
   const [directions, setDirections] = useState<Direction[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);

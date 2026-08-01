@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
@@ -18,7 +19,7 @@ interface Props {
 
 export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Props) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
   const trackLabel = (track?: string | null) =>
     track === 'residency' ? t.trackResidency : track === 'master' ? t.trackMaster : t.trackBachelor;
 
@@ -171,7 +172,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
       <AdminCard
         icon={<PlusIcon />}
         title={t.kontingentAddGroup}
-        subtitle={lang === 'ru' ? 'Добавить группу к уровню' : lang === 'en' ? 'Add a group to a level' : 'Darajaga guruh qo\'shish'}
+        subtitle={t.groupsAddSubtitle}
       >
         <div className="px-5 py-4 space-y-4">
           <form onSubmit={addGroup} className="space-y-4">

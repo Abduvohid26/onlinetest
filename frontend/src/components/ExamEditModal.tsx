@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { translations, Language } from '../i18n';
 import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { fromIsoToDatetimeLocal } from '../lib/datetimeLocal';
 import { DateTimeField } from './DateTimeField';
 import {
@@ -68,7 +69,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
       setLoading(true);
       setError('');
       try {
-        const res = await fetch(apiUrl(`/api/admin/exams/${examId}`), { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(apiUrl(`/api/admin/exams/${examId}`), { headers: authHeaders(token, lang) });
         if (!checkAdminAuthResponse(res)) return;
         const data = await readJsonSafe<any>(res);
         if (!res.ok) throw new Error(data?.error || t.examLoadFailed);
@@ -89,7 +90,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
         setExceptions(Array.isArray(data.exceptions) ? data.exceptions : []);
         setRetakeList(Array.isArray(data.retake_windows) ? data.retake_windows : []);
         if (data.exam_mode === 'bank_mixed') {
-          const cr = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: { Authorization: `Bearer ${token}` } });
+          const cr = await fetch(apiUrl('/api/admin/test-bank/categories'), { headers: authHeaders(token, lang) });
           if (!checkAdminAuthResponse(cr)) return;
           if (cr.ok && !cancelled) {
             const cats = await readJsonSafe<any[]>(cr);
@@ -163,7 +164,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
       }
       const res = await fetch(apiUrl(`/api/admin/exams/${examId}`), {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token, lang) },
         body: JSON.stringify(body),
       });
       if (!checkAdminAuthResponse(res)) return;
@@ -184,7 +185,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
     try {
       const res = await fetch(apiUrl(`/api/admin/exams/${examId}/exceptions`), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token, lang) },
         body: JSON.stringify({ items: exceptions }),
       });
       if (!checkAdminAuthResponse(res)) { setExBusy(false); return; }
@@ -211,7 +212,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
     try {
       const res = await fetch(apiUrl(`/api/admin/exams/${examId}/retake-windows`), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json', ...authHeaders(token, lang) },
         body: JSON.stringify({
           student_id: rtStudent.trim(),
           window_start: new Date(rtStart).toISOString(),
@@ -222,7 +223,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
       if (!checkAdminAuthResponse(res)) return;
       const data = (await readJsonSafe<{ error?: string; id?: number }>(res)) || {};
       if (!res.ok) throw new Error(data.error || t.examSaveFailed);
-      const r2 = await fetch(apiUrl(`/api/admin/exams/${examId}`), { headers: { Authorization: `Bearer ${token}` } });
+      const r2 = await fetch(apiUrl(`/api/admin/exams/${examId}`), { headers: authHeaders(token, lang) });
       if (!checkAdminAuthResponse(r2)) return;
       const ex = await readJsonSafe<any>(r2);
       if (r2.ok && ex?.retake_windows) setRetakeList(ex.retake_windows);
@@ -241,7 +242,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
     try {
       const res = await fetch(apiUrl(`/api/admin/exams/${examId}/retake-windows/${wid}`), {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(token, lang),
       });
       if (!checkAdminAuthResponse(res)) return;
       if (!res.ok) {
@@ -262,7 +263,7 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
     try {
       const res = await fetch(apiUrl(`/api/admin/exams/${examId}`), {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: authHeaders(token, lang),
       });
       if (!checkAdminAuthResponse(res)) return;
       const data = (await readJsonSafe<{ error?: string }>(res)) || {};
@@ -278,8 +279,8 @@ export function ExamEditModal({ token, lang, examId, groups, onClose, onSaved }:
   };
 
   const TAB_LABELS = {
-    main:     lang === 'ru' ? 'Основное' : lang === 'en' ? 'Main' : 'Asosiy',
-    advanced: lang === 'ru' ? 'Дополнительно' : lang === 'en' ? 'Advanced' : 'Qo\'shimcha',
+    main:     t.examEditMain,
+    advanced: t.examEditAdvanced,
   };
 
   return (

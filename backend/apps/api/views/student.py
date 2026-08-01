@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
-from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations, question_references
+from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations, resolve_ui_language
+from apps.api.student_api_i18n import student_api_msg, question_references
 from apps.api.proctor_config import max_warnings_before_ban, warn_suppress_seconds
 from apps.api.proctor_escalation import (
     apply_official_warning_or_ban,
@@ -101,7 +102,7 @@ def student_identity_compare(request):
         except (TypeError, ValueError):
             return Response({"error": "Invalid exam_id"}, status=400)
         if not Exam.objects.filter(pk=eid).exists():
-            return Response({"error": "Exam not found"}, status=404)
+            return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
         if not _student_assigned_to_exam(u, eid):
             return Response(
                 {"error": "Forbidden", "code": "EXAM_NOT_ASSIGNED"},
@@ -261,7 +262,7 @@ def student_identity_compare(request):
 def student_exams_list(request):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     if not u.group_id:
         return Response([])
     assigned_ids = list(
@@ -286,6 +287,7 @@ def student_exams_list(request):
                 last_violations[eid] = str(row.get("violation_type") or "")
     out = []
     now = dj_tz.now()
+    ui_lang = resolve_ui_language(request)
     for e in exams_qs:
         se = ses_by_exam.get(e.id)
         if se is not None and (se.status or "").strip() == "In Progress":
@@ -328,7 +330,9 @@ def student_exams_list(request):
                 "identity_retakes_used": id_used,
                 "identity_retakes_remaining": id_remaining,
                 "last_violation_type": last_vtype,
-                "last_violation_reason": violation_reason_text(last_vtype) if last_vtype else "",
+                "last_violation_reason": (
+                    violation_reason_text(last_vtype, ui_lang) if last_vtype else ""
+                ),
                 "exam_retakes_blocked": (
                     exam_retakes_exhausted(se, e) if se is not None else False
                 ),
@@ -338,7 +342,9 @@ def student_exams_list(request):
                     and identity_verify_required()
                     and not _identity_verification_fresh(se, now)
                 ),
-                "attempt_history": build_attempt_history(u.id, e.id) if se else [],
+                "attempt_history": (
+                    build_attempt_history(u.id, e.id, lang=ui_lang) if se else []
+                ),
             }
         )
     return Response(out)
@@ -348,7 +354,7 @@ def student_exams_list(request):
 @permission_classes([IsAuthenticated])
 def student_proctor_config(request):
     if not _is_student_user(request.user):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     return Response(
         {
             "max_warnings_before_ban": max_warnings_before_ban(),
@@ -360,20 +366,21 @@ def student_proctor_config(request):
 def student_exams_start(request, pk: int):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     exam = Exam.objects.filter(pk=pk).first()
     if not exam:
-        return Response({"error": "Exam not found"}, status=404)
+        return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
     if not ExamGroup.objects.filter(exam_id=pk, group_id=u.group_id).exists():
-        return Response({"error": "Exam not assigned to your group"}, status=403)
+        return Response({"error": student_api_msg("exam_not_assigned", resolve_ui_language(request))}, status=403)
 
     if vac_pc_only_enabled():
         ua = (request.META.get("HTTP_USER_AGENT") or "").lower()
         mobile_markers = ("android", "iphone", "ipad", "ipod", "mobile", "windows phone")
         if any(m in ua for m in mobile_markers):
+            ui = resolve_ui_language(request)
             return Response(
                 {
-                    "error": "Faqat kompyuter (desktop/laptop) orqali imtihon topshirish ruxsat etiladi.",
+                    "error": student_api_msg("desktop_only", ui),
                     "code": "VAC_PC_ONLY",
                 },
                 status=403,
@@ -397,13 +404,13 @@ def student_exams_start(request, pk: int):
     ).exists()
     if not in_general and not in_retake:
         if exam.start_time and now < exam.start_time:
-            return Response({"error": "Exam has not started yet"}, status=403)
-        return Response({"error": "Exam has already ended"}, status=403)
+            return Response({"error": student_api_msg("exam_not_started", resolve_ui_language(request))}, status=403)
+        return Response({"error": student_api_msg("exam_already_ended", resolve_ui_language(request))}, status=403)
 
     prof = AppUser.objects.filter(pk=u.id).values_list("profile_image", flat=True).first()
     if not prof or len(str(prof)) < 50:
         return Response(
-            {"error": "Profil rasmsiz imtihon boshlash mumkin emas. Administratorga murojaat qiling."},
+            {"error": student_api_msg("profile_photo_required", resolve_ui_language(request))},
             status=403,
         )
 
@@ -428,7 +435,7 @@ def student_exams_start(request, pk: int):
     ):
         return Response(
             {
-                "error": "Yuz tekshiruvi talab qilinadi. Pre-exam bosqichini yakunlang.",
+                "error": student_api_msg("identity_required", resolve_ui_language(request)),
                 "code": "IDENTITY_NOT_VERIFIED",
             },
             status=403,
@@ -457,12 +464,12 @@ def student_exams_start(request, pk: int):
                 session_challenge=session_challenge,
             )
         elif se.status in ("Banned", "Completed", "Failed"):
-            return Response({"error": f"Exam already {se.status}"}, status=403)
+            return Response({"error": student_api_msg("exam_already_status", resolve_ui_language(request), status=se.status)}, status=403)
         elif se.status == "Pending":
             if exam_retakes_exhausted(se, exam):
                 return Response(
                     {
-                        "error": "Qayta topshirish imkoniyati tugadi. Administratorga murojaat qiling.",
+                        "error": student_api_msg("retake_exhausted", resolve_ui_language(request)),
                         "code": "RETAKE_EXHAUSTED",
                     },
                     status=403,
@@ -593,8 +600,9 @@ def student_exams_start(request, pk: int):
             if pool_count < n_bank:
                 return Response(
                     {
-                        "error": "Sizning guruhingiz (kurs/dastur) uchun tanlangan kategoriyalarda "
-                        "yetarli savol yo'q. Administrator kategoriya yoki guruh sozlamalarini tekshirsin."
+                        "error": student_api_msg(
+                            "bank_pool_insufficient", resolve_ui_language(request)
+                        )
                     },
                     status=400,
                 )
@@ -699,7 +707,10 @@ def student_exams_start(request, pk: int):
                 msg = str(ex)
                 if isinstance(ex, IMentorApiError):
                     return Response({"error": msg}, status=502 if ex.status and ex.status >= 500 else 400)
-                return Response({"error": "iMentor test yuklanmadi"}, status=502)
+                return Response(
+                    {"error": student_api_msg("imentor_load_failed", resolve_ui_language(request))},
+                    status=502,
+                )
             para_lang = ex_lang
             if is_auto_exam and picked:
                 from apps.api.gemini_tools import detect_question_language
@@ -799,15 +810,15 @@ def student_exams_start(request, pk: int):
 def student_exams_submit(request, pk: int):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     answers = (request.data or {}).get("answers")
     flagged = (request.data or {}).get("flaggedQuestions")
     if not isinstance(answers, dict):
-        return Response({"error": "Invalid answers format"}, status=400)
+        return Response({"error": student_api_msg("invalid_answers", resolve_ui_language(request))}, status=400)
     if not Exam.objects.filter(pk=pk).exists():
-        return Response({"error": "Exam not found"}, status=404)
+        return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
     if not _student_assigned_to_exam(u, pk):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
 
     with transaction.atomic():
         se = (
@@ -817,7 +828,7 @@ def student_exams_submit(request, pk: int):
             .first()
         )
         if not se or se.status != "In Progress":
-            return Response({"error": "Cannot submit exam"}, status=403)
+            return Response({"error": student_api_msg("cannot_submit", resolve_ui_language(request))}, status=403)
         mismatch = _enforce_bound_device_or_403(se, request)
         if mismatch is not None:
             return mismatch
@@ -828,13 +839,13 @@ def student_exams_submit(request, pk: int):
         now_submit = dj_tz.now()
         if not student_in_exam_access_window(exam, str(u.id), now_submit):
             return Response(
-                {"error": "Imtihon vaqti tugagan. Javoblar qabul qilinmaydi."},
+                {"error": student_api_msg("exam_time_expired", resolve_ui_language(request))},
                 status=403,
             )
         deadline = submission_deadline(exam, se, student_id=str(u.id))
         if deadline and now_submit > deadline:
             return Response(
-                {"error": "Imtihon vaqti tugagan. Javoblar qabul qilinmaydi."},
+                {"error": student_api_msg("exam_time_expired", resolve_ui_language(request))},
                 status=403,
             )
         min_sec = exam_min_submit_seconds()
@@ -843,14 +854,19 @@ def student_exams_submit(request, pk: int):
             if elapsed < min_sec:
                 return Response(
                     {
-                        "error": f"Imtihonni topshirish uchun kamida {min_sec} soniya kuting.",
+                        "error": student_api_msg(
+                            "submit_min_wait", resolve_ui_language(request), n=min_sec
+                        ),
                         "code": "SUBMIT_TOO_EARLY",
                     },
                     status=403,
                 )
         if identity_verify_required() and not _identity_verification_fresh(se, now_submit):
             return Response(
-                {"error": "Yuz tekshiruvi muddati tugagan.", "code": "IDENTITY_VERIFY_EXPIRED"},
+                {
+                    "error": student_api_msg("identity_verify_expired", resolve_ui_language(request)),
+                    "code": "IDENTITY_VERIFY_EXPIRED",
+                },
                 status=403,
             )
         if se.session_questions_json:
@@ -945,15 +961,15 @@ def student_exams_submit(request, pk: int):
 def student_exam_clock(request, pk: int):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     exam = Exam.objects.filter(pk=pk).first()
     if not exam:
-        return Response({"error": "Exam not found"}, status=404)
+        return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
     if not _student_assigned_to_exam(u, pk):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     se = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
     if not se or se.status != "In Progress":
-        return Response({"error": "No active session"}, status=400)
+        return Response({"error": student_api_msg("no_active_session", resolve_ui_language(request))}, status=400)
     mismatch = _enforce_bound_device_or_403(se, request)
     if mismatch is not None:
         return mismatch
@@ -988,11 +1004,11 @@ def student_exam_clock(request, pk: int):
 def student_exam_draft(request, pk: int):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     if not Exam.objects.filter(pk=pk).exists():
-        return Response({"error": "Exam not found"}, status=404)
+        return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
     if not _student_assigned_to_exam(u, pk):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     se = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
     if not se or se.status != "In Progress":
         return Response({"answers": {}, "flaggedQuestions": [], "updated_at": None})
@@ -1020,15 +1036,15 @@ def student_exam_draft(request, pk: int):
 def student_exam_save_progress(request, pk: int):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     exam = Exam.objects.filter(pk=pk).first()
     if not exam:
-        return Response({"error": "Exam not found"}, status=404)
+        return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
     if not _student_assigned_to_exam(u, pk):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     se = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
     if not se or se.status != "In Progress":
-        return Response({"error": "No active session"}, status=400)
+        return Response({"error": student_api_msg("no_active_session", resolve_ui_language(request))}, status=400)
     mismatch = _enforce_bound_device_or_403(se, request)
     if mismatch is not None:
         return mismatch
@@ -1037,11 +1053,14 @@ def student_exam_save_progress(request, pk: int):
         return sig_err
     deadline = submission_deadline(exam, se, student_id=str(u.id))
     if deadline and dj_tz.now() > deadline:
-        return Response({"error": "Imtihon vaqti tugagan"}, status=403)
+        return Response(
+            {"error": student_api_msg("exam_time_expired_short", resolve_ui_language(request))},
+            status=403,
+        )
     answers = (request.data or {}).get("answers")
     flagged = (request.data or {}).get("flaggedQuestions")
     if not isinstance(answers, dict):
-        return Response({"error": "Invalid answers format"}, status=400)
+        return Response({"error": student_api_msg("invalid_answers", resolve_ui_language(request))}, status=400)
     if flagged is not None and not isinstance(flagged, list):
         return Response({"error": "Invalid flagged format"}, status=400)
     if se.session_questions_json:
@@ -1068,7 +1087,7 @@ def student_exam_save_progress(request, pk: int):
 def student_violations(request):
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     d = request.data or {}
     exam_id, vtype_raw = d.get("exam_id"), d.get("violation_type")
     if exam_id is None or exam_id == "" or vtype_raw is None or vtype_raw == "":
@@ -1128,12 +1147,12 @@ def student_violations(request):
         return Response({"error": "Invalid exam_id"}, status=400)
     exam_row = Exam.objects.filter(pk=exam_id_int).only("id", "ambient_audio_enabled").first()
     if exam_row is None:
-        return Response({"error": "Exam not found"}, status=404)
+        return Response({"error": student_api_msg("exam_not_found", resolve_ui_language(request))}, status=404)
     if not _student_assigned_to_exam(u, exam_id_int):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
     se_for_device = StudentExam.objects.filter(student_id=u.id, exam_id=exam_id_int).first()
     if not se_for_device or se_for_device.status != "In Progress":
-        return Response({"error": "No active session"}, status=409)
+        return Response({"error": student_api_msg("no_active_session", resolve_ui_language(request))}, status=409)
     mismatch = _enforce_bound_device_or_403(se_for_device, request)
     if mismatch is not None:
         return mismatch
@@ -1144,7 +1163,7 @@ def student_violations(request):
     def _guard(payload, status=200):
         return _exam_guarded_response(request, Response(payload, status=status))
 
-    reason_text = violation_reason_text(vtype)
+    reason_text = violation_reason_text(vtype, resolve_ui_language(request))
 
     # «Tashqi shovqin nazorati» imtihon sozlamasida O'CHIRILGAN bo'lsa — atrofdagi
     # ovozga bog'liq turlar umuman yozilmaydi va ogohlantirish bermaydi.
@@ -1500,11 +1519,11 @@ def student_proctor_frame(request, pk: int):
     """
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
 
     se = StudentExam.objects.filter(student_id=u.id, exam_id=pk).first()
     if not se or se.status != "In Progress":
-        return Response({"error": "No active session"}, status=409)
+        return Response({"error": student_api_msg("no_active_session", resolve_ui_language(request))}, status=409)
 
     mismatch = _enforce_bound_device_or_403(se, request)
     if mismatch is not None:
@@ -1549,7 +1568,7 @@ def student_proctor_frame_result(request, pk: int, task_id: str):
     """Async proctor task natijasini olish (poll). Tayyor bo'lmasa 202."""
     u = request.user
     if not _is_student_user(u):
-        return Response({"error": "Forbidden"}, status=403)
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
 
     from celery.result import AsyncResult
 

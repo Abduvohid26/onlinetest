@@ -90,8 +90,11 @@ from apps.api.services import (
     question_has_api_explanations,
     question_references,
     resolve_student_exam_language,
+    resolve_ui_language,
     shuffle_in_place,
 )
+from apps.api.admin_api_i18n import admin_api_msg
+from apps.api.student_api_i18n import student_api_msg  # noqa: F401 — re-export for views
 from apps.api.imentor_service import (
     enrich_questions_with_imentor_references,
     sync_ai_summary_item_references,
@@ -791,7 +794,10 @@ def _admin_exams_create_impl(request):
 
             if isinstance(ex, IMentorApiError):
                 return Response({"error": str(ex)}, status=400)
-            return Response({"error": "Noto'g'ri savollar soni"}, status=400)
+            return Response(
+                {"error": admin_api_msg("invalid_question_count", resolve_ui_language(request))},
+                status=400,
+            )
         imentor_codes_json = json.dumps(
             dump_imentor_selection(
                 codes,
@@ -816,7 +822,10 @@ def _admin_exams_create_impl(request):
 
             if isinstance(ex, IMentorApiError):
                 return Response({"error": str(ex)}, status=400)
-            return Response({"error": "iMentor test yuklanmadi"}, status=502)
+            return Response(
+                {"error": admin_api_msg("imentor_load_failed", resolve_ui_language(request))},
+                status=502,
+            )
     elif mode == "bank_mixed":
         raw_cat_ids = d.get("bank_category_ids")
         if isinstance(raw_cat_ids, list):
@@ -824,16 +833,21 @@ def _admin_exams_create_impl(request):
         else:
             cat_ids = safe_json_loads(raw_cat_ids or "[]", [])
         if not isinstance(cat_ids, list) or not cat_ids:
-            return Response({"error": "Select at least one test bank category"}, status=400)
+            return Response(
+                {"error": admin_api_msg("bank_category_required", resolve_ui_language(request))},
+                status=400,
+            )
         n = max(1, min(200, int(d.get("bank_question_count") or 20)))
         need_bank = n
         ok, pool_len = _bank_pool_check(cat_ids, need_bank)
         if not ok:
             return Response(
                 {
-                    "error": (
-                        f"Test bazasida yetarli savol yo'q ({pool_len}/{need_bank} kerak). "
-                        "Kategoriyalarga savol qo'shing yoki sonni kamaytiring."
+                    "error": admin_api_msg(
+                        "bank_pool_short",
+                        resolve_ui_language(request),
+                        have=pool_len,
+                        need=need_bank,
                     )
                 },
                 status=400,
@@ -871,13 +885,22 @@ def _admin_exams_create_impl(request):
     if not st or not et:
         return Response({"error": "Invalid datetime"}, status=400)
     if st >= et:
-        return Response({"error": "Boshlanish vaqti tugash vaqtidan oldin bo'lishi kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("start_before_end", resolve_ui_language(request))},
+            status=400,
+        )
     try:
         dur = int(duration_minutes)
     except (TypeError, ValueError):
-        return Response({"error": "Imtihon davomiyligi noto'g'ri"}, status=400)
+        return Response(
+            {"error": admin_api_msg("duration_invalid", resolve_ui_language(request))},
+            status=400,
+        )
     if dur <= 0:
-        return Response({"error": "Imtihon davomiyligi 0 dan katta bo'lishi kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("duration_positive", resolve_ui_language(request))},
+            status=400,
+        )
     # Qoidalar profili tanlovi olib tashlandi — har doim standart profil.
     # Retake chegaralari shundan olinadi (admin ularni alohida o'zgartira oladi).
     from apps.api.proctor_profiles import DEFAULT_PROCTOR_PROFILE, retake_limits_for_profile
@@ -889,14 +912,24 @@ def _admin_exams_create_impl(request):
     window_minutes = int((et - st).total_seconds() // 60)
     if dur > window_minutes:
         return Response(
-            {"error": f"Imtihon davomiyligi ({dur} daq) vaqt oralig'idan ({window_minutes} daq) katta bo'lishi mumkin emas"},
+            {
+                "error": admin_api_msg(
+                    "duration_exceeds_window",
+                    resolve_ui_language(request),
+                    dur=dur,
+                    window=window_minutes,
+                )
+            },
             status=400,
         )
 
     group_ids_raw = d.get("group_ids")
     gids = safe_json_loads(group_ids_raw, []) if isinstance(group_ids_raw, str) else (group_ids_raw or [])
     if not isinstance(gids, list) or not gids:
-        return Response({"error": "Kamida bitta guruh tanlanishi kerak"}, status=400)
+        return Response(
+            {"error": admin_api_msg("group_required", resolve_ui_language(request))},
+            status=400,
+        )
 
     ex_raw = d.get("exam_exceptions")
     if isinstance(ex_raw, str):

@@ -14,6 +14,7 @@ import { translations, Language } from './i18n';
 import { InstituteLogo } from './components/InstituteLogo';
 import { clearDeviceSessionToken, examAuthHeaders, setDeviceSessionToken } from './lib/deviceFingerprint';
 import { apiUrl } from './lib/apiUrl';
+import { authHeaders } from './lib/uiLangHeader';
 import { pollExamResultAiUpgrade } from './lib/upgradeExamResultAi';
 import { readJsonSafe } from './lib/http';
 
@@ -195,7 +196,7 @@ function AppContent() {
     const endpoint = roleEndpoints[user.role];
     if (!endpoint) return;
     tokenCheckedRef.current = true;
-    fetch(apiUrl(endpoint), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl(endpoint), { headers: authHeaders(token, lang) })
       .then(r => { if (r.status === 401) handleLogout(); })
       .catch(() => {});
   }, [token, user?.role, handleLogout]);
@@ -221,7 +222,7 @@ function AppContent() {
       return;
     }
     if (saved.examStatus === 'taking') {
-      fetch(apiUrl('/api/student/exams'), { headers: { Authorization: `Bearer ${token}` } })
+      fetch(apiUrl('/api/student/exams'), { headers: { ...authHeaders(token, lang), 'X-Student-Lang': lang } })
         .then(async (r) => {
           const list = await readJsonSafe<any[]>(r);
           const match = Array.isArray(list)
@@ -260,7 +261,7 @@ function AppContent() {
   useEffect(() => {
     if (user?.role !== 'student' || !token || !routeExamId || Number.isNaN(routeExamId)) return;
     if (activeExam?.id === routeExamId) return;
-    fetch(apiUrl('/api/student/exams'), { headers: { Authorization: `Bearer ${token}` } })
+    fetch(apiUrl('/api/student/exams'), { headers: { ...authHeaders(token, lang), 'X-Student-Lang': lang } })
       .then(async (r) => {
         const list = await readJsonSafe<any[]>(r);
         const match = Array.isArray(list) ? list.find((e) => e.id === routeExamId) : null;
@@ -600,7 +601,7 @@ function AppContent() {
         <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 max-w-3xl mx-auto">
           <InstituteLogo size="xs" className="opacity-90" />
           <p className="text-[10px] leading-tight text-gray-400 font-normal tracking-wide text-center">
-            © {new Date().getFullYear()} Fjsti Online Exam · Farg‘ona jamoat salomatligi tibbiyot instituti
+            © {new Date().getFullYear()} Fjsti Online Exam · {t.instituteFullName}
           </p>
         </div>
       </footer>

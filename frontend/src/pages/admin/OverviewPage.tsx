@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { translations, Language, type TranslationBundle } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import { AdminSectionLabel } from './ui';
 import type { AdminStats } from './types';
@@ -118,7 +119,7 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const res = await fetch(apiUrl('/api/admin/stats'), { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(apiUrl('/api/admin/stats'), { headers: authHeaders(token, lang) });
       if (!checkAdminAuthResponse(res)) return;
       const j = await readJsonSafe<AdminStats>(res);
       if (j) setStats(j);

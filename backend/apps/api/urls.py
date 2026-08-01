@@ -8,6 +8,7 @@ urlpatterns = [
     path("live", views.health_live),
     path("ready", views.health_ready),
     path("auth/login", views.auth_login),
+    path("auth/me", views.auth_me),
     path("student/identity-compare", views.student_identity_compare),
     path("student/exams", views.student_exams_list),
     path("student/exams/<int:pk>/clock", views.student_exam_clock),

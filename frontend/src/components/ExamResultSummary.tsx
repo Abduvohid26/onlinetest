@@ -178,7 +178,7 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                 <InstituteLogo size="xl" className="shrink-0 shadow-lg ring-2 ring-white" />
                 <div className="min-w-0 pt-1">
                   <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">
-                    Farg‘ona jamoat salomatligi tibbiyot instituti
+                    {t.instituteFullName}
                   </p>
                   <h1 className="text-2xl sm:text-[2rem] font-bold text-slate-900 tracking-tight mt-1.5 leading-tight">
                     {t.resultCertTitle}
@@ -260,11 +260,7 @@ export function ExamResultSummary({ data, token, lang = 'uz', publicPdfUrl, onBa
                 {data.score} <span className="text-slate-400 font-semibold text-xl">/ {data.total}</span>
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                {lang === 'ru'
-                  ? `Зачёт: минимум ${passThreshold}% правильных ответов`
-                  : lang === 'en'
-                    ? `Passing score: at least ${passThreshold}% correct`
-                    : `O'tish mezoni: kamida ${passThreshold}% to'g'ri javob`}
+                {t.passThresholdHint.replace('{n}', String(passThreshold))}
               </p>
             </div>
           </div>

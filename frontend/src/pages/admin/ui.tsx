@@ -35,7 +35,7 @@ interface FileInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement
   placeholder?: string;
 }
 export const AdminFileInput = React.forwardRef<HTMLInputElement, FileInputProps>(
-  ({ buttonText = 'Fayl tanlash', placeholder = 'Fayl tanlanmagan', onChange, disabled, className, ...rest }, ref) => {
+  ({ buttonText = 'Choose file', placeholder = 'No file selected', onChange, disabled, className, ...rest }, ref) => {
     const [fileName, setFileName] = React.useState('');
     return (
       <label

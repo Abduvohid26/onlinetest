@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { translations, Language } from '../i18n';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import {
   defaultExamEndLocal,
   defaultExamStartLocal,
@@ -62,7 +63,7 @@ export function ImtixonTab({
   adminUserId?: string;
 }) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
 
   const [groups, setGroups] = useState<any[]>([]);
   const [imentorDepartments, setImentorDepartments] = useState<ImentorDepartment[]>([]);
@@ -439,7 +440,7 @@ export function ImtixonTab({
                   {imentorDepartments.map((d) => (
                     <option key={d.code} value={d.code}>
                       {d.name} ({d.subjects_count ?? 0}{' '}
-                      {lang === 'ru' ? 'предм.' : lang === 'en' ? 'subj.' : 'fan'})
+                      {t.subjectsShort})
                     </option>
                   ))}
                 </AdminSelect>
@@ -466,7 +467,7 @@ export function ImtixonTab({
                     {imentorSubjects.map((s) => {
                       const hasTests = (s.test_count ?? 0) > 0;
                       const testLabel =
-                        lang === 'ru' ? 'тест' : lang === 'en' ? 'tests' : 'test';
+                        t.testsShort;
                       const meta = hasTests
                         ? `${s.test_count} ${testLabel}`
                         : t.imentorSubjectNoTests;

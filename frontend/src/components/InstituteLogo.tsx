@@ -20,7 +20,7 @@ export function InstituteLogo({ className, size = 'sm' }: InstituteLogoProps) {
   return (
     <img
       src={LOGO_SRC}
-      alt="Farg‘ona jamoat salomatligi tibbiyot instituti logotipi"
+      alt="FJSTI"
       className={clsx('object-contain rounded-full shadow-md ring-1 ring-black/5', sizeClasses[size], className)}
       width={256}
       height={256}

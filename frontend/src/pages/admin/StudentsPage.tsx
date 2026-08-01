@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
+import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
 import { fileToProfileImageBase64, ProfileImageError } from '../../lib/profileImage';
 import {
@@ -17,7 +18,7 @@ interface Props {
 
 export function StudentsPage({ token, lang, initialGroupId }: Props) {
   const t = translations[lang];
-  const h = { Authorization: `Bearer ${token}` };
+  const h = authHeaders(token, lang);
 
   const [groups, setGroups] = useState<Group[]>([]);
   const [students, setStudents] = useState<StudentRow[]>([]);
@@ -192,10 +193,10 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                 <AdminInput name="id" required placeholder="s001" />
               </AdminField>
               <AdminField label={t.userFullName} required>
-                <AdminInput name="name" required placeholder={lang === 'ru' ? 'Иван Иванов' : 'To\'liq ism'} />
+                <AdminInput name="name" required placeholder={t.namePlaceholderExample} />
               </AdminField>
               <AdminField label={t.password} required>
-                <AdminInput name="password" type="password" required minLength={10} autoComplete="new-password" placeholder="min 10 belgi" />
+                <AdminInput name="password" type="password" required minLength={10} autoComplete="new-password" placeholder={t.pwdMinPlaceholder} />
               </AdminField>
               <AdminField label={t.kontingentGroups}>
                 <AdminSelect value={selectedGroupForAdd} onChange={(e) => setSelectedGroupForAdd(e.target.value)}>
@@ -210,7 +211,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
             </div>
             <div className="flex flex-wrap gap-4 items-end">
               <AdminField label={`${t.profilePhotoLabel} *`} className="flex-1 min-w-[200px]">
-                <AdminFileInput name="profile_image" accept="image/*" required />
+                <AdminFileInput name="profile_image" accept="image/*" required buttonText={t.filePick} placeholder={t.fileNone} />
               </AdminField>
               <AdminBtn type="submit" variant="blue" size="lg" icon={<PlusIcon size={16} />}>
                 {t.kontingentAddStudent}
@@ -360,6 +361,8 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                       key={editing.id}
                       accept="image/*"
                       onChange={onPhotoChange}
+                      buttonText={t.filePick}
+                      placeholder={t.fileNone}
                     />
                     {editPhotoPick && <p className="text-[12px] text-emerald-600 mt-1">✓ {editPhotoFile}</p>}
                   </div>

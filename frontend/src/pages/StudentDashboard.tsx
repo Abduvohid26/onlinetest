@@ -5,6 +5,7 @@ import { translations, Language, banReasonLabel } from '../i18n';
 import { ExamResultSummary, type ExamResultPayload } from '../components/ExamResultSummary';
 import { readJsonSafe, checkStudentAuthResponse } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
+import { authHeaders } from '../lib/uiLangHeader';
 import { pollExamResultAiUpgrade } from '../lib/upgradeExamResultAi';
 import { examAuthHeaders } from '../lib/deviceFingerprint';
 import { formatCountdown, formatExamDateTime, msUntil } from '../lib/datetimeLocal';
@@ -235,7 +236,7 @@ export function StudentDashboard({
     if (isManual) setRefreshing(true);
 
     const examsRes = await fetch(apiUrl('/api/student/exams'), {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { ...authHeaders(token, lang), 'X-Student-Lang': lang },
     });
 
     const dateHdr = examsRes.headers.get('Date');
@@ -260,7 +261,7 @@ export function StudentDashboard({
 
     if (cancelledRef.current) return;
     const resultsRes = await fetch(apiUrl('/api/student/results'), {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { ...authHeaders(token, lang), 'X-Student-Lang': lang },
     });
     if (!checkStudentAuthResponse(resultsRes)) { setLoading(false); setRefreshing(false); return; }
     if (resultsRes.ok) {
@@ -270,7 +271,7 @@ export function StudentDashboard({
 
     if (cancelledRef.current) return;
     const appealsRes = await fetch(apiUrl('/api/student/ban-appeals'), {
-      headers: { Authorization: `Bearer ${token}`, ...examAuthHeaders(token) },
+      headers: { ...authHeaders(token, lang), 'X-Student-Lang': lang, ...examAuthHeaders(token) },
     });
     if (!checkStudentAuthResponse(appealsRes)) { setLoading(false); setRefreshing(false); return; }
     if (appealsRes.ok) {
