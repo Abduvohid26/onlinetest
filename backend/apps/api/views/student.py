@@ -1126,7 +1126,8 @@ def student_violations(request):
         exam_id_int = int(exam_id)
     except (TypeError, ValueError):
         return Response({"error": "Invalid exam_id"}, status=400)
-    if not Exam.objects.filter(pk=exam_id_int).exists():
+    exam_row = Exam.objects.filter(pk=exam_id_int).only("id", "ambient_audio_enabled").first()
+    if exam_row is None:
         return Response({"error": "Exam not found"}, status=404)
     if not _student_assigned_to_exam(u, exam_id_int):
         return Response({"error": "Forbidden"}, status=403)
@@ -1144,6 +1145,32 @@ def student_violations(request):
         return _exam_guarded_response(request, Response(payload, status=status))
 
     reason_text = violation_reason_text(vtype)
+
+    # «Tashqi shovqin nazorati» imtihon sozlamasida O'CHIRILGAN bo'lsa — atrofdagi
+    # ovozga bog'liq turlar umuman yozilmaydi va ogohlantirish bermaydi.
+    # SUSPICIOUS_AUDIO — shovqin; WHISPER_OR_CONVERSATION_SUSPECTED — nutq
+    # eshitildi, lekin talabaning og'zi qimirlamayapti, ya'ni ovoz BOSHQA
+    # odamdan (institut binosida imtihon o'tayotganda tabiiy holat).
+    # Talabaning O'ZI gapirishi (MOUTH_MOVEMENT_TALKING) bundan mustasno — u
+    # har doim hisobga olinadi.
+    AMBIENT_ONLY_TYPES = frozenset({"SUSPICIOUS_AUDIO", "WHISPER_OR_CONVERSATION_SUSPECTED"})
+    if vtype in AMBIENT_ONLY_TYPES and not bool(
+        getattr(exam_row, "ambient_audio_enabled", True)
+    ):
+        return _guard(
+            {
+                "banned": False,
+                "warningSuppressed": True,
+                "ambientDisabled": True,
+                "violationsCount": ViolationLog.objects.filter(
+                    student_id=u.id, exam_id=exam_id_int
+                ).count(),
+                "warningNumber": 0,
+                "violationReason": "",
+                "isFinalWarning": False,
+                "officialWarnings": int(se_for_device.proctor_official_warnings or 0),
+            }
+        )
 
     WARN_SUPPRESS_SECONDS = warn_suppress_seconds()
     EVENT_MIN_INTERVAL_SECONDS = max(1, int(os.environ.get("PROCTOR_EVENT_MIN_INTERVAL_SECONDS", "5")))

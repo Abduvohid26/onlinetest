@@ -282,6 +282,19 @@ function AppContent() {
           Boolean(match.in_progress)
             ? saved.activeExam
             : null;
+        // `/exam/:id/room` ga faqat HAQIQATAN ochiq sessiya bilan kiriladi.
+        // Aks holda (ban/tugatilgan/retake'dan keyin URL orqali yoki brauzer
+        // "Orqaga" tugmasi bilan qaytilganda) ExamRoom sessiyasiz ochilib,
+        // eski "Imtihonni boshlash" lobbisi chiqib ketardi — talaba banlangan
+        // bo'lsa ham nazorat noldan (1/3) qayta ishga tushardi.
+        if (routePhase === 'room' && !resumable) {
+          clearExamFlow();
+          setExamStatus('pending');
+          setActiveExam(null);
+          setStudentExamId(null);
+          navigate('/', { replace: true });
+          return;
+        }
         setActiveExam(resumable ? { ...resumable, ...match } : match);
         setStudentExamId(match.student_exam_id ?? saved?.studentExamId ?? 0);
         if (routePhase === 'check') setExamStatus('checking');

@@ -1786,7 +1786,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [audioLiveLabel, setAudioLiveLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    if (banned) return;
+    if (banned || !sessionStarted) return;
     // analyserRef dependency sifatida ishlamaydi — micReady state orqali qayta ulanamiz.
     if (!micReady) return;
     const analyser = analyserRef.current;
@@ -1817,7 +1817,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       const ambientRaw = ambientTrackerRef.current!.push(frame, speechRaw);
       const ambientMs = ambientContinuousRef.current!.push(ambientRaw, now);
-      const speechMs = speechContinuousRef.current!.push(speechRaw, now);
+      // «Tashqi shovqin nazorati» o'chirilgan bo'lsa: mikrofonga tushgan NUTQ ham
+      // faqat talabaning O'ZI gapirganda hisoblanadi (og'iz harakati bor).
+      // Silero VAD kimning ovozi ekanini ajratmaydi — yonidagi odam/koridordagi
+      // gap ham "gapirish" bo'lib ogohlantirish berardi, sozlama esa aynan shu
+      // holat (institut binosidagi imtihon) uchun qo'yilgan.
+      const speechCounted =
+        speechRaw && (ambientEnabledRef.current || mouthActiveRef.current);
+      const speechMs = speechContinuousRef.current!.push(speechCounted, now);
 
       const speechConfirmMs = sileroLive
         ? TALK_SIGNAL_CONFIRM_MS
@@ -1875,7 +1882,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
     }, 200);
     return () => clearInterval(id);
-  }, [banned, micReady]);
+  }, [banned, micReady, sessionStarted]);
 
   // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi. Davomiy holat
   // (mikrofon tuzatilmaguncha davom etadi) — qonun bo'yicha uzluksiz kuzatiladi,
@@ -2244,7 +2251,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       for (const t of types) void logViolationRef.current(t);
     },
     intervalMs: 15_000,
-    disabled: banned,
+    // Sessiya boshlanmagan (lobbi) — nazorat yo'q: savol ko'rinmayotgan paytda
+    // ogohlantirish/strike berilmasligi kerak.
+    disabled: banned || !sessionStarted,
   });
 
   // --- Real-time brauzer proctoring (MediaPipe): gaze/bosh burilishi, qimirlash,
@@ -2266,7 +2275,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     videoRef,
     streamRevision: proctorStreamRevision,
     eyeBaseline,
-    disabled: banned,
+    disabled: banned || !sessionStarted,
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
       formalIssuedFor(type);
