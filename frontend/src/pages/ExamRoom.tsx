@@ -17,6 +17,7 @@ import { SileroVad } from '../lib/sileroVad';
 import { ForbiddenObjectProctor } from '../lib/forbiddenObjectProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
+import { OwnSpeechGate } from '../lib/ownSpeechGate';
 import { ViolationGate } from '../lib/violationGate';
 import { TabSwitchGuard } from '../lib/tabSwitchGuard';
 import { ConsoleProbeDevtoolsDetector, WindowSizeDevtoolsHeuristic } from '../lib/devtoolsDetect';
@@ -1773,6 +1774,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     ambientEnabledRef.current = exam.ambient_audio_enabled !== false;
   }, [exam.ambient_audio_enabled]);
 
+  /** Tashqi shovqin o'chirilganda "o'zi gapiryaptimi" qarori (og'iz harakati oynasi). */
+  const ownSpeechGateRef = useRef<OwnSpeechGate | null>(null);
+
   const voiceTrackerRef = useRef<VoiceActivityTracker | null>(null);
   const ambientTrackerRef = useRef<AmbientNoiseTracker | null>(null);
   const speechContinuousRef = useRef<ContinuousSignalTracker | null>(null);
@@ -1817,13 +1821,18 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
       const ambientRaw = ambientTrackerRef.current!.push(frame, speechRaw);
       const ambientMs = ambientContinuousRef.current!.push(ambientRaw, now);
-      // «Tashqi shovqin nazorati» o'chirilgan bo'lsa: mikrofonga tushgan NUTQ ham
-      // faqat talabaning O'ZI gapirganda hisoblanadi (og'iz harakati bor).
-      // Silero VAD kimning ovozi ekanini ajratmaydi — yonidagi odam/koridordagi
-      // gap ham "gapirish" bo'lib ogohlantirish berardi, sozlama esa aynan shu
-      // holat (institut binosidagi imtihon) uchun qo'yilgan.
-      const speechCounted =
-        speechRaw && (ambientEnabledRef.current || mouthActiveRef.current);
+
+      // «Tashqi shovqin nazorati» O'CHIRILGAN bo'lsa: mikrofonga tushgan NUTQ ham
+      // faqat talabaning O'ZI gapirganda hisoblanadi. Silero VAD kimning ovozi
+      // ekanini ajratmaydi — yonidagi odam / koridordagi gap ham "gapirish" bo'lib
+      // chip + kichik modal + rasmiy ogohlantirish berardi. Sozlama esa aynan shu
+      // holat (institut binosida o'tkaziladigan imtihon) uchun qo'yilgan.
+      //
+      // Qaror OXIRGI ~2s og'iz harakati oynasi bo'yicha — `OwnSpeechGate`.
+      const ambientOn = ambientEnabledRef.current;
+      if (!ownSpeechGateRef.current) ownSpeechGateRef.current = new OwnSpeechGate();
+      const ownSpeech = ownSpeechGateRef.current.push(mouthActiveRef.current);
+      const speechCounted = speechRaw && (ambientOn || ownSpeech);
       const speechMs = speechContinuousRef.current!.push(speechCounted, now);
 
       const speechConfirmMs = sileroLive
@@ -1876,8 +1885,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (speechMs >= speechEscalateMs) {
         speechContinuousRef.current!.reset();
         formalIssuedFor(SPEECH_LEDGER_KEY);
+        // Tashqi shovqin o'chirilgan bo'lsa bu yerga FAQAT o'z nutqi yetib keladi
+        // (yuqoridagi og'iz oynasi) — turi ham shunga mos bo'lsin.
         void logViolationRef.current(
-          mouthActiveRef.current ? 'MOUTH_MOVEMENT_TALKING' : 'WHISPER_OR_CONVERSATION_SUSPECTED',
+          !ambientOn || mouthActiveRef.current
+            ? 'MOUTH_MOVEMENT_TALKING'
+            : 'WHISPER_OR_CONVERSATION_SUSPECTED',
         );
       }
     }, 200);
