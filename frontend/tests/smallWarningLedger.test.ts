@@ -1,5 +1,5 @@
 /**
- * "3 kichik ogohlantirish → 4-martasi rasmiy" qonuni (README.md).
+ * "2 kichik ogohlantirish → 3-martasi rasmiy" qonuni (README.md).
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,12 +13,11 @@ function episode(l: SmallWarningLedger, key: string): boolean {
 }
 
 describe('SmallWarningLedger', () => {
-  it('3 tagacha kichik, 4-epizodda rasmiy', () => {
+  it('2 tagacha kichik, 3-epizodda rasmiy', () => {
     const l = new SmallWarningLedger();
     assert.equal(episode(l, 'TALK'), false, '1-marta kichik');
     assert.equal(episode(l, 'TALK'), false, '2-marta kichik');
-    assert.equal(episode(l, 'TALK'), false, '3-marta kichik');
-    assert.equal(episode(l, 'TALK'), true, '4-marta RASMIY');
+    assert.equal(episode(l, 'TALK'), true, '3-marta RASMIY');
   });
 
   it('uzluksiz signal bitta epizod — takroran sanalmaydi', () => {
@@ -30,7 +29,7 @@ describe('SmallWarningLedger', () => {
 
   it('turlar bir-biriga qo\'shilmaydi', () => {
     const l = new SmallWarningLedger();
-    for (let i = 0; i < 3; i++) episode(l, 'TALK');
+    for (let i = 0; i < SMALL_WARNINGS_BEFORE_FORMAL; i++) episode(l, 'TALK');
     // Boshqa turdagi birinchi epizod hali kichik bo'lishi kerak.
     assert.equal(episode(l, 'HAND'), false);
     assert.equal(episode(l, 'TALK'), true, 'gapirish limiti to\'lgan');
@@ -38,11 +37,11 @@ describe('SmallWarningLedger', () => {
 
   it('rasmiy berilgach hisob nolga qaytadi', () => {
     const l = new SmallWarningLedger();
-    for (let i = 0; i < 3; i++) episode(l, 'TALK');
-    assert.equal(l.count('TALK'), 3);
+    for (let i = 0; i < SMALL_WARNINGS_BEFORE_FORMAL; i++) episode(l, 'TALK');
+    assert.equal(l.count('TALK'), SMALL_WARNINGS_BEFORE_FORMAL);
     l.formalIssued('TALK');
     assert.equal(l.count('TALK'), 0);
-    assert.equal(episode(l, 'TALK'), false, 'rasmiydan keyin yana 3 ta kichik beriladi');
+    assert.equal(episode(l, 'TALK'), false, 'rasmiydan keyin yana kichiklar beriladi');
   });
 
   it('remaining() qolgan kichik ogohlantirishlar sonini beradi', () => {
@@ -54,7 +53,7 @@ describe('SmallWarningLedger', () => {
 
   it('reset() hammasini tozalaydi', () => {
     const l = new SmallWarningLedger();
-    for (let i = 0; i < 3; i++) episode(l, 'TALK');
+    for (let i = 0; i < SMALL_WARNINGS_BEFORE_FORMAL; i++) episode(l, 'TALK');
     l.reset();
     assert.equal(l.count('TALK'), 0);
   });

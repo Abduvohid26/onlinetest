@@ -138,14 +138,14 @@ Login → Dashboard → PreExamCheck (kamera, qoidalar, shaxs, liveness)
 
 Qisqa uzilish (freym flicker, so‘zlar orasidagi pauza, tugmani qo‘yib yuborish) hisoblagichni buzmasligi uchun grace-oyna bor (odatda 500–1000ms).
 
-#### Kichik ogohlantirishlar SANALADI: 3 tadan keyin 4-si rasmiy
+#### Kichik ogohlantirishlar SANALADI: 2 tadan keyin 3-si rasmiy
 
 Faqat davomiylik yetarli emas edi: talaba qoidani buzib, chip chiqishi bilan to‘xtatib, keyin yana buzib — rasmiy ogohlantirishga umuman yetmasligi mumkin edi. Shu sabab **har bir kichik ogohlantirish sanaladi**:
 
 | Nechanchi kichik ogohlantirish | Natija |
 |---|---|
-| 1-, 2-, 3-marta | Kichik (kamera panelidagi chip, backendga hech narsa ketmaydi). Chipda hisob ko‘rinadi: `Gapirmang · 2/3` |
-| **4-marta** | **Darhol rasmiy** — chip chiqishi bilanoq `logViolation` ketadi va ogohlantirish modali ochiladi |
+| 1-, 2-marta | Kichik (kamera panelidagi chip, backendga hech narsa ketmaydi). Chipda hisob ko‘rinadi: `Gapirmang · 1/2` |
+| **3-marta** | **Darhol rasmiy** — chip chiqishi bilanoq `logViolation` ketadi va ogohlantirish modali ochiladi |
 
 - **Epizod** = signalning bitta uzluksiz davomi. Uzluksiz 30 soniya gapirish — bitta kichik ogohlantirish, 30 ta emas. To‘xtab, qaytadan boshlansa — yangi epizod, hisob +1.
 - Hisob **tur bo‘yicha alohida** (kalit = rasmiy violation turi). Bir marta qo‘l ko‘tarish + bir marta gapirish qo‘shilib jazoga aylanmaydi.
@@ -154,9 +154,9 @@ Faqat davomiylik yetarli emas edi: talaba qoidani buzib, chip chiqishi bilan to�
 
 Ya‘ni rasmiy ogohlantirish endi **ikki yo‘l** bilan keladi:
 1. Signal uzluksiz eskalatsiya muddatiga yetsa (4s, gapirish uchun 2s), **yoki**
-2. Shu tur bo‘yicha kichik ogohlantirishlar 3 tadan oshsa.
+2. Shu tur bo‘yicha kichik ogohlantirishlar 2 tadan oshsa.
 
-Kod: `frontend/src/lib/smallWarningLedger.ts` (`SmallWarningLedger`, `SMALL_WARNINGS_BEFORE_FORMAL = 3`), ExamRoom’dagi `noteSmallWarningRef` / `withSmallCount`. Test: `frontend/tests/smallWarningLedger.test.ts`.
+Kod: `frontend/src/lib/smallWarningLedger.ts` (`SmallWarningLedger`, `SMALL_WARNINGS_BEFORE_FORMAL = 2`), ExamRoom’dagi `noteSmallWarningRef` / `withSmallCount`. Test: `frontend/tests/smallWarningLedger.test.ts`.
 
 #### Gapirish uchun MAXSUS qoida (faqat gapirish uchun)
 

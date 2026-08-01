@@ -6,18 +6,20 @@
  * yonidagi odam, koridordagi gap, televizor ham "nutq" bo'lib chiqadi. Institut
  * binosida o'tkaziladigan imtihonda bu tinimsiz soxta ogohlantirish berardi.
  *
- * Nega bitta kadr yetarli emas: og'iz aniqlagichi qisqa noto'g'ri ijobiy beradi
- * (yutinish, kulish, chaynash) va yonidagi odam gapirayotgan paytga tasodifan mos
- * kelib qolishi mumkin. Shu sabab oxirgi ~2s oynasidagi kadrlarning KO'PCHILIGIDA
- * og'iz harakatda bo'lishi talab qilinadi.
+ * MUHIM — sezgirlik: bu darvoza gapirishni aniqlash CHEGARALARIGA (Silero/DSP
+ * ostonasi, TALK_SIGNAL_CONFIRM_MS / TALK_SIGNAL_ESCALATE_MS) UMUMAN tegmaydi.
+ * U faqat "ovoz manbai kim?" degan savolga javob beradi. Shu sabab og'iz oxirgi
+ * ~2s ichida BIR MARTA harakatlangani ham yetarli: talaba gapirganda og'iz ochilib
+ * yopiladi, MediaPipe esa har kadrda emas, uzuq-yuluq aniqlaydi (past yorug'lik,
+ * niqob, past FPS) — ko'pchilik kadr talab qilinsa, talabaning o'z gapirishi
+ * aniqlanmay qolardi. Yonidagi odam gapirganda esa talabaning og'zi umuman
+ * qimirlamaydi, ya'ni oyna bo'sh bo'ladi va signal hisoblanmaydi.
  */
 
 /** 200ms freym × 10 = ~2s oyna. */
 export const MOUTH_WINDOW_SAMPLES = 10;
-/** Shuncha kadr yig'ilmaguncha qaror qabul qilinmaydi (imtihon boshida). */
-export const MOUTH_WINDOW_MIN_SAMPLES = 4;
-/** Oynadagi og'iz-harakatli kadrlarning eng kam ulushi. */
-export const MOUTH_WINDOW_ACTIVE_RATIO = 0.6;
+/** Oynada shuncha og'iz-harakatli kadr bo'lsa — "o'zi gapiryapti". */
+export const MOUTH_WINDOW_MIN_ACTIVE = 1;
 
 export class OwnSpeechGate {
   private window: boolean[] = [];
@@ -29,9 +31,8 @@ export class OwnSpeechGate {
   push(mouthActive: boolean): boolean {
     this.window.push(mouthActive);
     if (this.window.length > MOUTH_WINDOW_SAMPLES) this.window.shift();
-    if (this.window.length < MOUTH_WINDOW_MIN_SAMPLES) return false;
     const active = this.window.reduce((n, v) => n + (v ? 1 : 0), 0);
-    return active / this.window.length >= MOUTH_WINDOW_ACTIVE_RATIO;
+    return active >= MOUTH_WINDOW_MIN_ACTIVE;
   }
 
   reset(): void {

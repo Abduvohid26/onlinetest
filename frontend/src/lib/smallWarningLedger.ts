@@ -1,13 +1,13 @@
 /**
- * Kichik ogohlantirishlar hisobi — "3 marta kichik, 4-martasi rasmiy" qonuni.
+ * Kichik ogohlantirishlar hisobi — "2 marta kichik, 3-martasi rasmiy" qonuni.
  *
  * README.md "Proctoring eskalatsiya qoidasi" ning ikkinchi qismi. Ilgari kichik
  * ogohlantirish faqat vizual edi va hech qayerda sanalmasdi — talaba qoidani
  * qayta-qayta buzib, har safar signalni to'xtatib turib, rasmiy ogohlantirishdan
  * qochishi mumkin edi. Endi HAR BIR kichik ogohlantirish sanaladi:
  *
- *   1-, 2-, 3-marta → kichik (kamera panelida chip, backendga hech narsa ketmaydi)
- *   4-marta         → DARHOL rasmiy ogohlantirish (chip chiqishi bilan)
+ *   1-, 2-marta → kichik (kamera panelida chip, backendga hech narsa ketmaydi)
+ *   3-marta     → DARHOL rasmiy ogohlantirish (chip chiqishi bilan)
  *
  * Hisob **tur bo'yicha alohida** yuritiladi (gapirish alohida, qo'l alohida...) —
  * har xil turdagi bir martalik tasodifiy signallar qo'shilib jazoga aylanmasin.
@@ -18,7 +18,7 @@
  */
 
 /** Necha marta kichik ogohlantirishdan keyin keyingisi rasmiy bo'ladi. */
-export const SMALL_WARNINGS_BEFORE_FORMAL = 3;
+export const SMALL_WARNINGS_BEFORE_FORMAL = 2;
 
 export class SmallWarningLedger {
   private counts = new Map<string, number>();
@@ -58,7 +58,7 @@ export class SmallWarningLedger {
 
   /**
    * Rasmiy ogohlantirish berildi — hisob nolga qaytadi va epizod yopiladi
-   * (talabaga toza start; keyingi rasmiy uchun yana 3 ta kichik kerak bo'ladi).
+   * (talabaga toza start; keyingi rasmiy uchun yana 2 ta kichik kerak bo'ladi).
    */
   formalIssued(key: string): void {
     this.counts.delete(key);

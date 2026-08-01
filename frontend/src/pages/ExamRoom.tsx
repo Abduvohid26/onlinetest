@@ -553,13 +553,27 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (proctorMediaReady) setStartMediaGateDone(true);
   }, [sessionStarted, banned, proctorMediaReady]);
 
+  /** Kamera/mikrofon kutish ekrani cho'zilib ketdi — qo'lda "Qayta urinish" beriladi. */
+  const [mediaGateSlow, setMediaGateSlow] = useState(false);
+
   // getUserMedia osilib qolsa — cheksiz spinner o'rniga qayta urinish.
+  // Ikki bosqich: 6s — talabaning O'ZI qayta urinishi mumkin (kamera band bo'lib
+  // qolgan, USB kamera ulanmagan — bularni faqat talaba hal qiladi); 20s — to'liq
+  // xato ekrani (ilgari 45s edi: imtihon vaqti ketaverardi va talaba nima
+  // qilishni bilmay o'tirardi).
   useEffect(() => {
-    if (!showExamMediaGate || cameraErrorHint) return;
-    const id = window.setTimeout(() => {
+    if (!showExamMediaGate || cameraErrorHint) {
+      setMediaGateSlow(false);
+      return;
+    }
+    const slowId = window.setTimeout(() => setMediaGateSlow(true), 6_000);
+    const failId = window.setTimeout(() => {
       setCameraErrorHint(translations[lang].preExamMediaInUse);
-    }, 45_000);
-    return () => window.clearTimeout(id);
+    }, 20_000);
+    return () => {
+      window.clearTimeout(slowId);
+      window.clearTimeout(failId);
+    };
   }, [showExamMediaGate, cameraErrorHint, lang]);
 
   const syncMicReadyFromStream = useCallback((stream: MediaStream | null | undefined) => {
@@ -3313,6 +3327,29 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                         </span>
                       </div>
                     </div>
+                    {/* Kamera darrov barqarorlashmasa — talaba kutib qolmasin. */}
+                    {mediaGateSlow && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-500 leading-relaxed">
+                          {t.preExamSiteSettingsHint}
+                        </p>
+                        <AdminBtn
+                          variant="blue"
+                          size="lg"
+                          onClick={() => {
+                            setMediaGateSlow(false);
+                            setStartMediaGateDone(false);
+                            setCameraErrorHint('');
+                            setCameraPreviewOk(false);
+                            setMicReady(false);
+                            setProctorRetryNonce((n) => n + 1);
+                          }}
+                          className="w-full sm:px-10"
+                        >
+                          {t.examMediaGateRetry}
+                        </AdminBtn>
+                      </div>
+                    )}
                   </>
                 )}
               </div>
