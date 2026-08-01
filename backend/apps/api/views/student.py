@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from apps.api.views._helpers import *  # noqa: F401,F403
 from apps.api.tasks import analyze_proctor_frame_task
-from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations, resolve_ui_language
-from apps.api.student_api_i18n import student_api_msg, question_references
+from apps.api.services import auto_finalize_student_exam_if_expired, bank_row_to_exam_dict_multilingual, exam_questions_add_translations, fill_missing_exam_translations, prepare_questions_for_grading, question_has_api_explanations, question_references, resolve_ui_language
+from apps.api.student_api_i18n import student_api_msg
 from apps.api.proctor_config import max_warnings_before_ban, warn_suppress_seconds
 from apps.api.proctor_escalation import (
     apply_official_warning_or_ban,
