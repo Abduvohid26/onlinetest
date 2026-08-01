@@ -713,9 +713,10 @@ export class RealtimeProctor {
       jawHist.push(jaw.score);
       if (jawHist.length > 8) jawHist.shift();
       // Joriy kadr og'iz ANIQ yopiq bo'lsa (juda past jawOpen), harakat tugagan —
-      // tez bo'shatamiz. Chegara past (0.08) — sekin/yumshoq gapirishni o'tkazib
+      // tez bo'shatamiz. Chegara past — sekin/yumshoq gapirishni o'tkazib
       // yubormasin (yumshoq nutqda jaw kichik ochiladi, lekin harakat bor).
-      const jawClosedNow = jaw.score < 0.08;
+      // Sezgirlik 30% oshirildi: 0.08 → 0.056 (oldingi barqaror qiymat 0.08).
+      const jawClosedNow = jaw.score < 0.056;
       if (!jawClosedNow && jawHist.length >= 4) {
         const mean = jawHist.reduce((a, b) => a + b, 0) / jawHist.length;
         const amp = Math.max(...jawHist) - Math.min(...jawHist);
@@ -723,11 +724,12 @@ export class RealtimeProctor {
         for (let i = 1; i < jawHist.length; i++) {
           if ((jawHist[i - 1] - mean) * (jawHist[i] - mean) < 0) crossings++;
         }
-        // Chegaralar biroz sezgirroq — yumshoq/sekin gapirish ham aniqlansin.
+        // Chegaralar 30% sezgirroq — yumshoq/sekin/past gapirish ham aniqlansin.
+        // Oldingi barqaror qiymatlar: amp 0.04 / jaw 0.18 + amp 0.03 / jaw 0.12.
         talking =
-          (crossings >= 3 && amp >= 0.04) ||
-          (jaw.score >= 0.18 && amp >= 0.03) ||
-          jawHist.filter((s) => s >= 0.12).length >= 3;
+          (crossings >= 3 && amp >= 0.028) ||
+          (jaw.score >= 0.126 && amp >= 0.021) ||
+          jawHist.filter((s) => s >= 0.084).length >= 3;
       }
     }
 
@@ -751,7 +753,8 @@ export class RealtimeProctor {
           for (let i = 1; i < hist.length; i++) {
             if ((hist[i - 1] - mean) * (hist[i] - mean) < 0) crossings++;
           }
-          talking = crossings >= 3 && amp >= 0.013;
+          // 30% sezgirroq (oldingi barqaror qiymat: 0.013).
+          talking = crossings >= 3 && amp >= 0.0091;
         }
       }
     }

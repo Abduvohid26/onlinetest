@@ -53,8 +53,10 @@ export interface VoiceFrame {
  * davriy (1.0). Uni `harmonicCount` rad etadi: sof tonda 1–2 ta ohang, nutqda
  * (vokal trakt + formantlar) 4–12 ta.
  */
-/** Minimal RMS — nafas/jim mikrofon shovqinidan biroz yuqoriroq. */
-const RMS_VOICE = 0.024;
+/** Minimal RMS — nafas/jim mikrofon shovqinidan biroz yuqoriroq.
+ *  Past ovozda gapirish aniqlanmay qolgani uchun sezgirlik ~40% oshirildi
+ *  (0.024 → 0.0144). Oldingi barqaror qiymat: 0.024. */
+const RMS_VOICE = 0.0144;
 /** Nutq f0 diapazoni (chuqur erkak ovozidan baland ayol ovozigacha). */
 const PITCH_MIN_HZ = 75;
 const PITCH_MAX_HZ = 350;
@@ -248,8 +250,10 @@ export class VoiceActivityTracker {
     this.prevRms = frame.rms * 0.65 + this.prevRms * 0.35;
     if (spike) return false;
 
-    // Fon shovqinidan aniq ajralishi kerak — 1.3× haddan sezgir edi (soxta signal).
-    const aboveFloor = frame.rms > this.noiseFloor * 1.85;
+    // Fon shovqinidan ajralishi kerak. 1.3× haddan sezgir edi (soxta signal),
+    // 1.85× esa past ovozni o'tkazib yubordi — ~40% sezgirroq: 1.51×.
+    // Oldingi barqaror qiymat: 1.85.
+    const aboveFloor = frame.rms > this.noiseFloor * 1.51;
     return frame.humanVoice && aboveFloor;
   }
 }

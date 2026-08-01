@@ -54,11 +54,18 @@ const CONTEXT = 64;
  * signalni tinimsiz yoqib-o'chirardi.
  *
  * Asos: Silero v5 public default = threshold 0.5, neg_threshold = threshold−0.15.
- * Biz biroz qattiqroq (0.55/0.40) — notebook AGC uchun zaxira; ESC-50 da hali
- * 0% FP (`docs/VAD_BENCHMARK.md`, `verify_chain.py --grid`).
+ *
+ * Bu yerda ataylab public defaultdan PASTROQ (0.33/0.24): past ovozda gapirgan
+ * talaba aniqlanmay qolayotgani uchun sezgirlik ~40% oshirildi. O'lchangan
+ * (`verify_chain.py`, 80 nutq + 124 maishiy shovqin): maishiy shovqin FP
+ * **0%** (chip ham, rasmiy ham), "juda jim ovoz" rasmiy 58.8% → 60.0%.
+ *
+ * OLDINGI, UZOQ SINALGAN BARQAROR QIYMAT — 0.55 / 0.40. Sezgirlik muammo
+ * tug'dirsa (soxta signal ko'paysa) avval SHU juftlikka qaytariladi.
+ * Batafsil: `docs/VAD_BENCHMARK.md`.
  */
-const SPEECH_START_PROB = 0.55;
-const SPEECH_STOP_PROB = 0.40;
+const SPEECH_START_PROB = 0.33;
+const SPEECH_STOP_PROB = 0.24;
 
 /**
  * SEZGIRLIK KALITI — nutq shuncha kadr UZLUKSIZ davom etsagina tasdiqlanadi

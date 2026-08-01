@@ -181,15 +181,38 @@ Production haddan **qattiq** edi (`0.78 / 0.55 / 16≈512ms`, grace 400ms, confi
 maishiy FP 0% bo'lib qolgan, lekin real nutq chip **92.5%** ga tushgan (SNR5 da **87.5%**).
 Rasmiy (2.5s) uzluksiz gapirishda ham sezgirlik yarmi edi.
 
-## Yangi sozlamalar (tanlangan)
+## Joriy sozlamalar
 
 | Qatlam | Qiymat | Asos |
 |---|---|---|
-| `SPEECH_START_PROB` | **0.55** | public 0.5 + notebook AGC zaxira |
-| `SPEECH_STOP_PROB` | **0.40** | public gisterezis (−0.15) |
+| `SPEECH_START_PROB` | **0.33** | past ovozda gapirish uchun sezgirlik +40% |
+| `SPEECH_STOP_PROB` | **0.24** | gisterezis nisbati saqlangan |
 | `SPEECH_MIN_FRAMES` | **8 (~256ms)** | Silero `min_speech_duration_ms=250` |
 | speech grace | **600ms** | so'z pauzalari; FP hali 0% |
 | confirm / escalate | **800 / 2500ms** | chip 98.8%; escalate o'zgarmagan |
+| `RMS_VOICE` (DSP zaxira) | **0.0144** | past ovoz; sezgirlik +40% |
+| fon ustunligi (DSP zaxira) | **1.51×** | past ovoz; sezgirlik +40% |
+
+## ⚠️ ENG BARQAROR (REFERENS) QIYMATLAR — muammo bo'lsa shu yerga qayting
+
+Quyidagi juftlik eng uzoq va eng ko'p sinovdan o'tgan, "hech qanday shikoyat
+bo'lmagan" konfiguratsiya. Sezgirlik oshirilgandan keyin soxta ogohlantirishlar
+ko'paysa — birinchi navbatda AYNAN shu qiymatlar qaytariladi:
+
+| Parametr | Barqaror qiymat | Fayl |
+|---|---|---|
+| `SPEECH_START_PROB` | **0.55** | `frontend/src/lib/sileroVad.ts` |
+| `SPEECH_STOP_PROB` | **0.40** | `frontend/src/lib/sileroVad.ts` |
+| `SPEECH_MIN_FRAMES` | **8** | `frontend/src/lib/sileroVad.ts` |
+| `RMS_VOICE` | **0.024** | `frontend/src/lib/voiceActivity.ts` |
+| fon ustunligi | **1.85×** | `frontend/src/lib/voiceActivity.ts` |
+| og'iz: `jawClosedNow` | **0.08** | `frontend/src/lib/realtimeProctor.ts` |
+| og'iz: amplituda | **0.04** / **0.03** / MAR **0.013** | `frontend/src/lib/realtimeProctor.ts` |
+| og'iz: `jawOpen` | **0.18** / **0.12** | `frontend/src/lib/realtimeProctor.ts` |
+
+O'lchov (`verify_chain.py`, 80 nutq + 124 maishiy shovqin): `0.55/0.40/8` va
+`0.33/0.24/8` — ikkalasida ham maishiy shovqin FP **0%**; "juda jim ovoz" rasmiy
+58.8% → **60.0%**, chip ikkalasida ham 98.8%.
 
 ## Zanjir o'lchovi (80 nutq + 124 shovqin)
 
