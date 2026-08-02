@@ -19,5 +19,5 @@ opencv-contrib-python-headless>=4.8
 python-dotenv>=1.0
 channels>=4.1
 channels-redis>=4.2
-redis>=5.0
+redis>=8.0.1
 celery>=5.3
