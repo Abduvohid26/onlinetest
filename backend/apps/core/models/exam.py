@@ -1,6 +1,6 @@
 from django.db import models
 
-from .user import AppUser, Group
+from .user import AppUser, Direction, Group
 
 
 class Exam(models.Model):
@@ -19,6 +19,13 @@ class Exam(models.Model):
     bank_category_ids = models.TextField(default="[]")
     bank_question_count = models.IntegerField(default=0)
     imentor_subject_codes = models.TextField(default="[]", blank=True)
+    # iMentor'dan tanlangan "variant_label" shu Direction.name ga tekshiriladi
+    # (validatsiya) va saqlanadi — endi erkin matn emas, haqiqiy yo'nalishga
+    # bog'lanadi. NULL = eski imtihonlar (bu maydon qo'shilishidan oldin
+    # yaratilgan) yoki variant tanlanmagan holat.
+    direction = models.ForeignKey(
+        Direction, null=True, blank=True, on_delete=models.SET_NULL, db_column="direction_id"
+    )
     technical_retakes_allowed = models.PositiveSmallIntegerField(default=3)
     identity_retakes_allowed = models.PositiveSmallIntegerField(default=1)
     proctor_profile = models.CharField(max_length=16, blank=True, default="standard")

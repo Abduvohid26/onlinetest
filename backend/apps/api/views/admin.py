@@ -1562,7 +1562,7 @@ def admin_exams(request):
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "GET":
         out = []
-        for e in Exam.objects.select_related("teacher").order_by("-id"):
+        for e in Exam.objects.select_related("teacher", "direction").order_by("-id"):
             out.append(_exam_row_dict(e, e.teacher.name))
         return Response(out)
     return _admin_exams_create_impl(request)
@@ -1572,7 +1572,7 @@ def admin_exam_detail(request, pk: int):
     if request.user.role != "admin":
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "GET":
-        e = Exam.objects.select_related("teacher").filter(pk=pk).first()
+        e = Exam.objects.select_related("teacher", "direction").filter(pk=pk).first()
         if not e:
             return Response({"error": "Exam not found"}, status=404)
         gids = list(ExamGroup.objects.filter(exam_id=pk).values_list("group_id", flat=True))
@@ -1749,6 +1749,14 @@ def admin_exam_detail(request, pk: int):
                 tu = AppUser.objects.filter(pk=str(d["teacher_id"]).strip()).first()
                 if tu and _request_user_role_norm(tu) in ("admin", "staff"):
                     e.teacher_id = tu.id
+            if "direction_id" in d:
+                raw_direction_id = d["direction_id"]
+                if raw_direction_id in (None, "", "null"):
+                    e.direction_id = None
+                elif Direction.objects.filter(pk=raw_direction_id).exists():
+                    e.direction_id = raw_direction_id
+                else:
+                    raise ValueError("DIRECTION")
             e.save()
             if d.get("group_ids") is not None:
                 gids = d["group_ids"]
@@ -1758,7 +1766,9 @@ def admin_exam_detail(request, pk: int):
                 ExamGroup.objects.bulk_create(
                     [ExamGroup(exam_id=pk, group_id=gid) for gid in gids]
                 )
-    except ValueError:
+    except ValueError as ve:
+        if str(ve) == "DIRECTION":
+            return Response({"error": "Invalid direction"}, status=400)
         return Response(
             {"error": admin_api_msg("group_required", resolve_ui_language(request))},
             status=400,

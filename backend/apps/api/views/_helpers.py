@@ -713,6 +713,8 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "bank_category_ids": e.bank_category_ids,
         "bank_question_count": e.bank_question_count,
         "imentor_subject_codes": safe_json_loads(getattr(e, "imentor_subject_codes", None) or "[]", []),
+        "direction_id": e.direction_id,
+        "direction_name": e.direction.name if e.direction_id else None,
         "technical_retakes_allowed": int(getattr(e, "technical_retakes_allowed", 3) or 3),
         "identity_retakes_allowed": int(getattr(e, "identity_retakes_allowed", 1) or 1),
         "proctor_profile": str(getattr(e, "proctor_profile", "") or "standard"),
@@ -758,6 +760,7 @@ def _admin_exams_create_impl(request):
     imentor_codes_json = "[]"
     bank_count = 0
     questions: list = []
+    variant_label_for_direction: str | None = None
 
     if mode == "imentor_mixed":
         from apps.api.imentor_service import (
@@ -773,6 +776,7 @@ def _admin_exams_create_impl(request):
             selection["variant_label"] = str(d.get("imentor_variant_label") or "").strip()
         if d.get("imentor_topic_code"):
             selection["topic_code"] = str(d.get("imentor_topic_code") or "").strip().lower()
+        variant_label_for_direction = selection.get("variant_label") or None
         raw_list = selection["subject_codes"]
         ok, err, _total = validate_imentor_subjects(
             raw_list,
@@ -932,6 +936,22 @@ def _admin_exams_create_impl(request):
             status=400,
         )
 
+    # Direction — Kafedra→Yo'nalish→Guruh integratsiyasi (Bosqich 8). Admin
+    # to'g'ridan-to'g'ri direction_id yuborishi mumkin; yubormasa, imentor_mixed
+    # rejimida tanlangan variant_label OnlineTest'ning haqiqiy Direction.name
+    # bilan solishtiriladi (mos kelsa avtomatik bog'lanadi, mos kelmasa —
+    # jim o'tkazib yuboriladi, imtihon yaratish bloklanmaydi).
+    direction_id = None
+    raw_direction_id = d.get("direction_id")
+    if raw_direction_id not in (None, "", "null"):
+        if not Direction.objects.filter(pk=raw_direction_id).exists():
+            return Response({"error": "Invalid direction"}, status=400)
+        direction_id = raw_direction_id
+    elif variant_label_for_direction:
+        matched = Direction.objects.filter(name__iexact=variant_label_for_direction).first()
+        if matched:
+            direction_id = matched.id
+
     ex_raw = d.get("exam_exceptions")
     if isinstance(ex_raw, str):
         ex_list = safe_json_loads(ex_raw, [])
@@ -954,6 +974,7 @@ def _admin_exams_create_impl(request):
             bank_category_ids=bank_cats_json,
             bank_question_count=bank_count,
             imentor_subject_codes=imentor_codes_json,
+            direction_id=direction_id,
             technical_retakes_allowed=violation_retakes,
             identity_retakes_allowed=identity_retakes,
             proctor_profile=profile,

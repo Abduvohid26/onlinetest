@@ -4,6 +4,7 @@ from apps.api import views
 
 urlpatterns = [
     path("internal/realtime/exam-access", views.internal_realtime_exam_access),
+    path("public/academic-catalog/", views.public_academic_catalog),
     path("health", views.health),
     path("live", views.health_live),
     path("ready", views.health_ready),

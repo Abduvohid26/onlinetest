@@ -136,27 +136,150 @@ chiqiladi — avtomatik/skript bilan bog'lash qilinmaydi (chunki to'g'ri xarita
 faqat foydalanuvchi/dekanatga ma'lum).
 
 ## Bosqich 4 — OnlineTest: iMentor uchun ochiq katalog API
-- [ ] Autentifikatsiya kaliti mexanizmi tanlandi
-- [ ] `GET /api/public/academic-catalog/` (yoki tanlangan shakl) yozildi va test qilindi
+- [x] Autentifikatsiya kaliti mexanizmi tanlandi: `X-Api-Key` header, `ONLINE_TEST_PUBLIC_API_KEYS`
+  env var (vergul bilan bir nechta kalit) — iMentor'ning `IMENTOR_EXTERNAL_API_KEYS`/`X-Api-Key`
+  naqshiga o'xshab (`imentor/backend/core/external_api_views.py`), lekin teskari yo'nalish uchun
+  alohida env var/kalit
+- [x] `GET /api/public/academic-catalog/` yozildi (`apps/api/views/public.py`,
+  `apps/api/urls.py`) — auth talab qilmaydi (`@permission_classes([AllowAny])`),
+  o'zi ichida `X-Api-Key` tekshiradi (`internal_realtime_exam_access` bilan bir xil
+  naqsh). Javob: `{kafedralar: [{id,name,code,directions:[{id,name,groups:[{id,name,
+  level,student_count}]}]}], unassigned_directions: [...]}`. Faqat `is_active=True`
+  kafedra/guruhlar chiqadi.
+- [x] To'liq sinov (lokal Docker Postgres, real `runserver`): kalitsiz so'rov → 403,
+  noto'g'ri kalit → 403, ikkita turli to'g'ri kalit → ikkalasi ham 200 (bir nechta
+  hamkor kaliti ishlashi tasdiqlandi), test ma'lumoti bilan daraxt tuzilishi
+  (kafedra→direction→group, `student_count`, kafedrasiz yo'nalish `unassigned_directions`da)
+  to'g'ri chiqdi. Test ma'lumotlari tozalab tashlandi.
+- [ ] Serverda `ONLINE_TEST_PUBLIC_API_KEYS` sozlanmagan va endpoint hali serverga
+  chiqarilmagan — keyingi qadam (deploy + iMentor tomonidagi haqiqiy kalitni kelishish)
+- Production manzil (iMentor tomonidan chaqiriladigan): `https://online-imtixon.uz/api/public/academic-catalog/`
 
 ## Bosqich 5 — iMentor: klient funksiyasi
-- [ ] `fetch_academic_catalog()` qo'shildi (`imentor/backend/core/online_test_client.py`)
-- [ ] Keshlash (Redis, TTL) qo'shildi
+- [x] `fetch_academic_catalog()` qo'shildi (`imentor/backend/core/online_test_client.py`) —
+  `GET /api/public/academic-catalog/` ni `X-Api-Key: ONLINE_TEST_CONSUMER_API_KEY` bilan
+  chaqiradi, `OnlineTestAuthError` orqali xatolarni birxillashtiradi (login funksiyasi
+  bilan bir xil naqsh)
+- [x] Keshlash qo'shildi — `django.core.cache.cache`, kalit
+  `online_test:academic_catalog`, TTL 600s (10 daqiqa). `use_cache=False` bilan
+  chetlab o'tish mumkin (masalan admin panelda "Yangilash" tugmasi uchun)
+- [x] `settings/base.py`ga `ONLINE_TEST_CONSUMER_API_KEY` qo'shildi;
+  `.env.example` (ikkalasi), `deploy/.env.production`,
+  `docker-compose.dev.yml`/`docker-compose.prod.yml`ga ham qo'shildi
+  (`ONLINE_TEST_API_BASE_URL`ga o'xshab)
+- [x] `requirements.txt`da `requests` bor edi, lekin lokal `.venv`da o'rnatilmagan
+  ekan — o'rnatildi (test uchun; production image build vaqtida avtomatik
+  o'rnatiladi, alohida qadam kerak emas)
+- [x] **To'liq E2E sinov** (ikkala loyiha bir vaqtda, lokal Postgres + real
+  OnlineTest server + iMentor Django muhiti): (1) haqiqiy so'rov — kafedra/
+  yo'nalish/guruh to'g'ri keldi; (2) OnlineTest manzili keyin **noto'g'ri portga**
+  almashtirilib, qayta chaqirilganda **kesh orqali** (tarmoqqa umuman urilmasdan)
+  bir xil natija qaytdi; (3) `use_cache=False` bilan (kesh chetlab o'tilib)
+  noto'g'ri portga urinilganda `OnlineTestAuthError` to'g'ri ko'tarildi
+  (502, "OnlineTest ga ulanib bo'lmadi."). Test ma'lumotlari tozalab tashlandi.
 
 ## Bosqich 6 — iMentor: frontendda ishlatish
-- [ ] Qaysi ekranlar aniqlandi (StaffProfile, ClinicalGroupMember, ...)
-- [ ] Dropdown'lar ID asosida ishlaydigan qilindi
+- [x] Qaysi ekranlar aniqlandi (Explore agenti orqali): `AdminStaffManagement.tsx`
+  (admin xodim CRUD) va `RegisterPage.tsx` (o'z-o'zini ro'yxatdan o'tkazish) —
+  ikkalasida ham `faculty/department/direction/study_group` erkin matn edi.
+  `ClinicalGroupMember` uchun frontend forma topilmadi (hali qurilmagan yoki
+  boshqa nom bilan).
+- [x] **Amaliy qamrov qarori**: faqat `AdminStaffManagement.tsx` (admin, nazorat
+  ostidagi sirt) o'zgartirildi bu safar; `RegisterPage.tsx` (ochiq/public forma)
+  va `ClinicalGroupMember` — keyingi safarga qoldirildi (pastga qarang).
+- [x] Backend proxy: `AcademicCatalogView` (`imentor/backend/core/views.py`) —
+  `fetch_academic_catalog()`ni frontendga beradi, `JWTAuthentication` +
+  `IsAuthenticated, HasAnyPlatformRole` bilan himoyalangan (OnlineTest kaliti
+  frontendga hech qachon chiqmaydi — `online_test_login`/`OnlineTestStudentLoginView`
+  bilan bir xil naqsh). URL: `v1/academic-catalog/`.
+- [x] Frontend: `utils/academicCatalogApi.ts` — backend proxyni chaqiradi,
+  5 daqiqalik client-side kesh bilan.
+- [x] `AdminStaffManagement.tsx`: `department` (=Kafedra), `direction`,
+  `studyGroup` maydonlari endi kaskadli dropdown (Kafedra → Yo'nalish → Guruh),
+  agar katalog yuklanmasa yoki mavjud qiymat katalogga mos kelmasa — oddiy matn
+  inputga qaytadi (buzilmaydigan fallback). **Muhim dizayn qarori**: model
+  maydonlari hamon `CharField` (matn) — schema o'zgarmadi, faqat kiritish endi
+  erkin emas, katalogdan tanlanadi (nom matni saqlanadi, ID emas) — bu
+  breaking change emas, migratsiya kerak emas.
+  `faculty` **o'zgartirilmadi** (yangi ierarxiyada mos keladigan daraja yo'q).
+- [x] i18n: `admin.notSelected` uz/ru/en qo'shildi.
+- [x] `tsc --noEmit` va `npm run build` (imentor frontend) — toza (3 ta
+  oldindan mavjud, mensiz faylga tegishli xato bor edi — tasdiqlandi, mening
+  o'zgarishlarimga aloqasi yo'q).
+- [x] **To'liq E2E sinov**: ikkala loyiha birga (real OnlineTest server + iMentor
+  Django muhiti, `manage.py test` orqali DRF marshrutini haqiqiy chaqirib):
+  `AcademicCatalogView` → `200 OK`, test kafedra/yo'nalish/guruh to'g'ri
+  qaytdi. Test ma'lumotlari va vaqtinchalik test fayli tozalab tashlandi.
+
+**Qoldirilgan (keyingi safar)**: `RegisterPage.tsx` (ochiq ro'yxatdan o'tish
+formasi) va `ClinicalGroupMember` UI — agar topilsa/qurilsa — xuddi shu
+`academicCatalogApi.ts` yordamchisidan foydalanib, xuddi shunday kaskadli
+dropdown qo'shish kerak bo'ladi.
 
 ## Bosqich 7 — Tozalash (keyingi safar, alohida reja kerak)
 - [ ] Rejalashtirilmagan — hozircha kutilmoqda
 
 ## Bosqich 8 — Test bazasi (imtihon) yaratish oqimini Direction bilan integratsiya qilish
 (Bosqich 1-2 va Bosqich 0 to'liq tugagandan keyin boshlanadi — batafsili: PLAN.md §"Bosqich 8")
-- [ ] `Exam`ga `direction` FK qo'shildi (OnlineTest)
-- [ ] iMentordan kelgan `variant_labels` `Direction.name`ga tekshiriladigan (validatsiya) qilindi
-- [ ] `ExamGroup` guruh tanlash `Exam.direction` bo'yicha filtrlanadigan qilindi
-- [ ] "Shu yo'nalishdagi barcha guruhlarni tanlash" tugmasi qo'shildi
-- [ ] (ixtiyoriy) iMentor `CourseSyllabus.variants`ga barqaror `direction_code` qo'shildi
+- [x] `Exam.direction` FK qo'shildi (`apps/core/models/exam.py`, nullable,
+  `SET_NULL`) — migration `0031_add_exam_direction.py`
+- [x] Direction validatsiya/avtomatik bog'lash (`_admin_exams_create_impl`,
+  `_helpers.py`): admin `direction_id`ni to'g'ridan-to'g'ri yuborishi mumkin
+  (validatsiya bilan — mavjud bo'lmasa 400); yubormasa va rejim
+  `imentor_mixed` bo'lsa, tanlangan `variant_label` `Direction.name`ga
+  (katta-kichik harfga sezgir emas) solishtiriladi — mos kelsa avtomatik
+  bog'lanadi, mos kelmasa jim o'tkazib yuboriladi (imtihon yaratish
+  bloklanmaydi — hozircha kafedra↔yo'nalish to'liq bog'lanmagani uchun
+  yumshoq yondashuv tanlandi).
+- [x] `admin_exam_detail` PATCH ham `direction_id`ni qo'llab-quvvatlaydi
+  (o'rnatish/`null` bilan uzish/noto'g'ri qiymatda 400).
+- [x] `_exam_row_dict` javobiga `direction_id`/`direction_name` qo'shildi;
+  ikkala `Exam.objects.select_related("teacher")` chaqiruviga `"direction"`
+  ham qo'shildi (N+1 oldini olish uchun).
+- [x] Frontend (`ImtixonTab.tsx`): guruh tanlashda **"Yo'nalish bo'yicha
+  filtr"** dropdown va **"Shu yo'nalishdagi barchasini tanlash"** tugmasi
+  qo'shildi — qo'shimcha API so'rovsiz (guruh ro'yxatida `direction_id`/
+  `direction_name` allaqachon bor edi). `GroupMultiSelect`ning o'zi
+  o'zgartirilmadi (generic saqlandi) — filtr shunchaki `selGroups`ga
+  bulk qo'shadi.
+- [x] i18n: `selectDirectionFilter`, `selectAllGroupsInDirection` uz/ru/en.
+- [x] `tsc --noEmit` (frontend) — toza.
+- [x] **To'liq HTTP E2E sinov** (lokal Docker Postgres, real admin login):
+  to'g'ri `direction_id` bilan yaratish → detail'da `direction_name` to'g'ri
+  chiqdi; noto'g'ri `direction_id` bilan yaratish → `400`; PATCH orqali
+  `direction_id: null` (uzish) → muvaffaqiyatli; PATCH noto'g'ri
+  `direction_id` → `400`; ro'yxat sahifasi (`select_related`) → `200`.
+  Test ma'lumotlari va vaqtinchalik admin parol tozalab/tiklab qo'yildi.
+- [ ] (ixtiyoriy, keyingi safar) iMentor `CourseSyllabus.variants`ga barqaror
+  `direction_code` qo'shish — ikkala tizim endi "tasodifiy bir xil matn"ga
+  emas, balki aniq kodga tayanishi uchun.
+
+### 8.1 — iMentor'ning ikkinchi, mustaqil "Kafedra" jadvalini sinxronlash
+
+**Topilma**: iMentor'da syllabus (fan/test bazasi) katalogi uchun **allaqachon
+o'zining alohida `AcademicDepartment` modeli bor edi** (`imentor/backend/core/
+models.py:82` — "Kafedra — fan syllabus katalogining yuqori darajasi"),
+OnlineTest'dagi yangi `Kafedra`dan **butunlay mustaqil**. Ya'ni ikkita
+bog'lanmagan "Kafedra" ro'yxati bor edi.
+
+- [x] `imentor/backend/core/management/commands/sync_kafedra_from_onlinetest.py`
+  yozildi — OnlineTest'ning `academic-catalog` API'sidan Kafedra nomlarini
+  o'qib, iMentor'ning `AcademicDepartment`iga yozadi/yangilaydi (nom bo'yicha
+  moslashtirish, katta-kichik harfga sezgir emas).
+- [x] Kod (`code`) muammosi hal qilindi: OnlineTest'da `code` ixtiyoriy
+  (ko'p kafedrada bo'sh), lekin iMentor'da `AcademicDepartment.code` **majburiy
+  va unikal** — shuning uchun kodsiz kafedralar uchun nomdan avtomatik kod
+  generatsiya qilinadi (so'zlarning bosh harflari), to'qnashsa raqam qo'shiladi.
+- [x] **To'liq sinov** (`manage.py test` orqali, real OnlineTest serveriga
+  ulanib): 46 ta kafedradan 45 tasi yangi yaratildi, oldindan boshqa kod bilan
+  mavjud bo'lgan "Kardiologiya" to'g'ri yangilandi (`OLDCODE` → `KRD`), kodsiz
+  kafedralar uchun avtomatik kod ishladi, **ikkinchi marta ishga tushirilganda
+  0 yangi/0 yangilangan/46 o'zgarishsiz** — to'liq idempotent. Test ma'lumotlari
+  tozalab tashlandi.
+- [ ] Serverda hali ishga tushirilmagan — keyingi qadam:
+  `python manage.py sync_kafedra_from_onlinetest --apply`
+- [ ] Muntazam avtomatik ishga tushirish (masalan kunlik cron) — hozircha
+  rejalashtirilmagan, qo'lda ishga tushiriladi.
 
 ---
 

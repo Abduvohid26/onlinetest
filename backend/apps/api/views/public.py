@@ -4,6 +4,73 @@ from __future__ import annotations
 from apps.api.views._helpers import *  # noqa: F401,F403
 
 
+def academic_catalog_api_keys() -> frozenset[str]:
+    raw = os.environ.get("ONLINE_TEST_PUBLIC_API_KEYS", "") or ""
+    return frozenset(part.strip() for part in raw.split(",") if part.strip())
+
+
+@api_view(["GET"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def public_academic_catalog(request):
+    """Kafedra -> Yo'nalish -> Guruh daraxti — tashqi hamkorlar (masalan iMentor)
+    uchun, X-Api-Key header bilan himoyalangan. Faqat o'qish uchun."""
+    keys = academic_catalog_api_keys()
+    header = (request.headers.get("X-Api-Key") or request.META.get("HTTP_X_API_KEY") or "").strip()
+    if not keys or not header or header not in keys:
+        return Response({"error": "Valid X-Api-Key header required."}, status=403)
+
+    from django.db.models import Count
+
+    student_counts = {
+        row["group_id"]: row["cnt"]
+        for row in AppUser.objects.filter(role="student", group_id__isnull=False)
+        .values("group_id")
+        .annotate(cnt=Count("id"))
+    }
+
+    groups_by_direction: dict[int | None, list[dict]] = {}
+    for g in Group.objects.filter(is_active=True).select_related("level", "direction"):
+        groups_by_direction.setdefault(g.direction_id, []).append(
+            {
+                "id": g.id,
+                "name": g.name,
+                "level": g.level.name,
+                "student_count": student_counts.get(g.id, 0),
+            }
+        )
+
+    directions_by_kafedra: dict[int | None, list[dict]] = {}
+    for d in Direction.objects.select_related("kafedra").order_by("name"):
+        directions_by_kafedra.setdefault(d.kafedra_id, []).append(
+            {
+                "id": d.id,
+                "name": d.name,
+                "groups": groups_by_direction.get(d.id, []),
+            }
+        )
+
+    kafedralar = []
+    for kf in Kafedra.objects.filter(is_active=True):
+        kafedralar.append(
+            {
+                "id": kf.id,
+                "name": kf.name,
+                "code": kf.code,
+                "directions": directions_by_kafedra.get(kf.id, []),
+            }
+        )
+
+    return Response(
+        {
+            "kafedralar": kafedralar,
+            # Kafedraga bog'lanmagan yo'nalishlar (hali qo'lda bog'lanmagan) —
+            # iMentor tomonida "kafedrasiz" deb ko'rsatilishi uchun alohida.
+            "unassigned_directions": directions_by_kafedra.get(None, []),
+        }
+    )
+
+
 @api_view(["GET"])
 @authentication_classes([])
 @permission_classes([AllowAny])

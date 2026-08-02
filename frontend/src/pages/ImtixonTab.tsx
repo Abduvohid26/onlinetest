@@ -66,6 +66,7 @@ export function ImtixonTab({
   const h = authHeaders(token, lang);
 
   const [groups, setGroups] = useState<any[]>([]);
+  const [groupDirectionFilter, setGroupDirectionFilter] = useState('');
   const [imentorDepartments, setImentorDepartments] = useState<ImentorDepartment[]>([]);
   const [imentorSubjects, setImentorSubjects] = useState<ImentorSubject[]>([]);
   const [imentorConfigured, setImentorConfigured] = useState(true);
@@ -93,6 +94,25 @@ export function ImtixonTab({
   const [subjectsLoading, setSubjectsLoading] = useState(false);
 
   const [selGroups, setSelGroups] = useState<number[]>([]);
+
+  // Guruh ro'yxatida allaqachon direction_id/direction_name bor (admin/groups
+  // javobidan) — Kafedra→Yo'nalish→Guruh integratsiyasi uchun qo'shimcha API
+  // so'rov shart emas, shu yerdan noyob yo'nalishlar ro'yxatini chiqaramiz.
+  const groupDirectionOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const g of groups) {
+      if (g.direction_id != null) map.set(String(g.direction_id), g.direction_name || String(g.direction_id));
+    }
+    return Array.from(map, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [groups]);
+
+  const selectAllGroupsInDirection = () => {
+    if (!groupDirectionFilter) return;
+    const ids = groups
+      .filter((g) => String(g.direction_id) === groupDirectionFilter)
+      .map((g) => g.id as number);
+    setSelGroups((prev) => Array.from(new Set([...prev, ...ids])));
+  };
   const [exModal, setExModal] = useState(false);
   const [poolStudents, setPoolStudents] = useState<StudentRow[]>([]);
   const [exMap, setExMap] = useState<Record<string, { on: boolean; reason: string }>>({});
@@ -676,6 +696,29 @@ export function ImtixonTab({
 
             <div>
               <AdminLabel required>{t.selectGroups}</AdminLabel>
+              {groupDirectionOptions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <select
+                    value={groupDirectionFilter}
+                    onChange={(e) => setGroupDirectionFilter(e.target.value)}
+                    className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-[13px] text-gray-900"
+                  >
+                    <option value="">{t.selectDirectionFilter}</option>
+                    {groupDirectionOptions.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                  <AdminBtn
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={!groupDirectionFilter}
+                    onClick={selectAllGroupsInDirection}
+                  >
+                    {t.selectAllGroupsInDirection}
+                  </AdminBtn>
+                </div>
+              )}
               <GroupMultiSelect
                 groups={groups}
                 value={selGroups}
