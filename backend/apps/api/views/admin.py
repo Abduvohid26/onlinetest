@@ -601,11 +601,142 @@ def admin_level_detail(request, pk: int):
 
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
+def admin_kafedralar(request):
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    if request.method == "GET":
+        out = []
+        for k in Kafedra.objects.all():
+            out.append(
+                {
+                    "id": k.id,
+                    "name": k.name,
+                    "code": k.code,
+                    "sort_order": k.sort_order,
+                    "is_active": k.is_active,
+                    "direction_count": k.directions.count(),
+                }
+            )
+        return Response(out)
+    name = (request.data or {}).get("name")
+    if not name or not str(name).strip():
+        return Response({"error": "Name required"}, status=400)
+    name = str(name).strip()[:200]
+    if Kafedra.objects.filter(name__iexact=name).exists():
+        return Response(
+            {"error": admin_api_msg("kafedra_name_exists", resolve_ui_language(request))},
+            status=400,
+        )
+    code = (request.data or {}).get("code")
+    code = str(code).strip()[:50] or None if code else None
+    if code and Kafedra.objects.filter(code__iexact=code).exists():
+        return Response(
+            {"error": admin_api_msg("kafedra_code_exists", resolve_ui_language(request))},
+            status=400,
+        )
+    d = request.data or {}
+    sort_order = d.get("sort_order") or 0
+    try:
+        sort_order = int(sort_order)
+    except (TypeError, ValueError):
+        sort_order = 0
+    kf = Kafedra.objects.create(name=name, code=code, sort_order=sort_order)
+    audit(request, "create_kafedra", "kafedra", kf.id, kf.name)
+    return Response({"id": kf.id, "name": kf.name, "code": kf.code})
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def admin_kafedra_detail(request, pk: int):
+    if request.user.role != "admin":
+        return Response({"error": "Forbidden"}, status=403)
+    kf = Kafedra.objects.filter(pk=pk).first()
+    if not kf:
+        return Response(
+            {"error": admin_api_msg("kafedra_not_found", resolve_ui_language(request))},
+            status=404,
+        )
+    if request.method == "GET":
+        return Response(
+            {
+                "id": kf.id,
+                "name": kf.name,
+                "code": kf.code,
+                "sort_order": kf.sort_order,
+                "is_active": kf.is_active,
+                "direction_count": kf.directions.count(),
+            }
+        )
+    if request.method == "PATCH":
+        d = request.data or {}
+        uf = []
+        if "name" in d:
+            name = str(d["name"] or "").strip()
+            if not name:
+                return Response({"error": "Name required"}, status=400)
+            if Kafedra.objects.filter(name__iexact=name).exclude(pk=pk).exists():
+                return Response(
+                    {"error": admin_api_msg("kafedra_name_exists", resolve_ui_language(request))},
+                    status=400,
+                )
+            kf.name = name[:200]
+            uf.append("name")
+        if "code" in d:
+            code = str(d["code"] or "").strip()[:50] or None
+            if code and Kafedra.objects.filter(code__iexact=code).exclude(pk=pk).exists():
+                return Response(
+                    {"error": admin_api_msg("kafedra_code_exists", resolve_ui_language(request))},
+                    status=400,
+                )
+            kf.code = code
+            uf.append("code")
+        if "sort_order" in d:
+            try:
+                kf.sort_order = int(d["sort_order"])
+            except (TypeError, ValueError):
+                return Response({"error": "Invalid sort_order"}, status=400)
+            uf.append("sort_order")
+        if "is_active" in d:
+            kf.is_active = bool(d["is_active"])
+            uf.append("is_active")
+        if not uf:
+            return Response({"error": "No fields to update"}, status=400)
+        kf.save(update_fields=list(dict.fromkeys(uf)))
+        audit(request, "update_kafedra", "kafedra", kf.id, kf.name, "changed: " + ", ".join(uf))
+        return Response({"id": kf.id, "name": kf.name, "code": kf.code})
+    if request.method == "DELETE":
+        direction_count = kf.directions.count()
+        if direction_count > 0:
+            return Response(
+                {
+                    "error": admin_api_msg(
+                        "kafedra_has_directions", resolve_ui_language(request), n=direction_count
+                    )
+                },
+                status=400,
+            )
+        audit(request, "delete_kafedra", "kafedra", kf.id, kf.name)
+        kf.delete()
+        return Response({"success": True})
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
 def admin_directions(request):
     if request.user.role != "admin":
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "GET":
-        return Response(list(Direction.objects.order_by("name").values()))
+        out = []
+        for dr in Direction.objects.select_related("kafedra").order_by("name"):
+            out.append(
+                {
+                    "id": dr.id,
+                    "name": dr.name,
+                    "kafedra_id": dr.kafedra_id,
+                    "kafedra_name": dr.kafedra.name if dr.kafedra_id else None,
+                }
+            )
+        return Response(out)
     name = (request.data or {}).get("name")
     if not name or not str(name).strip():
         return Response({"error": "Name required"}, status=400)
@@ -615,9 +746,15 @@ def admin_directions(request):
             {"error": admin_api_msg("direction_name_exists", resolve_ui_language(request))},
             status=400,
         )
-    dr = Direction.objects.create(name=name)
+    kafedra_id = (request.data or {}).get("kafedra_id")
+    if kafedra_id not in (None, "", "null"):
+        if not Kafedra.objects.filter(pk=kafedra_id).exists():
+            return Response({"error": "Invalid kafedra"}, status=400)
+    else:
+        kafedra_id = None
+    dr = Direction.objects.create(name=name, kafedra_id=kafedra_id)
     audit(request, "create_direction", "direction", dr.id, dr.name)
-    return Response({"id": dr.id, "name": dr.name})
+    return Response({"id": dr.id, "name": dr.name, "kafedra_id": dr.kafedra_id})
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -633,22 +770,44 @@ def admin_direction_detail(request, pk: int):
         )
     if request.method == "GET":
         group_count = Group.objects.filter(direction_id=pk).count()
-        return Response({"id": dr.id, "name": dr.name, "group_count": group_count})
+        return Response(
+            {
+                "id": dr.id,
+                "name": dr.name,
+                "kafedra_id": dr.kafedra_id,
+                "kafedra_name": dr.kafedra.name if dr.kafedra_id else None,
+                "group_count": group_count,
+            }
+        )
     if request.method == "PATCH":
-        name = (request.data or {}).get("name")
-        if not name or not str(name).strip():
-            return Response({"error": "Name required"}, status=400)
+        d = request.data or {}
         old_name = dr.name
-        name = str(name).strip()[:200]
-        if Direction.objects.filter(name__iexact=name).exclude(pk=pk).exists():
-            return Response(
-                {"error": admin_api_msg("direction_name_exists", resolve_ui_language(request))},
-                status=400,
-            )
-        dr.name = name
-        dr.save()
+        uf = []
+        if "name" in d:
+            name = str(d["name"] or "").strip()
+            if not name:
+                return Response({"error": "Name required"}, status=400)
+            if Direction.objects.filter(name__iexact=name).exclude(pk=pk).exists():
+                return Response(
+                    {"error": admin_api_msg("direction_name_exists", resolve_ui_language(request))},
+                    status=400,
+                )
+            dr.name = name[:200]
+            uf.append("name")
+        if "kafedra_id" in d:
+            kafedra_id = d["kafedra_id"]
+            if kafedra_id not in (None, "", "null"):
+                if not Kafedra.objects.filter(pk=kafedra_id).exists():
+                    return Response({"error": "Invalid kafedra"}, status=400)
+                dr.kafedra_id = kafedra_id
+            else:
+                dr.kafedra_id = None
+            uf.append("kafedra_id")
+        if not uf:
+            return Response({"error": "No fields to update"}, status=400)
+        dr.save(update_fields=list(dict.fromkeys(uf)))
         audit(request, "rename_direction", "direction", dr.id, dr.name, f"{old_name!r} → {dr.name!r}")
-        return Response({"id": dr.id, "name": dr.name})
+        return Response({"id": dr.id, "name": dr.name, "kafedra_id": dr.kafedra_id})
     if request.method == "DELETE":
         group_count = Group.objects.filter(direction_id=pk).count()
         if group_count > 0:

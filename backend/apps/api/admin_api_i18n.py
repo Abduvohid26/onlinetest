@@ -74,6 +74,26 @@ _MSG: dict[str, dict[str, str]] = {
         "В этом направлении {n} групп(ы). Сначала перенесите или удалите группы.",
         "This direction has {n} group(s). Move or delete the groups first.",
     ),
+    "kafedra_name_exists": _tri(
+        "Bu nomdagi kafedra allaqachon bor",
+        "Кафедра с таким названием уже существует",
+        "A department with this name already exists",
+    ),
+    "kafedra_code_exists": _tri(
+        "Bu koddagi kafedra allaqachon bor",
+        "Кафедра с таким кодом уже существует",
+        "A department with this code already exists",
+    ),
+    "kafedra_not_found": _tri(
+        "Kafedra topilmadi",
+        "Кафедра не найдена",
+        "Department not found",
+    ),
+    "kafedra_has_directions": _tri(
+        "Bu kafedrada {n} ta yo'nalish bor. Avval yo'nalishlarni boshqa kafedraga o'tkazing yoki bog'lanishni bekor qiling.",
+        "У этой кафедры {n} направлений(я). Сначала перенесите направления или отвяжите их.",
+        "This department has {n} direction(s). Move or unlink the directions first.",
+    ),
     "academic_year_invalid": _tri(
         "academic_year noto‘g‘ri",
         "Некорректный academic_year",

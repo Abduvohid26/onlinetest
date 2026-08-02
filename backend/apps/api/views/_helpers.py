@@ -127,6 +127,7 @@ from apps.core.models import (
     ExamRetakeWindow,
     ExamStudentException,
     Group,
+    Kafedra,
     Level,
     StudentExam,
     TestBankCategory,

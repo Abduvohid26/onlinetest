@@ -9,6 +9,7 @@ import { ImtixonTab } from './ImtixonTab';
 import { AdminExamsTab } from './AdminExamsTab';
 import { OverviewPage } from './admin/OverviewPage';
 import { LevelsPage } from './admin/LevelsPage';
+import { KafedralarPage } from './admin/KafedralarPage';
 import { DirectionsPage } from './admin/DirectionsPage';
 import { GroupsPage } from './admin/GroupsPage';
 import { StudentsPage } from './admin/StudentsPage';
@@ -21,6 +22,7 @@ import type { Level, Group } from './admin/types';
 type AdminPage =
   | 'overview'
   | 'levels'
+  | 'kafedralar'
   | 'directions'
   | 'groups'
   | 'students'
@@ -45,6 +47,11 @@ const IC = {
   levels: (
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+    </svg>
+  ),
+  kafedralar: (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 6v-3a1 1 0 011-1h2a1 1 0 011 1v3" />
     </svg>
   ),
   groups: (
@@ -87,6 +94,7 @@ const IC = {
 const PAGE_PATHS: Record<AdminPage, string> = {
   overview:     '/admin',
   levels:       '/admin/levels',
+  kafedralar:   '/admin/kafedralar',
   directions:   '/admin/directions',
   groups:       '/admin/groups',
   students:     '/admin/students',
@@ -168,6 +176,7 @@ export function AdminDashboard({
       label: t.sidebarStudentsSection,
       items: [
         { id: 'levels', label: t.sidebarLevelsSub },
+        { id: 'kafedralar', label: t.kontingentKafedralar },
         { id: 'directions', label: t.kontingentDirections },
         { id: 'groups', label: t.sidebarGroupsSub },
         { id: 'students', label: t.sidebarStudentsSub },
@@ -332,6 +341,9 @@ export function AdminDashboard({
                 navigateTo('groups');
               }}
             />
+          )}
+          {page === 'kafedralar' && (
+            <KafedralarPage token={token} lang={lang} />
           )}
           {page === 'directions' && (
             <DirectionsPage token={token} lang={lang} />

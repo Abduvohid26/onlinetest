@@ -1,6 +1,20 @@
 export type Level = { id: number; name: string };
 
-export type Direction = { id: number; name: string };
+export type Kafedra = {
+  id: number;
+  name: string;
+  code?: string | null;
+  sort_order?: number;
+  is_active?: boolean;
+  direction_count?: number;
+};
+
+export type Direction = {
+  id: number;
+  name: string;
+  kafedra_id?: number | null;
+  kafedra_name?: string | null;
+};
 
 export type Group = {
   id: number;

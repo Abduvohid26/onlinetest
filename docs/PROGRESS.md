@@ -61,18 +61,58 @@ bog'lanishi maxsus XML zanjiri orqali tiklanadi: `xl/worksheets/sheet1.xml`
 - [ ] 3-kurs.xlsx uchun rasmlar (guruh muammosi hal bo'lgandan keyin, alohida)
 
 ## Bosqich 1 — OnlineTest: Kafedra modeli
-- [ ] `Kafedra` modeli qo'shildi (`backend/apps/core/models/user.py`)
-- [ ] `Direction.kafedra` FK qo'shildi (nullable)
-- [ ] Migration yaratildi va ishga tushirildi
+- [x] `Kafedra` modeli qo'shildi (`backend/apps/core/models/user.py`) — `name` (unique),
+  `code` (unique, **null=True** — ikkita bo'sh kod bir-biriga to'qnashmasligi uchun),
+  `sort_order`, `is_active`
+- [x] `Direction.kafedra` FK qo'shildi (nullable, `SET_NULL`, `related_name="directions"`)
+- [x] `apps/core/models/__init__.py`ga eksport qilindi
+- [x] Migration yaratildi (`0030_add_kafedra.py`) — lokal Docker Postgres'da sinovdan
+  o'tkazildi (2 ta kafedra, biri bo'sh kod bilan — `unique` xato bermadi; `Direction`ga
+  FK biriktirish ishladi), keyin tozalab tashlandi. **Serverda hali ishga tushirilmagan.**
+- Django admin panelida ro'yxatdan o'tkazilmadi — `Direction` ham ro'yxatdan o'tmagan
+  (ataylab, chunki Bosqich 2/3da maxsus admin API/UI orqali boshqariladi)
 
 ## Bosqich 2 — OnlineTest: admin CRUD API
-- [ ] `admin_kafedralar` / `admin_kafedra_detail` view'lari yozildi
-- [ ] URL'lar qo'shildi (`apps/api/urls.py`)
-- [ ] `admin_directions` javobiga `kafedra_id`/`kafedra_name` qo'shildi
+- [x] `admin_kafedralar` (GET/POST) va `admin_kafedra_detail` (GET/PATCH/DELETE)
+  view'lari yozildi (`apps/api/views/admin.py`) — `admin_directions`/`admin_direction_detail`
+  bilan bir xil naqsh (validatsiya, `audit()`, bog'liq yozuv bo'lsa o'chirishga to'siq)
+- [x] URL'lar qo'shildi: `admin/kafedralar`, `admin/kafedralar/<int:pk>` (`apps/api/urls.py`)
+- [x] `admin_directions` (GET/POST) va `admin_direction_detail` (GET/PATCH/DELETE)
+  `kafedra_id`/`kafedra_name` bilan yangilandi — POST/PATCHda `kafedra_id` validatsiya
+  qilinadi (mavjud bo'lmasa 400)
+- [x] `Kafedra` `_helpers.py` orqali eksport qilindi (wildcard import zanjiri)
+- [x] Xato xabarlari qo'shildi (`admin_api_i18n.py`): `kafedra_name_exists`,
+  `kafedra_code_exists`, `kafedra_not_found`, `kafedra_has_directions` (uz/ru/en)
+- [x] **To'liq HTTP sinovi** (lokal Docker Postgres, real `runserver` + admin token):
+  kafedra yaratish (kod bilan/kodsiz), direction'ni kafedra bilan yaratish,
+  `direction_count` hisoblash, bog'liq kafedrani o'chirishga to'siq (400),
+  uzish (`kafedra_id: null`) + muvaffaqiyatli o'chirish (200) — barchasi to'g'ri
+  ishladi. Test paytida bitta bug topilib tuzatildi: PATCH'da `old_name`
+  o'zgartirishdan OLDIN emas, KEYIN o'qilayotgan edi (audit logda ma'nosiz
+  bo'lardi) — tuzatildi. Test ma'lumotlari va vaqtinchalik admin parol
+  tozalab/tiklab qo'yildi.
 
 ## Bosqich 3 — OnlineTest admin frontend
-- [ ] "Kafedralar" boshqaruv sahifasi (ro'yxat/qo'shish/tahrirlash/o'chirish)
-- [ ] Yo'nalish formasiga "Kafedra" dropdown qo'shildi
+- [x] `KafedralarPage.tsx` yozildi (`frontend/src/pages/admin/`) — `DirectionsPage.tsx`
+  bilan bir xil naqsh (CRUD, inline edit/delete, bog'liq yozuv bo'lsa o'chirishga
+  to'siq), qo'shimcha `code` maydoni bilan
+- [x] `types.ts`ga `Kafedra` turi va `Direction.kafedra_id`/`kafedra_name` qo'shildi
+- [x] `DirectionsPage.tsx`ga "Kafedra" dropdown qo'shildi (qo'shish formasi +
+  inline tahrirlash), ro'yxatda `kafedra_name` ko'rsatiladi
+- [x] `AdminDashboard.tsx`ga yangi sahifa ulandi: `AdminPage` turi, `PAGE_PATHS`
+  (`/admin/kafedralar`), sidebar nav item ("Darajalar" bilan "Yo'nalishlar"
+  orasida), render bloki
+- [x] i18n: uz/ru/en uchta tilda barcha yangi matnlar qo'shildi
+  (`kontingentKafedralar`, `kafedraLabel`, `kafedraHasDirections`, ...)
+- [x] `tsc --noEmit` va `npm run build` — ikkalasi ham toza (xatosiz)
+- [x] **To'liq brauzer E2E sinovi** (real Vite dev server + Django + lokal Postgres,
+  haqiqiy admin login orqali): "Kafedralar" menyusi ko'rindi → kafedra yaratildi
+  (kod bilan) → "Yo'nalishlar" sahifasida yangi kafedra dropdown'da chiqdi →
+  yo'nalish shu kafedra bilan yaratildi → ro'yxatda "TESTDIR — UI Test Kafedra ·
+  0 Guruhlar" to'g'ri ko'rindi → Kafedralar sahifasida "1 Yo'nalishlar" to'g'ri
+  yangilandi → bog'liq kafedrani o'chirishga urinishda to'g'ri ogohlantirish
+  chiqdi (o'chirish bloklandi). Test ma'lumotlari va vaqtinchalik admin parol
+  tozalab/tiklab qo'yildi.
 
 ## Bosqich 4 — OnlineTest: iMentor uchun ochiq katalog API
 - [ ] Autentifikatsiya kaliti mexanizmi tanlandi
@@ -99,14 +139,11 @@ bog'lanishi maxsus XML zanjiri orqali tiklanadi: `xl/worksheets/sheet1.xml`
 
 ---
 
-**Oxirgi yangilanish:** 2026-08-02 — Bosqich 0 **serverda muvaffaqiyatli yakunlandi**:
-butun kontingent (3-kurs.xlsx dan tashqari) production bazasiga import qilindi
-(4226 talaba, 303 guruh, 15 yo'nalish), real login tasdiqlandi. Deploy jarayonida
-ikkita amaliy muammo hal qilindi: (1) `docker-compose.yml`ga `app` xizmati uchun
-`./data:/app/data:ro` bind mount qo'shildi — chunki `data/` .gitignore'da bo'lgani
-uchun image build'ga kirmaydi, va `docker cp` orqali qo'yilgan fayllar konteyner
-qayta yaratilganda yo'qolgan edi; (2) `backend/kontingent.py` — barcha 4 faylni
-bitta buyruq bilan (`python kontingent.py [--apply]`) ishga tushiradigan sof
-Python skript (bash o'rniga, konteyner ichida `manage.py` joylashuvidan qat'iy
-nazar ishlaydi). Keyingi qadam: 3-kurs.xlsx uchun guruh manbasini aniqlash,
-yoki Bosqich 1 (Kafedra modeli)ga o'tish.
+**Oxirgi yangilanish:** 2026-08-02 — Bosqich 0, 1, 2, 3 **kod darajasida tayyor**
+(0 — serverda ham yakunlangan, 1-3 — hali faqat lokal sinovdan o'tgan, serverga
+tushirilmagan). Bosqich 1-3 (Kafedra→Direction zanjiri: model, admin API, admin
+frontend) real brauzer E2E sinovidan muvaffaqiyatli o'tdi — kafedra yaratish,
+yo'nalishga bog'lash, hisoblangan `direction_count`, bog'liq yozuvni o'chirishga
+to'siq — barchasi ishlab chiqarish sifatida tekshirildi. Keyingi qadam: Bosqich
+1-3'ni serverga chiqarish (migration + deploy), so'ng Bosqich 4 (iMentor uchun
+ochiq katalog API)ga o'tish, yoki 3-kurs.xlsx uchun guruh manbasini aniqlash.

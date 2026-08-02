@@ -11,6 +11,23 @@ class Level(models.Model):
         db_table = "levels"
 
 
+class Kafedra(models.Model):
+    """Kafedra (masalan "Ichki kasalliklar kafedrasi") — Direction'ning tashkiliy ota-bo'g'ini."""
+
+    name = models.CharField(max_length=200, unique=True)
+    code = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    sort_order = models.PositiveSmallIntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        app_label = "core"
+        db_table = "kafedralar"
+        ordering = ["sort_order", "name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class Direction(models.Model):
     """Yo'nalish/fakultet (masalan "Davolash ishi", "Stomatologiya").
 
@@ -19,6 +36,12 @@ class Direction(models.Model):
     """
 
     name = models.CharField(max_length=200, unique=True)
+    # NULL = kafedra hali belgilanmagan (mavjud yo'nalishlar shu holatda import
+    # qilingan) — admin panel orqali keyin to'ldiriladi, majburiy emas.
+    kafedra = models.ForeignKey(
+        Kafedra, null=True, blank=True, on_delete=models.SET_NULL,
+        db_column="kafedra_id", related_name="directions",
+    )
 
     class Meta:
         app_label = "core"
