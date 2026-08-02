@@ -690,6 +690,8 @@ def admin_groups(request):
                     "direction_name": g.direction.name if g.direction_id else None,
                     "program_track": getattr(g, "program_track", "bachelor") or "bachelor",
                     "academic_year": getattr(g, "academic_year", None),
+                    "intake_year": getattr(g, "intake_year", None),
+                    "is_active": getattr(g, "is_active", True),
                     "student_count": student_counts.get(g.id, 0),
                 }
             )
@@ -712,8 +714,20 @@ def admin_groups(request):
             ay_val = int(ay)
         except (TypeError, ValueError):
             ay_val = None
+    iy = d.get("intake_year")
+    iy_val = None
+    if iy not in (None, "", "null"):
+        try:
+            iy_val = int(iy)
+        except (TypeError, ValueError):
+            iy_val = None
     g = Group.objects.create(
-        name=name, level_id=level_id, direction_id=direction_id, program_track=pt, academic_year=ay_val
+        name=name,
+        level_id=level_id,
+        direction_id=direction_id,
+        program_track=pt,
+        academic_year=ay_val,
+        intake_year=iy_val,
     )
     audit(request, "create_group", "group", g.id, g.name, f"level_id={level_id}, direction_id={direction_id}")
     return Response({"success": True, "id": g.id})
@@ -776,6 +790,19 @@ def admin_group_detail(request, pk: int):
                     status=400,
                 )
         uf.append("academic_year")
+    if "intake_year" in d:
+        v = d["intake_year"]
+        if v in ("", None, "null"):
+            g.intake_year = None
+        else:
+            try:
+                g.intake_year = int(v)
+            except (TypeError, ValueError):
+                return Response(
+                    {"error": admin_api_msg("academic_year_invalid", resolve_ui_language(request))},
+                    status=400,
+                )
+        uf.append("intake_year")
     if not uf:
         return Response({"error": "No fields to update"}, status=400)
     g.save(update_fields=list(dict.fromkeys(uf)))

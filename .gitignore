@@ -52,3 +52,4 @@ tools/vad-benchmark/venv/
 frontend/public/ort/
 frontend/public/models/
 frontend/vendor/
+data/

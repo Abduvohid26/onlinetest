@@ -32,6 +32,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
   const [newDirectionId, setNewDirectionId] = useState('');
   const [newTrack, setNewTrack] = useState('bachelor');
   const [newYear, setNewYear] = useState('');
+  const [newIntakeYear, setNewIntakeYear] = useState('');
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
@@ -76,6 +77,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
       program_track: newTrack,
     };
     if (newYear.trim()) body.academic_year = Number(newYear);
+    if (newIntakeYear.trim()) body.intake_year = Number(newIntakeYear);
     const res = await fetch(apiUrl('/api/admin/groups'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...h },
@@ -86,6 +88,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
     if (res.ok) {
       setNewGroupName('');
       setNewDirectionId('');
+      setNewIntakeYear('');
       setMsg({ type: 'success', text: t.groupAddedOk });
       reload();
     } else {
@@ -215,6 +218,16 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
                 />
               </AdminField>
             </div>
+            <AdminField label={t.intakeYear}>
+              <AdminInput
+                value={newIntakeYear}
+                onChange={(e) => setNewIntakeYear(e.target.value)}
+                placeholder="2025"
+                type="number"
+                min={2000}
+                max={2100}
+              />
+            </AdminField>
             <AdminBtn type="submit" variant="blue" size="lg" loading={saving} icon={<PlusIcon size={16} />} className="w-full">
               {t.groupAddBtn}
             </AdminBtn>
@@ -292,8 +305,12 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
                         <p className="text-[12px] sm:text-[13px] text-gray-400 mt-0.5 truncate">
                           {g.level_name}{g.direction_name ? ` · ${g.direction_name}` : ''} · {trackLabel(g.program_track)}
                           {g.academic_year != null ? ` · ${g.academic_year}-yil` : ''}
+                          {g.intake_year != null ? ` · ${t.intakeYear}: ${g.intake_year}` : ''}
                           {sc > 0 && (
                             <span className="ml-2 font-medium text-indigo-600">{sc} {t.kontingentStudents}</span>
+                          )}
+                          {g.is_active === false && (
+                            <span className="ml-2 font-medium text-amber-600">{t.groupGraduated}</span>
                           )}
                         </p>
                       </div>

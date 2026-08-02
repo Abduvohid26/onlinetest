@@ -269,6 +269,8 @@ export const translations = {
     trackResidency: "Ordinatura",
     trackMaster: "Magistratura",
     academicYear: "Kurs (yil)",
+    intakeYear: "Qabul yili",
+    groupGraduated: "Bitirgan",
     examCreated: "Imtihon muvaffaqiyatli yaratildi.",
     technicalRetakesAllowedLabel: "Qoidabuzarlik uchun qayta urinishlar",
     technicalRetakesAllowedHint:
@@ -1128,6 +1130,8 @@ export const translations = {
     trackResidency: "Ординатура",
     trackMaster: "Магистратура",
     academicYear: "Курс (год)",
+    intakeYear: "Год поступления",
+    groupGraduated: "Выпустился",
     examCreated: "Экзамен успешно создан.",
     technicalRetakesAllowedLabel: "Технические повторы",
     technicalRetakesAllowedHint:
@@ -1983,6 +1987,8 @@ export const translations = {
     trackResidency: "Residency",
     trackMaster: "Master",
     academicYear: "Academic year",
+    intakeYear: "Intake year",
+    groupGraduated: "Graduated",
     examCreated: "Exam created successfully.",
     technicalRetakesAllowedLabel: "Technical retakes",
     technicalRetakesAllowedHint:

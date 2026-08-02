@@ -34,6 +34,14 @@ class Group(models.Model):
     )
     program_track = models.CharField(max_length=20, default="bachelor")
     academic_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    # Guruh qabul qilingan o'quv yili (masalan 2025) — yillik kurs ko'tarilishini
+    # (current_level = shu_yil - intake_year + 1) hisoblash uchun. NULL = eski
+    # guruhlar (bu maydon qo'shilishidan oldin yaratilgan), qo'lda to'ldiriladi.
+    intake_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    # False = guruh bitirgan (yoki boshqa sababga ko'ra arxivlangan) — `promote_groups`
+    # yillik kurs ko'tarishda hisoblangan kurs raqami maksimal kursdan oshib ketsa, shu
+    # bayroq o'chiriladi va `level` ga endi tegilmaydi. Talabalar/tarix saqlanib qoladi.
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         app_label = "core"

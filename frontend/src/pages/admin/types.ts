@@ -11,6 +11,8 @@ export type Group = {
   direction_name?: string | null;
   program_track?: string;
   academic_year?: number | null;
+  intake_year?: number | null;
+  is_active?: boolean;
   student_count?: number;
 };
 
