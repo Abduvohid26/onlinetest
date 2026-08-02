@@ -114,6 +114,27 @@ bog'lanishi maxsus XML zanjiri orqali tiklanadi: `xl/worksheets/sheet1.xml`
   chiqdi (o'chirish bloklandi). Test ma'lumotlari va vaqtinchalik admin parol
   tozalab/tiklab qo'yildi.
 
+### 3.1 — Kafedra ro'yxatini boshlang'ich to'ldirish
+
+- [x] `apps/core/management/commands/seed_kafedralar.py` yozildi — 46 ta kafedra
+  nomini bir martada yaratadi (manba: Excel fayllardagi ordinatura/magistratura
+  guruh nomlaridan chiqarilgan, imlo xatolari va yil/til variantlari tozalangan,
+  masalan "Kardiologiya-25 (Magistratura) rus" → "Kardiologiya"). Idempotent
+  (`get_or_create`), dry-run default. Lokal Postgres'da sinovdan o'tkazildi:
+  birinchi ishga tushirishda 46 yangi, ikkinchisida 0 yangi/46 mavjud — to'g'ri.
+- [ ] Serverda `--apply` bilan ishga tushirilmagan — keyingi qadam.
+
+**⚠️ Ochiq kontseptual savol — Kafedra↔Direction bog'lanishi**: mavjud 15 ta
+`Direction` (`TPI, DI, MD, PI, S, F, OHI, FT, BM, XT, RTT, SSBJSS, TBATM, P, ЛД`)
+— bular **bakalavriat yo'nalishlari**. Yangi 46 ta `Kafedra` esa Excel'dagi
+**ordinatura/magistratura** mutaxassislik nomlaridan chiqarilgan — bular boshqa
+daraja/miqyos (bitta bakalavriat yo'nalishini odatda o'nlab kafedra birgalikda
+o'qitadi, faqat bittasiga tegishli emas). Foydalanuvchi bilan aniqlashtirilgan
+qaror: **hozircha bog'lashni qo'lda, admin panel orqali (Yo'nalishlar sahifasi
+→ Tahrirlash → Kafedra tanlash) amalga oshiramiz**, keyinroq qayta ko'rib
+chiqiladi — avtomatik/skript bilan bog'lash qilinmaydi (chunki to'g'ri xarita
+faqat foydalanuvchi/dekanatga ma'lum).
+
 ## Bosqich 4 — OnlineTest: iMentor uchun ochiq katalog API
 - [ ] Autentifikatsiya kaliti mexanizmi tanlandi
 - [ ] `GET /api/public/academic-catalog/` (yoki tanlangan shakl) yozildi va test qilindi
