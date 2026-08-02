@@ -39,6 +39,11 @@ services:
       - "8080:8080"
     env_file:
       - backend/.env
+    volumes:
+      # Talabalar kontingenti (Excel) — data/ .gitignore'da, shuning uchun
+      # image build vaqtida ichiga tushmaydi. Bind mount: host qayta ishga
+      # tushirilsa/deploy qilinsa ham fayllar yo'qolmaydi (docker cp'dan farqli).
+      - ./data:/app/data:ro
     environment:
       DJANGO_DEBUG: "1"
       IDENTITY_VERIFY_DEBUG_LOG: "1"
