@@ -4,7 +4,8 @@
 Konteyner ichida (yoki manage.py bilan bir papkada) ishlatish:
 
   python kontingent.py                 # dry-run, hech narsa yozilmaydi
-  python kontingent.py --apply         # haqiqatan bazaga yozadi
+  python kontingent.py --apply         # haqiqatan bazaga yozadi (talabalar)
+  python kontingent.py --apply --photos   # talabalar + rasmlar (profile_image)
   python kontingent.py --data-dir /app/data/talablar_kotingenti --apply
 
 Excel fayllar default holatda shu skriptga nisbatan `../data/talablar kotingenti/`
@@ -59,6 +60,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Haqiqatan saqlash (default: dry-run)")
     parser.add_argument(
+        "--photos",
+        action="store_true",
+        help="Talabalardan keyin har fayl uchun seed_student_photos ni ham ishga tushiradi",
+    )
+    parser.add_argument(
         "--data-dir",
         default="",
         help="Excel fayllar joylashgan papka (default: ../data/talablar kotingenti)",
@@ -98,6 +104,15 @@ def main() -> int:
             kwargs["level_name"] = level_name
         call_command("import_students", **kwargs)
         print()
+
+        if args.photos:
+            print(f"--- Rasmlar: {filename} ---")
+            call_command(
+                "seed_student_photos",
+                file=str(data_dir / filename),
+                apply=args.apply,
+            )
+            print()
 
     print("=" * 70)
     print(SKIPPED_NOTE)
