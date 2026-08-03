@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { translations, Language } from '../i18n';
-import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../lib/http';
+import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse, fetchWithTimeout } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { authHeaders } from '../lib/uiLangHeader';
 import {
@@ -340,11 +340,20 @@ export function ImtixonTab({
       if (selTopic) body.imentor_topic_code = selTopic;
       if (responsibleStaffId.trim()) body.teacher_id = responsibleStaffId.trim();
 
-      const res = await fetch(apiUrl('/api/admin/exams'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...h },
-        body: JSON.stringify(body),
-      });
+      // iMentor rejimida savollar shu so'rov ICHIDA olib, AI orqali 3 tilga
+      // tarjima qilinadi — ko'p savol/fanda bir necha daqiqa cho'zilishi
+      // mumkin. Ilgari bu yerda aniq timeout YO'Q edi va `catch` ham yo'q edi —
+      // haqiqiy tarmoq xatosi bo'lsa foydalanuvchiga HECH NARSA ko'rsatilmasdi
+      // (jim "osilib qolgan" tugma). Endi ikkalasi ham tuzatildi.
+      const res = await fetchWithTimeout(
+        apiUrl('/api/admin/exams'),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...h },
+          body: JSON.stringify(body),
+        },
+        480_000,
+      );
 
       if (!checkAdminAuthResponse(res)) return;
       const d = await readJsonSafe<{ error?: string }>(res);
@@ -365,6 +374,8 @@ export function ImtixonTab({
       setExMap({});
       setStartLocal(defaultExamStartLocal());
       setEndLocal(defaultExamEndLocal(duration));
+    } catch {
+      setMsg({ type: 'err', text: t.importNetworkError });
     } finally {
       setBusy(false);
     }

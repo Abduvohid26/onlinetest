@@ -34,6 +34,7 @@ import {
   openPreferredCameraStream,
   VIRTUAL_CAMERA_BLOCKED_MESSAGE,
 } from '../lib/preferredCameraStream';
+import { prewarmProctorStream, discardPrewarmedProctorStream } from '../lib/proctorStreamPrewarm';
 
 const PASSIVE_LIVE_SAMPLES = 12;
 const PASSIVE_LIVE_GAP_MS = 260;
@@ -102,6 +103,9 @@ export function PreExamCheck({
   const [mediaHint, setMediaHint] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
+  /** `onComplete` chaqirilganmi — shunda unmount cleanup prewarm qilingan
+   *  kamera oqimini YO'Q QILMASLIGI kerak (ExamRoom uni da'vo qiladi). */
+  const proceededToExamRef = useRef(false);
   const [showVerifyCelebration, setShowVerifyCelebration] = useState(false);
   const [livenessPassed, setLivenessPassed] = useState(false);
   const [livenessChecking, setLivenessChecking] = useState(false);
@@ -147,6 +151,17 @@ export function PreExamCheck({
   useEffect(() => {
     tRef.current = t;
   }, [t]);
+
+  // Komponent ExamRoom'ga o'tmasdan unmount bo'lsa (masalan foydalanuvchi
+  // "Kirish"ni bosgach sahifadan chiqsa) — prewarm qilingan kamera oqimi
+  // fonda ochiq qolib ketmasin. `proceededToExamRef` true bo'lsa — ExamRoom
+  // shu oqimni da'vo qilishi kerak, TEGMAYMIZ.
+  useEffect(
+    () => () => {
+      if (!proceededToExamRef.current) discardPrewarmedProctorStream();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!showRulesModal) return;
@@ -703,6 +718,10 @@ export function PreExamCheck({
   const handleEnter = async () => {
     setError('');
     setStarting(true);
+    // ExamRoom kamera/mikrofonni ochishini KUTMASDAN, tarmoq so'rovi bilan
+    // PARALLEL boshlab qo'yamiz — "Kamera tayyorlanmoqda" ekrani deyarli
+    // darhol o'tishi uchun (bewaqt xato bo'lsa ExamRoom o'zi qayta so'raydi).
+    prewarmProctorStream();
     try {
       const res = await fetch(apiUrl(`/api/student/exams/${exam.id}/start`), {
         method: 'POST',
@@ -726,6 +745,7 @@ export function PreExamCheck({
       }>(res);
       if (!res.ok || !data?.exam || data.studentExamId == null) {
         setError(data?.error || t.preExamStartError);
+        discardPrewarmedProctorStream();
         return;
       }
       if (data.deviceToken) {
@@ -744,6 +764,7 @@ export function PreExamCheck({
       } catch {
         /* sessionStorage o'chirilgan — nisbiy taqqoslash ishlamaydi, xato emas */
       }
+      proceededToExamRef.current = true;
       onComplete(
         {
           ...data.exam,
@@ -756,6 +777,7 @@ export function PreExamCheck({
       );
     } catch {
       setError(t.preExamNetworkError);
+      discardPrewarmedProctorStream();
     } finally {
       setStarting(false);
     }

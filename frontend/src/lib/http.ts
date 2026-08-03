@@ -19,6 +19,28 @@ export function checkStudentAuthResponse(res: Response): boolean {
   return true;
 }
 
+/**
+ * Uzoq (AI tarjima/tahlil bilan) so'rovlar uchun — `fetch` odatda hech qachon
+ * o'zi to'xtamaydi (brauzer standart timeout qo'ymaydi), shuning uchun
+ * tarmoq uzilib qolsa foydalanuvchi cheksiz kutib qoladi. `timeoutMs`dan
+ * keyin so'rov bekor qilinadi va aniq `TimeoutError` (`DOMException`) beriladi
+ * — chaqiruvchi buni oddiy tarmoq xatosidan alohida xabar bilan ko'rsatishi
+ * mumkin (masalan "juda uzoq davom etdi" vs "internet uzildi").
+ */
+export async function fetchWithTimeout(
+  input: string,
+  init: RequestInit = {},
+  timeoutMs = 240_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const id = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(id);
+  }
+}
+
 /** Avoid SyntaxError when the server returns HTML (e.g. SPA fallback) instead of JSON. */
 export async function readJsonSafe<T = unknown>(res: Response): Promise<T | null> {
   const ct = res.headers.get('content-type') || '';

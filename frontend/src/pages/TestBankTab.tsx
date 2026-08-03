@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { translations, Language } from '../i18n';
-import { readJsonSafe, checkAdminAuthResponse } from '../lib/http';
+import { readJsonSafe, checkAdminAuthResponse, fetchWithTimeout } from '../lib/http';
 import { apiUrl } from '../lib/apiUrl';
 import { authHeaders } from '../lib/uiLangHeader';
 import { AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminFileInput, AdminPageMessageStack, PlusIcon } from './admin/ui';
@@ -306,9 +306,14 @@ export function TestBankTab({ token, lang }: { token: string; lang: Language }) 
       fd.append('file', smartFile);
       fd.append('collection_name', name);
       fd.append('language', sourceLanguage);
-      const res = await fetch(apiUrl('/api/admin/test-bank/import-smart'), {
-        method: 'POST', headers: h, body: fd,
-      });
+      // AI (OCR/parse/tarjima) katta fayllarda bir necha daqiqa cho'zilishi mumkin —
+      // 8 daqiqa (avvalgi holat: aniq timeout umuman yo'q edi, tarmoq/proksi o'z
+      // chegarasida uzib qo'yardi; endi kamida shu vaqtgacha kutamiz).
+      const res = await fetchWithTimeout(
+        apiUrl('/api/admin/test-bank/import-smart'),
+        { method: 'POST', headers: h, body: fd },
+        480_000,
+      );
       if (!checkAdminAuthResponse(res)) return;
       const d = await readJsonSafe<{
         error?: string; detail?: string; inserted?: number; detected?: number;

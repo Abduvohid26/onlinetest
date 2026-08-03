@@ -34,6 +34,7 @@ import {
   openPreferredProctorStream,
   VIRTUAL_CAMERA_BLOCKED_MESSAGE,
 } from '../lib/preferredCameraStream';
+import { claimPrewarmedProctorStream } from '../lib/proctorStreamPrewarm';
 import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
@@ -605,8 +606,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         seq: vacStateRef.current.seq,
         method,
         path,
+        lang,
       }),
-    [token, exam.id, exam.sessionKey, studentExamId, user.id],
+    [token, exam.id, exam.sessionKey, studentExamId, user.id, lang],
   );
 
   /**
@@ -1581,7 +1583,21 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         setCameraErrorHint('');
         setCameraPreviewOk(false);
         setMicReady(false);
-        const stream = await openPreferredProctorStream();
+        // PreExamCheck "Kirish" bosilganda kamerani OLDINDAN so'ragan bo'lishi
+        // mumkin (proctorStreamPrewarm.ts) — bo'lsa, shuni ishlatamiz (yangi
+        // getUserMedia so'rovisiz, tezroq). Muvaffaqiyatsiz/yo'q bo'lsa —
+        // odatdagidek o'zimiz so'raymiz.
+        const prewarmed = claimPrewarmedProctorStream();
+        let stream: MediaStream;
+        if (prewarmed) {
+          try {
+            stream = await prewarmed;
+          } catch {
+            stream = await openPreferredProctorStream();
+          }
+        } else {
+          stream = await openPreferredProctorStream();
+        }
         streamRef.current = stream;
         setProctorStreamRevision((n) => n + 1);
 
@@ -1753,19 +1769,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       document.removeEventListener('gesturestart', blockGesture);
       document.removeEventListener('gesturechange', blockGesture);
       if (devtoolsTick !== null) clearInterval(devtoolsTick);
-      
-      if (getFullscreenElement()) {
-        const doc = document as Document & {
-          webkitExitFullscreen?: () => Promise<void> | void;
-          msExitFullscreen?: () => Promise<void> | void;
-        };
-        const exit =
-          doc.exitFullscreen?.bind(doc) ||
-          doc.webkitExitFullscreen?.bind(doc) ||
-          doc.msExitFullscreen?.bind(doc);
-        void Promise.resolve(exit?.()).catch(() => {});
-      }
 
+      // MUHIM: bu yerda ILGARI `exitFullscreen()` ham chaqirilardi. Bu effekt
+      // `proctorRetryNonce` o'zgarganda ham (masalan "Живая синхронизация"
+      // banneridagi "Переподключиться" tugmasi, yoki kamera preview tiklash)
+      // QAYTA ishga tushadi — ya'ni HAQIQIY unmountda emas, oddiy qayta
+      // urinishda ham talaba fullscreendan chiqarib yuborilardi. Fullscreendan
+      // chiqish endi FAQAT haqiqiy unmountda ishlaydigan alohida effektda
+      // (pastda, bo'sh dependency bilan).
       socketRef.current?.destroy();
       Object.values(peerConnectionsRef.current).forEach(pc => pc.close());
 
@@ -1777,6 +1788,26 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
     };
   }, [banned, exam.id, token, user.id, proctorRetryNonce, requestExamFullscreen, syncMicReadyFromStream]);
+
+  // Fullscreendan chiqish — FAQAT komponent HAQIQIY unmount bo'lganda (imtihon
+  // tugadi/banned/sahifadan chiqildi). Bo'sh dependency: `proctorRetryNonce`
+  // kabi qayta-urinish signallariga BOG'LIQ EMAS, shuning uchun "Живая
+  // синхронизация" banneridagi qayta ulanish yoki kamera tiklanishi talabani
+  // endi fullscreendan chiqarib yubormaydi.
+  useEffect(() => {
+    return () => {
+      if (!getFullscreenElement()) return;
+      const doc = document as Document & {
+        webkitExitFullscreen?: () => Promise<void> | void;
+        msExitFullscreen?: () => Promise<void> | void;
+      };
+      const exit =
+        doc.exitFullscreen?.bind(doc) ||
+        doc.webkitExitFullscreen?.bind(doc) ||
+        doc.msExitFullscreen?.bind(doc);
+      void Promise.resolve(exit?.()).catch(() => {});
+    };
+  }, [getFullscreenElement]);
 
   // --- Real-time ovoz: faqat inson nutqi (spektr + RMS), ~200ms freym.
   // Qonun (README.md "Proctoring eskalatsiya qoidasi") bilan bir xil ikki bosqich:

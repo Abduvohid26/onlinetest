@@ -59,8 +59,13 @@ export async function buildGuardedExamHeaders(params: {
   sessionKey?: string;
   method: string;
   path: string;
+  lang?: string;
 }): Promise<Record<string, string>> {
   const base = examAuthHeaders(params.token);
+  // Talabaning UI tili — backend shu orqali qoidabuzarlik sabab matnini
+  // (violationReason) to'g'ri tilda qaytaradi. Yo'q bo'lsa backend "uz"ga
+  // tushib qoladi, garchi UI boshqa tilda bo'lsa ham.
+  if (params.lang) base['X-Student-Lang'] = params.lang;
   if (!params.sessionKey) return base;
   if (typeof params.seq === 'number') {
     base['X-Exam-Seq'] = String(params.seq);
