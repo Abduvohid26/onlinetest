@@ -70,11 +70,17 @@ export const LIVE_SIGNAL_ESCALATE_FAST_MS = 1600;
 
 // GAPIRISH uchun MAXSUS (tezroq) qoida — README.md "Gapirish uchun maxsus qoida".
 // Mikrofon Silero VAD (ExamRoom):
-//   ~0.8s uzluksiz → kichik ogohlantirish, ~2.5s → rasmiy.
-// 800ms: LibriSpeech chip 98.8% (900ms esa ~97.5%); ESC-50 FP 0%.
-// Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI.
-export const TALK_SIGNAL_CONFIRM_MS = 800;
-export const TALK_SIGNAL_ESCALATE_MS = 2500;
+//   ~0.3s uzluksiz → kichik ogohlantirish, ~1.8s → rasmiy.
+//
+// 2026-08-03: 800/2500 → 300/1800. Sabab: 800ms bitta so'zni deyarli hech
+// qachon ushlamasdi (haqiqiy so'z ~300-700ms) — talaba faqat 2+ so'z aytsa
+// (pauza SPEECH_MIN_FRAMES/GRACE bilan ko'prik bo'lib) chip chiqardi.
+// `verify_chain.py`da o'lchangan (LibriSpeech 80 nutq + ESC-50 124 shovqin,
+// custom bitta-so'z simulyatsiyasi): chip 98.8%→100%, rasmiy 50-62%→91-92.5%,
+// shovqin FP chip 0%→3.2% (arzon — jazosiz yorliq), rasmiy FP hamon 0%.
+// Shovqin (SUSPICIOUS_AUDIO) bunga KIRMAYDI — undagi LIVE_SIGNAL_* o'zgarmadi.
+export const TALK_SIGNAL_CONFIRM_MS = 300;
+export const TALK_SIGNAL_ESCALATE_MS = 1800;
 
 /** QONUN ISTISNOSI — darhol yorliq beriladigan turlar (0.4s).
  *  Sabab: gapirish va nigohni chetga olish bir zumda bo'ladi. 1.5s kutish

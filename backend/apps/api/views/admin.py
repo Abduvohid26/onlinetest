@@ -1244,29 +1244,38 @@ def admin_test_bank_import_smart(request):
             ca_main = it["correctAnswer"]
 
             if source_language == "en":
-                # EN asl matn, UZ/RU tarjima
+                # EN asl matn, UZ/RU/EN barchasi to'ldiriladi
                 text_uz = _tr_str("text_uz")
                 text_ru = _tr_str("text_ru")
+                text_en = text_main  # asl
                 opts_uz = _tr_list("options_uz")
                 opts_ru = _tr_list("options_ru")
+                opts_en = opts_main  # asl
                 ca_uz = _tr_str("correct_answer_uz")
                 ca_ru = _tr_str("correct_answer_ru")
+                ca_en = ca_main  # asl
             elif source_language == "ru":
-                # RU asl matn → text_ru = asl, text_uz = tarjima
+                # RU asl matn → text_ru = asl, text_uz/text_en = tarjima
                 text_uz = _tr_str("text_uz")
                 text_ru = text_main  # asl
+                text_en = _tr_str("text_en")
                 opts_uz = _tr_list("options_uz")
                 opts_ru = opts_main  # asl
+                opts_en = _tr_list("options_en")
                 ca_uz = _tr_str("correct_answer_uz")
                 ca_ru = ca_main  # asl
+                ca_en = _tr_str("correct_answer_en")
             else:
-                # UZ yoki other → text_uz = asl, text_ru = tarjima
+                # UZ yoki other → text_uz = asl, text_ru/text_en = tarjima
                 text_uz = text_main  # asl
                 text_ru = _tr_str("text_ru")
+                text_en = _tr_str("text_en")
                 opts_uz = opts_main  # asl
                 opts_ru = _tr_list("options_ru")
+                opts_en = _tr_list("options_en")
                 ca_uz = ca_main  # asl
                 ca_ru = _tr_str("correct_answer_ru")
+                ca_en = _tr_str("correct_answer_en")
 
             TestBankQuestion.objects.create(
                 category=cat,
@@ -1276,10 +1285,13 @@ def admin_test_bank_import_smart(request):
                 language=source_language,
                 text_uz=text_uz[:50000],
                 text_ru=text_ru[:50000],
+                text_en=text_en[:50000],
                 options_uz_json=json.dumps(opts_uz) if opts_uz else "[]",
                 options_ru_json=json.dumps(opts_ru) if opts_ru else "[]",
+                options_en_json=json.dumps(opts_en) if opts_en else "[]",
                 correct_answer_uz=ca_uz[:500],
                 correct_answer_ru=ca_ru[:500],
+                correct_answer_en=ca_en[:500],
             )
             inserted += 1
             categories_touched[cat.name] = categories_touched.get(cat.name, 0) + 1
@@ -1311,13 +1323,13 @@ def admin_test_bank_categories(request):
             fq = (
                 TestBankQuestion.objects.filter(category_id=c.id)
                 .order_by("-id")
-                .only("text", "text_uz", "text_ru")
+                .only("text", "text_uz", "text_ru", "text_en")
                 .first()
             )
             preview = None
             if fq:
                 preview = {
-                    "text_en": (fq.text or "")[:280],
+                    "text_en": (fq.text_en or fq.text or "")[:280],
                     "text_uz": (fq.text_uz or "")[:280],
                     "text_ru": (fq.text_ru or "")[:280],
                 }
@@ -1491,12 +1503,15 @@ def admin_test_bank_questions(request):
                         "text": q.text,
                         "text_uz": q.text_uz,
                         "text_ru": q.text_ru,
+                        "text_en": q.text_en,
                         "options_json": q.options_json,
                         "options_uz_json": q.options_uz_json,
                         "options_ru_json": q.options_ru_json,
+                        "options_en_json": q.options_en_json,
                         "correct_answer": q.correct_answer,
                         "correct_answer_uz": q.correct_answer_uz,
                         "correct_answer_ru": q.correct_answer_ru,
+                        "correct_answer_en": q.correct_answer_en,
                         "language": q.language,
                         "created_at": q.created_at.isoformat() if q.created_at else None,
                     }

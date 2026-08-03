@@ -156,7 +156,9 @@ def public_verify_result(request, result_id: str):
     answers = norm_answers(safe_json_loads(se.answers_json, {}))
     ai = safe_json_loads(se.ai_summary_json, {})
     if not ai.get("items"):
-        ai = build_fallback_ai_summary(questions, answers)
+        ai = build_fallback_ai_summary(
+            questions, answers, detect_grading_language(se.exam, answers, raw_questions=questions)
+        )
     total = len(questions)
     completed_iso = se.completed_at.isoformat() if se.completed_at else ""
     icode = integrity_code(result_id, completed_iso, se.score, total, k)
@@ -255,7 +257,9 @@ def public_verify_certificate_pdf(request, result_id: str):
     answers = norm_answers(safe_json_loads(se.answers_json, {}))
     ai = safe_json_loads(se.ai_summary_json, {})
     if not ai.get("items"):
-        ai = build_fallback_ai_summary(questions, answers)
+        ai = build_fallback_ai_summary(
+            questions, answers, detect_grading_language(se.exam, answers, raw_questions=questions)
+        )
     total = len(questions)
     completed_iso = se.completed_at.isoformat() if se.completed_at else ""
     base = public_base_url(request)

@@ -1038,7 +1038,7 @@ def _result_details_bundle(se: StudentExam, request, for_pdf: bool = False, lang
     ai = safe_json_loads(se.ai_summary_json, {})
     if not ai.get("items"):
         # Fallback: eski yoki buzilgan summary — hisoblash
-        ai = build_fallback_ai_summary(questions, answers)
+        ai = build_fallback_ai_summary(questions, answers, lang)
         if not ai.get("items"):
             return "corrupt"
     total = len(questions)

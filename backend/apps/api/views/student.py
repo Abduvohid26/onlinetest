@@ -893,7 +893,8 @@ def student_exams_submit(request, pk: int):
         # marta ochganda hisoblanadi (`_upgrade_ai_summary_if_needed`, student_results.py).
         # Sabab: submit darhol javob berishi kerak — AI kutish talabani osilib qolgan
         # tugma oldida ushlab turmasin.
-        ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
+        quick_lang = detect_grading_language(exam, norm, student_lang=student_lang, raw_questions=questions)
+        ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm, quick_lang))
         se.status = "Completed"
         se.score = score
         se.answers_json = json.dumps(norm)

@@ -25,12 +25,15 @@ type Question = {
   text: string;
   text_uz: string;
   text_ru: string;
+  text_en: string;
   options_json: string;
   options_uz_json: string;
   options_ru_json: string;
+  options_en_json: string;
   correct_answer: string;
   correct_answer_uz: string;
   correct_answer_ru: string;
+  correct_answer_en: string;
   language: string;
 };
 
@@ -89,13 +92,15 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
   const getText = (q: Question) => {
     if (lang === 'uz' && q.text_uz) return q.text_uz;
     if (lang === 'ru' && q.text_ru) return q.text_ru;
-    return q.text || q.text_uz || q.text_ru;
+    if (lang === 'en' && q.text_en) return q.text_en;
+    return q.text_en || q.text || q.text_uz || q.text_ru;
   };
 
   const getOptions = (q: Question): string[] => {
     try {
       if (lang === 'uz' && q.options_uz_json) return JSON.parse(q.options_uz_json);
       if (lang === 'ru' && q.options_ru_json) return JSON.parse(q.options_ru_json);
+      if (lang === 'en' && q.options_en_json) return JSON.parse(q.options_en_json);
       return JSON.parse(q.options_json);
     } catch { return []; }
   };
@@ -103,6 +108,7 @@ function QuestionsPanel({ catId, lang, token }: { catId: number; lang: Language;
   const getCorrect = (q: Question) => {
     if (lang === 'uz' && q.correct_answer_uz) return q.correct_answer_uz;
     if (lang === 'ru' && q.correct_answer_ru) return q.correct_answer_ru;
+    if (lang === 'en' && q.correct_answer_en) return q.correct_answer_en;
     return q.correct_answer;
   };
 

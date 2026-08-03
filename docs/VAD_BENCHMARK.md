@@ -181,17 +181,23 @@ Production haddan **qattiq** edi (`0.78 / 0.55 / 16≈512ms`, grace 400ms, confi
 maishiy FP 0% bo'lib qolgan, lekin real nutq chip **92.5%** ga tushgan (SNR5 da **87.5%**).
 Rasmiy (2.5s) uzluksiz gapirishda ham sezgirlik yarmi edi.
 
-## Joriy sozlamalar
+## Joriy sozlamalar (2026-08-03)
 
 | Qatlam | Qiymat | Asos |
 |---|---|---|
-| `SPEECH_START_PROB` | **0.33** | past ovozda gapirish uchun sezgirlik +40% |
-| `SPEECH_STOP_PROB` | **0.24** | gisterezis nisbati saqlangan |
-| `SPEECH_MIN_FRAMES` | **8 (~256ms)** | Silero `min_speech_duration_ms=250` |
-| speech grace | **600ms** | so'z pauzalari; FP hali 0% |
-| confirm / escalate | **800 / 2500ms** | chip 98.8%; escalate o'zgarmagan |
-| `RMS_VOICE` (DSP zaxira) | **0.0144** | past ovoz; sezgirlik +40% |
-| fon ustunligi (DSP zaxira) | **1.51×** | past ovoz; sezgirlik +40% |
+| `SPEECH_START_PROB` | **0.25** | bitta so'z + past ovoz uchun sezgirlik yana oshirildi |
+| `SPEECH_STOP_PROB` | **0.18** | gisterezis nisbati saqlangan |
+| `SPEECH_MIN_FRAMES` | **3 (~96ms)** | bitta qisqa so'zni ushlash |
+| speech grace | **600ms** | so'z pauzalari; FP hali 0% (rasmiy) |
+| confirm / escalate | **300 / 1800ms** | asosiy to'siq CONFIRM edi (800ms > bitta so'z uzunligi) |
+| `RMS_VOICE` (DSP zaxira) | **0.0144** | o'zgarmadi (2026-08-01) |
+| fon ustunligi (DSP zaxira) | **1.51×** | o'zgarmadi (2026-08-01) |
+
+O'lchov (`verify_chain.py` + custom bitta-so'z simulyatsiyasi, 80 nutq + 124
+maishiy shovqin): eskisiga (`0.33/0.24/8, confirm=800`) nisbatan chip
+98.8%→**100%**, rasmiy 50-62.5%→**91-92.5%**, maishiy shovqin FP chip
+0%→**3.2%** (rasmiy/jazoli FP hamon **0%**). Bitta 450-700ms so'z (jim ovozda)
+avval **0%** ushlanardi, endi **67-98%**.
 
 ## ⚠️ ENG BARQAROR (REFERENS) QIYMATLAR — muammo bo'lsa shu yerga qayting
 

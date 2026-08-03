@@ -34,10 +34,10 @@ def build_student_question_list(full: list[dict]) -> list[dict]:
     return out
 
 
-def _option_explanation_for(q: dict, answer: str) -> str:
-    """Talaba tanlagan variant uchun iMentor optionExplanations dan izoh."""
+def _option_explanation_for(q: dict, answer: str, lang: str = "uz") -> str:
+    """Talaba tanlagan variant uchun iMentor optionExplanations dan izoh (imtihon tiliga mos)."""
     opts = [str(o) for o in (q.get("options") or [])]
-    expls = q.get("optionExplanations")
+    expls = q.get(f"optionExplanations_{lang}") or q.get("optionExplanations")
     if not isinstance(expls, list) or not opts or not answer:
         return ""
     try:
@@ -50,16 +50,50 @@ def _option_explanation_for(q: dict, answer: str) -> str:
     return str(expls[idx] or "").strip()
 
 
-def _api_explanation_pair(q: dict, student_answer: str, *, is_correct: bool) -> tuple[str, str, str]:
+_CORRECT_TEMPLATE = {
+    "uz": "Javob to'g'ri tanlangan.",
+    "ru": "Ответ выбран верно.",
+    "en": "Correct answer selected.",
+}
+_CHOSE_WRONG_TEMPLATE = {
+    "uz": 'Siz "{chosen}" variantini tanladingiz — to\'g\'ri javob "{correct}".',
+    "ru": 'Вы выбрали вариант "{chosen}" — правильный ответ "{correct}".',
+    "en": 'You selected "{chosen}" — the correct answer is "{correct}".',
+}
+_UNANSWERED_TEMPLATE = {
+    "uz": 'Javob belgilanmagan — to\'g\'ri javob "{correct}".',
+    "ru": 'Ответ не был выбран — правильный ответ "{correct}".',
+    "en": 'No answer was selected — the correct answer is "{correct}".',
+}
+_EMPTY_ANSWER = {"uz": "bo'sh", "ru": "пусто", "en": "empty"}
+_NO_MATCH_TEMPLATE = {
+    "uz": 'Tanlangan javob ("{chosen}") savolning to\'g\'ri yechimi bilan mos kelmaydi.',
+    "ru": 'Выбранный ответ ("{chosen}") не соответствует правильному решению вопроса.',
+    "en": 'The selected answer ("{chosen}") does not match the correct solution to the question.',
+}
+_ONLY_CLEAR_OPTION_TEMPLATE = {
+    "uz": 'To\'g\'ri javob "{correct}" -- savol mazmuniga mos yagona aniq variant.',
+    "ru": 'Правильный ответ "{correct}" -- единственный вариант, точно соответствующий содержанию вопроса.',
+    "en": 'The correct answer is "{correct}" -- the only option that clearly matches the question.',
+}
+
+
+def _api_explanation_pair(
+    q: dict, student_answer: str, *, is_correct: bool, lang: str = "uz"
+) -> tuple[str, str, str]:
     """
-    API (iMentor) manbasidagi izohlar.
+    API (iMentor) manbasidagi izohlar — imtihon tiliga mos variantda.
     Qaytaradi: (commentCorrect, whyStudentWrong, whyCorrectIsRight) — bo'sh bo'lishi mumkin.
     """
-    explanation = str(q.get("explanation") or "").strip()
+    lang = lang if lang in ("uz", "ru", "en") else "uz"
+    explanation = str(q.get(f"explanation_{lang}") or q.get("explanation") or "").strip()
     if is_correct:
-        return (explanation or "Javob to'g'ri tanlangan.", "", "")
-    why_wrong = _option_explanation_for(q, student_answer)
-    why_right = explanation or _option_explanation_for(q, str(q.get("correctAnswer") or ""))
+        return (explanation or _CORRECT_TEMPLATE[lang], "", "")
+    why_wrong = _option_explanation_for(q, student_answer, lang)
+    correct_localized = str(
+        q.get(f"correct_answer_{lang}") or q.get("correctAnswer") or ""
+    ).strip()
+    why_right = explanation or _option_explanation_for(q, str(q.get("correctAnswer") or ""), lang)
     if not why_wrong and why_right:
         # Ko'p iMentor testlarida umumiy `explanation` bor, lekin har bir variant
         # uchun alohida izoh (`optionExplanations`) yo'q. Bunday holatda "Nega
@@ -67,11 +101,10 @@ def _api_explanation_pair(q: dict, student_answer: str, *, is_correct: bool) -> 
         # Tibbiy sabab O'YLAB TOPILMAYDI — faqat baholash faktи aytiladi,
         # asosiy tushuntirish esa quyidagi "to'g'ri variant" qatorida turadi.
         chosen = str(student_answer or "").strip()
-        correct = str(q.get("correctAnswer") or "").strip()
         if chosen:
-            why_wrong = f'Siz "{chosen}" variantini tanladingiz — to\'g\'ri javob "{correct}".'
+            why_wrong = _CHOSE_WRONG_TEMPLATE[lang].format(chosen=chosen, correct=correct_localized)
         else:
-            why_wrong = f'Javob belgilanmagan — to\'g\'ri javob "{correct}".'
+            why_wrong = _UNANSWERED_TEMPLATE[lang].format(correct=correct_localized)
     return ("", why_wrong, why_right)
 
 
@@ -90,28 +123,30 @@ def question_has_api_explanations(q: dict) -> bool:
     return isinstance(oe, list) and any(str(x).strip() for x in oe)
 
 
-def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) -> dict:
+def build_fallback_ai_summary(
+    questions: list[dict], answers: dict[str, str], language: str = "uz"
+) -> dict:
+    lang = (language or "uz").lower()
+    if lang not in ("uz", "ru", "en"):
+        lang = "uz"
     items = []
     used_api = 0
     for q in questions:
         qid = q["id"]
         st = answers.get(str(qid), "") or ""
         ok = st == q.get("correctAnswer")
-        comment, why_wrong, why_right = _api_explanation_pair(q, st, is_correct=ok)
+        comment, why_wrong, why_right = _api_explanation_pair(q, st, is_correct=ok, lang=lang)
         if question_has_api_explanations(q) and (comment or why_wrong or why_right):
             used_api += 1
             item_source = "api"
         else:
             item_source = "fallback"
-            comment = "Javob to'g'ri tanlangan." if ok else ""
-            why_wrong = (
-                "" if ok
-                else 'Tanlangan javob ("' + (st or "bo'sh") + '") savolning to\'g\'ri yechimi bilan mos kelmaydi.'
-            )
-            why_right = (
-                "" if ok
-                else 'To\'g\'ri javob "' + str(q.get("correctAnswer") or "") + '" -- savol mazmuniga mos yagona aniq variant.'
-            )
+            correct_localized = str(
+                q.get(f"correct_answer_{lang}") or q.get("correctAnswer") or ""
+            ).strip()
+            comment = _CORRECT_TEMPLATE[lang] if ok else ""
+            why_wrong = "" if ok else _NO_MATCH_TEMPLATE[lang].format(chosen=(st or _EMPTY_ANSWER[lang]))
+            why_right = "" if ok else _ONLY_CLEAR_OPTION_TEMPLATE[lang].format(correct=correct_localized)
         items.append(
             {
                 "questionId": qid,
@@ -129,12 +164,18 @@ def build_fallback_ai_summary(questions: list[dict], answers: dict[str, str]) ->
         source = "mixed"
     else:
         source = "fallback"
+    overview_api = {
+        "uz": "Quyida har bir savol bo'yicha API manbasidagi tahlil ko'rsatilgan.",
+        "ru": "Ниже показан анализ по каждому вопросу из источника API.",
+        "en": "Below is the per-question analysis from the API source.",
+    }
+    overview_fallback = {
+        "uz": "Quyida har bir savol bo'yicha avtomatik tekshiruv natijalari ko'rsatilgan.",
+        "ru": "Ниже показаны результаты автоматической проверки по каждому вопросу.",
+        "en": "Below are the automatic check results for each question.",
+    }
     return {
-        "overview": (
-            "Quyida har bir savol bo'yicha API manbasidagi tahlil ko'rsatilgan."
-            if source == "api"
-            else "Quyida har bir savol bo'yicha avtomatik tekshiruv natijalari ko'rsatilgan."
-        ),
+        "overview": overview_api[lang] if source == "api" else overview_fallback[lang],
         "items": items,
         "source": source,
     }
@@ -151,7 +192,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
     # API manbasi to'liq bo'lsa — AI umuman chaqirilmaydi.
     api_ready = all(question_has_api_explanations(q) for q in questions) if questions else False
     if api_ready:
-        return build_fallback_ai_summary(questions, answers)
+        return build_fallback_ai_summary(questions, answers, lang)
 
     # Qisman: AI'ga FAQAT izohi yo'q savollar yuboriladi. Ilgari butun ro'yxat
     # yuborilardi — bitta izohsiz savol tufayli API izohi bor savollar ham
@@ -160,7 +201,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
     try:
         ai = generate_exam_ai_summary(missing, answers, lang) if missing else {"items": [], "source": "api"}
     except Exception:
-        ai = build_fallback_ai_summary(questions, answers)
+        ai = build_fallback_ai_summary(questions, answers, lang)
 
     # AI natijasini API izohlari bilan boyitish (bo'sh joylarni to'ldirish)
     items_out = []
@@ -171,7 +212,7 @@ def build_exam_ai_summary(questions: list[dict], answers: dict[str, str], langua
         st = answers.get(str(qid), "") or ""
         ok = st == q.get("correctAnswer")
         ai_row = next((i for i in (ai.get("items") or []) if i.get("questionId") == qid), {}) or {}
-        c_api, w_api, r_api = _api_explanation_pair(q, st, is_correct=ok)
+        c_api, w_api, r_api = _api_explanation_pair(q, st, is_correct=ok, lang=lang)
         if question_has_api_explanations(q) and (c_api or w_api or r_api):
             used_api += 1
             items_out.append(
@@ -273,7 +314,8 @@ def finalize_student_exam_session(
     # (`_upgrade_ai_summary_if_needed`, student_results.py). Bu funksiya avto-yakunlash
     # (vaqt tugaganda) uchun ham ishlatiladi — talaba kutib turmasa ham, izchillik uchun
     # bir xil "tezkor keyin yangilash" qoidasi.
-    ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm))
+    quick_lang = detect_grading_language(exam, norm, raw_questions=raw_questions)
+    ai_summary_json = json.dumps(build_fallback_ai_summary(questions, norm, quick_lang))
     se.status = "Completed"
     se.score = score
     se.answers_json = json.dumps(norm)
@@ -620,6 +662,18 @@ def exam_question_with_translations(q: dict, tr: dict, source_lang: str) -> dict
     # Manba (iMentor API) izohlari tarjima bosqichida yo'qolmasin — natija
     # sahifasida tayyor izoh o'rniga AI qayta yozib berardi.
     _carry_api_explanations(q, out, src)
+    # AI tomonidan tarjima qilingan izohlar (translate_questions_batch natijasi) —
+    # manba tilida allaqachon borini _carry_api_explanations to'ldirgan, bu yerda
+    # faqat YETISHMAYOTGAN (boshqa til) izohlar to'ldiriladi.
+    for lang in ("uz", "ru", "en"):
+        if not out.get(f"explanation_{lang}"):
+            val = str(tr.get(f"explanation_{lang}") or "").strip()
+            if val:
+                out[f"explanation_{lang}"] = val
+        if not out.get(f"optionExplanations_{lang}"):
+            val = tr.get(f"optionExplanations_{lang}")
+            if isinstance(val, list) and any(str(x).strip() for x in val):
+                out[f"optionExplanations_{lang}"] = [str(x).strip() for x in val]
     return out
 
 
@@ -663,14 +717,20 @@ def exam_questions_add_translations(questions: list[dict], source_language: str 
     if src not in ("uz", "ru", "en"):
         sample = " ".join(str(q.get("text") or "") for q in questions[:8])
         src = detect_question_language(sample)
-    payload = [
-        {
+    payload = []
+    for q in questions:
+        item = {
             "text": str(q.get("text") or ""),
             "options": list(q.get("options") or []),
             "correctAnswer": str(q.get("correctAnswer") or ""),
         }
-        for q in questions
-    ]
+        expl = str(q.get("explanation") or "").strip()
+        if expl:
+            item["explanation"] = expl
+            oe = q.get("optionExplanations")
+            if isinstance(oe, list) and any(str(x).strip() for x in oe):
+                item["optionExplanations"] = list(oe)
+        payload.append(item)
     try:
         translations = translate_questions_batch(payload, src)
     except Exception:
@@ -890,23 +950,27 @@ def bank_row_to_exam_dict_multilingual(row) -> dict:
 
 def bank_row_to_exam_dict(row, exam_lang: str) -> dict:
     """TestBankQuestion qatoridan imtihon tili bo'yicha savol dict (to'g'ri javob bilan)."""
-    opts_en = safe_json_loads(row.options_json, [])
+    opts_en_fallback = safe_json_loads(row.options_json, [])
     exam_lang = (exam_lang or "uz").lower()
     if exam_lang == "en":
-        text, opts, ca = row.text, list(opts_en), row.correct_answer
+        opts_en = safe_json_loads(getattr(row, "options_en_json", None) or "[]", [])
+        text = (getattr(row, "text_en", None) or "").strip() or row.text
+        if not any(str(x).strip() for x in opts_en):
+            opts_en = list(opts_en_fallback)
+        opts, ca = opts_en, (getattr(row, "correct_answer_en", None) or "").strip() or row.correct_answer
     elif exam_lang == "ru":
         opts = safe_json_loads(getattr(row, "options_ru_json", None) or "[]", [])
         text = (getattr(row, "text_ru", None) or "").strip() or row.text
         if not any(str(x).strip() for x in opts):
-            opts = list(opts_en)
+            opts = list(opts_en_fallback)
         ca = (getattr(row, "correct_answer_ru", None) or "").strip() or row.correct_answer
     else:
         opts = safe_json_loads(getattr(row, "options_uz_json", None) or "[]", [])
         text = (getattr(row, "text_uz", None) or "").strip() or row.text
         if not any(str(x).strip() for x in opts):
-            opts = list(opts_en)
+            opts = list(opts_en_fallback)
         ca = (getattr(row, "correct_answer_uz", None) or "").strip() or row.correct_answer
-    opts = _coerce_exam_options(opts, opts_en)
+    opts = _coerce_exam_options(opts, opts_en_fallback)
     ca = str(ca or "").strip()
     if ca not in opts:
         for o in opts:

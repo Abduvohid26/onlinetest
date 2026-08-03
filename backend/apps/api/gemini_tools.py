@@ -248,7 +248,7 @@ def generate_exam_ai_summary(questions: list[dict], answers: dict[str, str], lan
     """
     from apps.api.services import build_fallback_ai_summary
 
-    fallback = build_fallback_ai_summary(questions, answers)
+    fallback = build_fallback_ai_summary(questions, answers, language)
 
     if not api_key_configured():
         return fallback
@@ -844,36 +844,67 @@ def translate_questions_batch(questions: list[dict], source_language: str) -> li
 
     for i in range(0, len(questions), chunk_size):
         chunk = questions[i: i + chunk_size]
+        # Ba'zi savollarda (iMentor) izoh bor — bo'lsa, uni ham tarjima qilamiz.
+        # Yo'q bo'lsa (oddiy PDF/manual import) token tejash uchun umuman
+        # so'ralmaydi.
+        has_expl = any(str(q.get("explanation") or "").strip() for q in chunk)
 
         # Faqat kerakli maydonlar — kamroq token
-        batch = [
-            {
+        batch = []
+        for j, q in enumerate(chunk):
+            item = {
                 "i": j,  # Index — javobda moslashtirish uchun
                 "t": q["text"][:300],  # Max 300 belgi
                 "o": [str(x)[:150] for x in (q.get("options") or [])[:5]],
                 "ca": str(q.get("correctAnswer") or "")[:150],
             }
-            for j, q in enumerate(chunk)
-        ]
+            if has_expl:
+                item["e"] = str(q.get("explanation") or "")[:600]
+                oe = q.get("optionExplanations")
+                if isinstance(oe, list) and any(str(x).strip() for x in oe):
+                    item["oe"] = [str(x)[:250] for x in oe[:5]]
+            batch.append(item)
+
+        expl_note = (
+            ' Also translate "e" (explanation) and "oe" (per-option explanations, '
+            'same order/count as "o") when present.'
+            if has_expl
+            else ""
+        )
+
+        def _schema(target_codes: list[str]) -> str:
+            fields = ['"i":N']
+            for code in target_codes:
+                fields.append(f'"t_{code}":"..."')
+            for code in target_codes:
+                fields.append(f'"o_{code}":["..."]')
+            for code in target_codes:
+                fields.append(f'"ca_{code}":"..."')
+            if has_expl:
+                for code in target_codes:
+                    fields.append(f'"e_{code}":"..."')
+                for code in target_codes:
+                    fields.append(f'"oe_{code}":["..."]')
+            return "{" + ",".join(fields) + "}"
 
         # Qaysi tillar kerak?
         if src == "en":
             targets = "Uzbek(Latin) as uz, Russian as ru"
-            out_schema = '{"i":N,"t_uz":"...","t_ru":"...","o_uz":["..."],"o_ru":["..."],"ca_uz":"...","ca_ru":"..."}'
-            lang_note = "Source is English, translate to UZ and RU only."
+            out_schema = _schema(["uz", "ru"])
+            lang_note = "Source is English, translate to UZ and RU only." + expl_note
         elif src == "ru":
             targets = "Uzbek(Latin) as uz, English as en"
-            out_schema = '{"i":N,"t_uz":"...","t_en":"...","o_uz":["..."],"o_en":["..."],"ca_uz":"...","ca_en":"..."}'
-            lang_note = "Source is Russian, translate to UZ and EN only."
+            out_schema = _schema(["uz", "en"])
+            lang_note = "Source is Russian, translate to UZ and EN only." + expl_note
         elif src == "uz":
             targets = "Russian as ru, English as en"
-            out_schema = '{"i":N,"t_ru":"...","t_en":"...","o_ru":["..."],"o_en":["..."],"ca_ru":"...","ca_en":"..."}'
-            lang_note = "Source is Uzbek(Latin), translate to RU and EN only."
+            out_schema = _schema(["ru", "en"])
+            lang_note = "Source is Uzbek(Latin), translate to RU and EN only." + expl_note
         else:
             # Unknown → translate to all 3
             targets = "Uzbek(Latin) as uz, Russian as ru, English as en"
-            out_schema = '{"i":N,"t_uz":"...","t_ru":"...","t_en":"...","o_uz":["..."],"o_ru":["..."],"o_en":["..."],"ca_uz":"...","ca_ru":"...","ca_en":"..."}'
-            lang_note = f"Source language: {src_name}. Translate to UZ, RU, EN."
+            out_schema = _schema(["uz", "ru", "en"])
+            lang_note = f"Source language: {src_name}. Translate to UZ, RU, EN." + expl_note
 
         prompt = (
             f"Medical MCQ translator. {lang_note}\n"
@@ -946,6 +977,23 @@ def translate_questions_batch(questions: list[dict], source_language: str) -> li
                     "correct_answer_ru": str(raw.get("ca_ru") or ""),
                     "correct_answer_en": str(raw.get("ca_en") or ""),
                 }
+
+            if has_expl and (q.get("explanation") or "").strip():
+                expl_src = str(q.get("explanation") or "").strip()
+                oe_src = q.get("optionExplanations")
+                oe_src = [str(x).strip() for x in oe_src] if isinstance(oe_src, list) else []
+                for code in ("uz", "ru", "en"):
+                    if code == src:
+                        result[f"explanation_{code}"] = expl_src
+                        if oe_src:
+                            result[f"optionExplanations_{code}"] = oe_src
+                    else:
+                        e_val = str(raw.get(f"e_{code}") or "").strip()
+                        if e_val:
+                            result[f"explanation_{code}"] = e_val
+                        oe_val = raw.get(f"oe_{code}")
+                        if isinstance(oe_val, list) and any(str(x).strip() for x in oe_val):
+                            result[f"optionExplanations_{code}"] = _safe_list(oe_val, len(oe_src) or len(opts_src))
 
             out_all.append(result)
 

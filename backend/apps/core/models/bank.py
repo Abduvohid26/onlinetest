@@ -25,10 +25,13 @@ class TestBankQuestion(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     text_uz = models.TextField(blank=True)
     text_ru = models.TextField(blank=True)
+    text_en = models.TextField(blank=True)
     options_uz_json = models.TextField(blank=True, default="[]")
     options_ru_json = models.TextField(blank=True, default="[]")
+    options_en_json = models.TextField(blank=True, default="[]")
     correct_answer_uz = models.CharField(max_length=500, blank=True)
     correct_answer_ru = models.CharField(max_length=500, blank=True)
+    correct_answer_en = models.CharField(max_length=500, blank=True)
 
     class Meta:
         app_label = "core"

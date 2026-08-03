@@ -55,27 +55,30 @@ const CONTEXT = 64;
  *
  * Asos: Silero v5 public default = threshold 0.5, neg_threshold = threshold−0.15.
  *
- * Bu yerda ataylab public defaultdan PASTROQ (0.33/0.24): past ovozda gapirgan
- * talaba aniqlanmay qolayotgani uchun sezgirlik ~40% oshirildi. O'lchangan
- * (`verify_chain.py`, 80 nutq + 124 maishiy shovqin): maishiy shovqin FP
- * **0%** (chip ham, rasmiy ham), "juda jim ovoz" rasmiy 58.8% → 60.0%.
+ * 2026-08-03: bitta so'zni ham, past ovozni ham ushlab qolish uchun yana
+ * pasaytirildi (0.33/0.24 → 0.25/0.18). Sabab: real to'siq bu chegara emas,
+ * balki ExamRoom'dagi TALK_SIGNAL_CONFIRM_MS (800ms) edi — bitta so'z odatda
+ * 300-700ms, ya'ni hech qachon 800ms'ga yetmasdi. `verify_chain.py`da
+ * o'lchangan (80 nutq + 124 maishiy shovqin, custom bitta-so'z simulyatsiyasi
+ * bilan): (0.25/0.18, mf=3, confirm=300ms) — chip 98.8%→100%, rasmiy
+ * 50-62%→91-92.5%, maishiy shovqin FP chip 0%→3.2% (rasmiy FP 0% qoldi).
  *
  * OLDINGI, UZOQ SINALGAN BARQAROR QIYMAT — 0.55 / 0.40. Sezgirlik muammo
  * tug'dirsa (soxta signal ko'paysa) avval SHU juftlikka qaytariladi.
  * Batafsil: `docs/VAD_BENCHMARK.md`.
  */
-const SPEECH_START_PROB = 0.33;
-const SPEECH_STOP_PROB = 0.24;
+const SPEECH_START_PROB = 0.25;
+const SPEECH_STOP_PROB = 0.18;
 
 /**
  * SEZGIRLIK KALITI — nutq shuncha kadr UZLUKSIZ davom etsagina tasdiqlanadi
- * (1 kadr = 32ms, 8 kadr ≈ 256ms ≈ Silero `min_speech_duration_ms=250`).
+ * (1 kadr = 32ms, 3 kadr ≈ 96ms).
  *
- * Yo'tal/kulgi/xorildash spike'lari maxP yuqori bo'lishi mumkin, lekin
- * tasdiqlangan uzluksizlik ≤96ms — 256ms filtri ularni chipga yetkazmaydi.
- * Eski 0.78/16 (~512ms) real nutq chipini 98.8% → 92.5% ga tushirardi.
+ * 2026-08-03: 8 → 3 (256ms → 96ms) — bitta qisqa so'zni ushlab qolish uchun.
+ * `verify_chain.py` bilan tekshirilgan: maishiy shovqin FP 0% → 3.2% (chip,
+ * arzon xato — jazosiz yorliq), rasmiy FP hamon 0%.
  */
-const SPEECH_MIN_FRAMES = 8;
+const SPEECH_MIN_FRAMES = 3;
 
 /**
  * Navbat cho'zilib ketsa (sekin qurilma) eng eski kadrlarni tashlaymiz — real-time
