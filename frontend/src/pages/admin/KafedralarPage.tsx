@@ -6,7 +6,7 @@ import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminPageMessage, PlusIcon,
+  AdminEmpty, AdminPageMessage, AdminPagination, usePagedList, PlusIcon,
 } from './ui';
 import type { Kafedra } from './types';
 
@@ -23,6 +23,7 @@ export function KafedralarPage({ token, lang }: Props) {
   const h = authHeaders(token, lang);
 
   const [kafedralar, setKafedralar] = useState<Kafedra[]>([]);
+  const kafedraPage = usePagedList(kafedralar);
   const [newName, setNewName] = useState('');
   const [newCode, setNewCode] = useState('');
   const [saving, setSaving] = useState(false);
@@ -173,7 +174,7 @@ export function KafedralarPage({ token, lang }: Props) {
                 title={t.emptyKafedralar}
                 subtitle={t.kafedraEmptyHint}
               />
-            ) : kafedralar.map((kf, i) => {
+            ) : kafedraPage.pageItems.map((kf, i) => {
               const isEditing = editingId === kf.id;
               const isDeleteConfirm = deleteConfirmId === kf.id;
               const dCount = kf.direction_count ?? 0;
@@ -278,6 +279,13 @@ export function KafedralarPage({ token, lang }: Props) {
               );
             })}
           </div>
+          <AdminPagination
+            page={kafedraPage.page}
+            totalPages={kafedraPage.totalPages}
+            onPageChange={kafedraPage.setPage}
+            total={kafedraPage.total}
+            pageSize={kafedraPage.pageSize}
+          />
         </AdminCard>
       </div>
     </div>

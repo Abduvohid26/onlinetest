@@ -283,11 +283,52 @@ bog'lanmagan "Kafedra" ro'yxati bor edi.
 
 ---
 
-**Oxirgi yangilanish:** 2026-08-02 — Bosqich 0, 1, 2, 3 **kod darajasida tayyor**
-(0 — serverda ham yakunlangan, 1-3 — hali faqat lokal sinovdan o'tgan, serverga
-tushirilmagan). Bosqich 1-3 (Kafedra→Direction zanjiri: model, admin API, admin
-frontend) real brauzer E2E sinovidan muvaffaqiyatli o'tdi — kafedra yaratish,
-yo'nalishga bog'lash, hisoblangan `direction_count`, bog'liq yozuvni o'chirishga
-to'siq — barchasi ishlab chiqarish sifatida tekshirildi. Keyingi qadam: Bosqich
-1-3'ni serverga chiqarish (migration + deploy), so'ng Bosqich 4 (iMentor uchun
-ochiq katalog API)ga o'tish, yoki 3-kurs.xlsx uchun guruh manbasini aniqlash.
+## Ishlab chiqarishga chiqarish — YAKUNLANDI (2026-08-02)
+
+Bosqich 0–6, 8 va 8.1 **barchasi production serverda ishga tushirildi va
+tasdiqlandi** (foydalanuvchi tomonidan real serverda sinovdan o'tkazildi):
+
+- OnlineTest: kod deploy qilindi (`git pull` + `docker compose build`),
+  migratsiyalar qo'llandi, `ONLINE_TEST_PUBLIC_API_KEYS` sozlandi,
+  `seed_kafedralar --apply` bajarildi.
+- iMentor: `ONLINE_TEST_CONSUMER_API_KEY` sozlandi (OnlineTest bilan bir xil
+  kalit), `sync_kafedra_from_onlinetest --apply` bajarildi — natija: **42
+  yangi + 4 mavjud = 46/46** to'g'ri sinxronlandi.
+- `GET /api/public/academic-catalog/` production'da tasdiqlangan (`curl` orqali
+  200 OK, real JSON).
+
+**Yo'lda topilgan va hal qilingan muammolar** (kelajakda shunga o'xshash holat
+uchun eslatma):
+1. Kod avtomatik commit qilingan, lekin GitHub'ga push qilinmagan edi — server
+   `git pull` bilan yangilanmadi, `/api/public/academic-catalog/` 404 qaytardi.
+   Yechim: ish stantsiyasidan `git push origin main`, keyin serverda
+   `git pull && docker compose up -d --build`.
+2. `seed_kafedralar` (OnlineTest) va `sync_kafedra_from_onlinetest` (iMentor) —
+   ikki xil loyihaning ikki xil buyrug'i, birinchi urinishda aralashtirilgan.
+
+**Qolgan ochiq ish**: Kafedra↔Direction bog'lash (qo'lda, foydalanuvchi
+tomonidan bajariladi), 3-kurs.xlsx (1073 talaba, guruh manbasi noaniq),
+`RegisterPage.tsx`/`ClinicalGroupMember` UI (Bosqich 6 qoldirilgan qismi).
+
+## Admin UI sayqal — pagination va icon tuzatish (2026-08-02)
+
+Kafedra loyihasidan tashqari, umumiy admin panel UI so'rovi bo'yicha:
+
+- [x] `AdminDashboard.tsx`: `directions` (Yo'nalishlar) nav item uchun icon
+  butunlay yo'q edi (eski xato, Kafedra loyihasiga aloqasi yo'q) — qo'shildi.
+- [x] `pages/admin/ui.tsx`ga reusable `usePagedList()` hook va
+  `AdminPagination` komponenti qo'shildi (client-side, 20 tadan sahifalash).
+- [x] Qo'llanildi: `LevelsPage`, `KafedralarPage`, `DirectionsPage`,
+  `GroupsPage`, `StudentsPage`, `BannedPage` (2 ro'yxat: bloklanganlar +
+  shikoyatlar), `StaffPage` (2 ro'yxat: xodim + admin), `AdminExamsTab`
+  (imtihonlar ro'yxati) — jami 9 ta ro'yxat.
+- `AuditPage.tsx` — tegilmadi, u allaqachon server-side pagination bilan
+  ishlaydi.
+- `AdminExamsTab`dagi natijalar jadvali (bitta imtihon ichidagi talaba
+  natijalari) — tegilmadi, allaqachon `max-h-[70vh] overflow-y-auto` bilan
+  cheklangan, alohida pagination shart emas deb topildi.
+- [x] `tsc --noEmit` va `npm run build` — toza.
+- [x] **Brauzerda real sinov** (lokal Docker Postgres, 46 ta kafedra bilan):
+  "Kafedralar" sahifasida `1–20 / 46`, `1 / 3` to'g'ri ko'rindi; "keyingi"
+  tugmasi bosilganda `21–40 / 46`, `2 / 3`ga to'g'ri o'tdi. Test ma'lumotlari
+  tozalab tashlandi.

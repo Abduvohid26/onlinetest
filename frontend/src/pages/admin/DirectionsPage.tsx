@@ -6,7 +6,7 @@ import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminPageMessage, PlusIcon,
+  AdminEmpty, AdminPageMessage, AdminPagination, usePagedList, PlusIcon,
 } from './ui';
 import type { Direction, Group, Kafedra } from './types';
 
@@ -23,6 +23,7 @@ export function DirectionsPage({ token, lang }: Props) {
   const h = authHeaders(token, lang);
 
   const [directions, setDirections] = useState<Direction[]>([]);
+  const directionPage = usePagedList(directions);
   const [groups, setGroups] = useState<Group[]>([]);
   const [kafedralar, setKafedralar] = useState<Kafedra[]>([]);
   const [newName, setNewName] = useState('');
@@ -190,7 +191,7 @@ export function DirectionsPage({ token, lang }: Props) {
                 title={t.emptyDirections}
                 subtitle={t.directionEmptyHint}
               />
-            ) : directions.map((dr, i) => {
+            ) : directionPage.pageItems.map((dr, i) => {
               const gCount = groups.filter((g) => g.direction_id === dr.id).length;
               const isEditing = editingId === dr.id;
               const isDeleteConfirm = deleteConfirmId === dr.id;
@@ -298,6 +299,13 @@ export function DirectionsPage({ token, lang }: Props) {
               );
             })}
           </div>
+          <AdminPagination
+            page={directionPage.page}
+            totalPages={directionPage.totalPages}
+            onPageChange={directionPage.setPage}
+            total={directionPage.total}
+            pageSize={directionPage.pageSize}
+          />
         </AdminCard>
       </div>
     </div>

@@ -6,7 +6,7 @@ import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminPageMessage, ChevronRight, PlusIcon,
+  AdminEmpty, AdminPageMessage, AdminPagination, usePagedList, ChevronRight, PlusIcon,
 } from './ui';
 import type { Level, Direction, Group } from './types';
 
@@ -165,6 +165,7 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
     if (filterDirectionId && String(g.direction_id ?? '') !== filterDirectionId) return false;
     return true;
   });
+  const groupPage = usePagedList(filtered);
 
   return (
     <>
@@ -261,12 +262,12 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
         }
       >
         <div className="divide-y divide-gray-100">
-          {filtered.length === 0 ? (
+          {groupPage.pageItems.length === 0 ? (
             <AdminEmpty
               icon={<svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" /></svg>}
               title={t.groupsEmpty}
             />
-          ) : filtered.map((g, i) => {
+          ) : groupPage.pageItems.map((g, i) => {
             const isEditing = editingId === g.id;
             const isDeleteConfirm = deleteConfirmId === g.id;
             const sc = g.student_count ?? 0;
@@ -384,6 +385,13 @@ export function GroupsPage({ token, lang, initialLevelId, onViewStudents }: Prop
             );
           })}
         </div>
+        <AdminPagination
+          page={groupPage.page}
+          totalPages={groupPage.totalPages}
+          onPageChange={groupPage.setPage}
+          total={groupPage.total}
+          pageSize={groupPage.pageSize}
+        />
       </AdminCard>
     </div>
     </>

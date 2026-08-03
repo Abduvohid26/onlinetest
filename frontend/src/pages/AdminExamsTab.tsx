@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ExamSettings } from '../components/ExamSettings';
 import { LiveMonitor } from '../components/LiveMonitor';
 import { ExamEditModal } from '../components/ExamEditModal';
-import { AdminBtn, AdminSelect, AdminEmpty } from './admin/ui';
+import { AdminBtn, AdminSelect, AdminEmpty, AdminPagination, usePagedList } from './admin/ui';
 
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.06 } } };
 const item: any = { hidden: { opacity: 0, y: 16 }, show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 26 } } };
@@ -171,6 +171,7 @@ export function AdminExamsTab({
     if (examListFilter === 'Ended') return st === 'ended';
     return true;
   });
+  const examPage = usePagedList(filteredExams);
 
   return (
     <motion.div variants={container} initial="hidden" animate="show" className="space-y-5">
@@ -235,7 +236,7 @@ export function AdminExamsTab({
               />
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {filteredExams.map((e: any, i: number) => (
+                {examPage.pageItems.map((e: any, i: number) => (
                   <motion.div
                     key={e.id}
                     initial={{ opacity: 0, y: 8 }}
@@ -315,6 +316,13 @@ export function AdminExamsTab({
               </div>
             )}
           </div>
+          <AdminPagination
+            page={examPage.page}
+            totalPages={examPage.totalPages}
+            onPageChange={examPage.setPage}
+            total={examPage.total}
+            pageSize={examPage.pageSize}
+          />
         </div>
       </motion.div>
 

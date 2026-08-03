@@ -6,7 +6,7 @@ import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
   AdminInput, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminPageMessage, ChevronRight, PlusIcon,
+  AdminEmpty, AdminPageMessage, AdminPagination, usePagedList, ChevronRight, PlusIcon,
 } from './ui';
 import type { Level, Group } from './types';
 
@@ -21,6 +21,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
   const h = authHeaders(token, lang);
 
   const [levels, setLevels] = useState<Level[]>([]);
+  const levelPage = usePagedList(levels);
   const [groups, setGroups] = useState<Group[]>([]);
   const [newName, setNewName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -167,7 +168,7 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
                 title={t.emptyLevels}
                 subtitle={t.levelEmptyHint}
               />
-            ) : levels.map((lv, i) => {
+            ) : levelPage.pageItems.map((lv, i) => {
               const gCount = groups.filter((g) => g.level_id === lv.id).length;
               const isEditing = editingId === lv.id;
               const isDeleteConfirm = deleteConfirmId === lv.id;
@@ -269,6 +270,13 @@ export function LevelsPage({ token, lang, onViewGroups }: Props) {
               );
             })}
           </div>
+          <AdminPagination
+            page={levelPage.page}
+            totalPages={levelPage.totalPages}
+            onPageChange={levelPage.setPage}
+            total={levelPage.total}
+            pageSize={levelPage.pageSize}
+          />
         </AdminCard>
       </div>
     </div>

@@ -6,7 +6,8 @@ import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../..
 import { fileToProfileImageBase64, ProfileImageError } from '../../lib/profileImage';
 import {
   AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
-  AdminEmpty, AdminAlert, AdminModal, AdminFileInput, AdminPageMessageStack, PlusIcon,
+  AdminEmpty, AdminAlert, AdminModal, AdminFileInput, AdminPageMessageStack,
+  AdminPagination, usePagedList, PlusIcon,
 } from './ui';
 import type { Group, StudentRow } from './types';
 
@@ -163,6 +164,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
     const matchG = !groupFilter || String(u.group_id) === groupFilter;
     return matchQ && matchG;
   });
+  const studentPage = usePagedList(filtered);
 
   return (
     <div className="space-y-5">
@@ -270,7 +272,7 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((u) => (
+                {studentPage.pageItems.map((u) => (
                   <tr key={u.id} className={`border-b border-gray-50 transition-colors ${deleteConfirmId === u.id ? 'bg-red-50/30' : u.status === 'Banned' ? 'bg-red-50/20 hover:bg-red-50/40' : 'hover:bg-gray-50/60'}`}>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-3">
@@ -314,6 +316,13 @@ export function StudentsPage({ token, lang, initialGroupId }: Props) {
             </table>
           </div>
         )}
+        <AdminPagination
+          page={studentPage.page}
+          totalPages={studentPage.totalPages}
+          onPageChange={studentPage.setPage}
+          total={studentPage.total}
+          pageSize={studentPage.pageSize}
+        />
       </AdminCard>
 
       {/* ── Edit modal ── */}

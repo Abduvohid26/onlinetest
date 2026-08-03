@@ -470,3 +470,57 @@ export const AdminModal = ({
     )}
   </AnimatePresence>
 );
+
+/* ── Pagination ─────────────────────────────────────────────────────────── */
+export const ADMIN_PAGE_SIZE = 20;
+
+/** Ro'yxatni sahifalarga bo'ladi (client-side). Filtr/qidiruv o'zgarsa sahifa
+ * avtomatik 1-ga qaytadi. */
+export function usePagedList<T>(items: T[], pageSize: number = ADMIN_PAGE_SIZE) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  useEffect(() => {
+    if (page !== safePage) setPage(safePage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length]);
+  const start = (safePage - 1) * pageSize;
+  const pageItems = items.slice(start, start + pageSize);
+  return { page: safePage, setPage, totalPages, pageItems, total: items.length, pageSize };
+}
+
+export function AdminPagination({
+  page,
+  totalPages,
+  onPageChange,
+  total,
+  pageSize,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (p: number) => void;
+  total?: number;
+  pageSize?: number;
+}) {
+  if (totalPages <= 1) return null;
+  const from = total != null && pageSize ? (page - 1) * pageSize + 1 : null;
+  const to = total != null && pageSize ? Math.min(page * pageSize, total) : null;
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100 flex-wrap">
+      {from != null && to != null ? (
+        <span className="text-[12px] text-gray-500">{from}–{to} / {total}</span>
+      ) : <span />}
+      <div className="flex items-center gap-1.5">
+        <AdminBtn variant="ghost" size="sm" disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
+          ‹
+        </AdminBtn>
+        <span className="text-[13px] text-gray-600 font-medium tabular-nums px-1">
+          {page} / {totalPages}
+        </span>
+        <AdminBtn variant="ghost" size="sm" disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
+          ›
+        </AdminBtn>
+      </div>
+    </div>
+  );
+}

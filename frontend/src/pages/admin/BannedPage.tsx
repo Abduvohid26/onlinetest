@@ -4,7 +4,7 @@ import { translations, Language } from '../../i18n';
 import { apiUrl } from '../../lib/apiUrl';
 import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, parseAdminUsersList, checkAdminAuthResponse } from '../../lib/http';
-import { AdminInput, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminLabel, AdminTextarea, AdminModal, AdminFileInput, AdminPageMessage } from './ui';
+import { AdminInput, AdminBtn, AdminCard, AdminAlert, AdminEmpty, AdminLabel, AdminTextarea, AdminModal, AdminFileInput, AdminPageMessage, AdminPagination, usePagedList } from './ui';
 import type { BanAppeal, Group, StudentRow } from './types';
 
 interface Props { token: string; lang: Language; }
@@ -120,6 +120,8 @@ export function BannedPage({ token, lang }: Props) {
     const q = search.toLowerCase();
     return !q || u.name.toLowerCase().includes(q) || u.id.toLowerCase().includes(q);
   });
+  const bannedPage = usePagedList(filtered);
+  const appealsPage = usePagedList(appeals);
 
   return (
     <div className="space-y-5">
@@ -145,7 +147,7 @@ export function BannedPage({ token, lang }: Props) {
               icon={<svg className="w-8 h-8 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>}
               title={t.adminBannedEmpty}
             />
-          ) : filtered.map((u, i) => (
+          ) : bannedPage.pageItems.map((u, i) => (
             <motion.div key={u.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
               <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 px-4 sm:px-5 py-3 sm:py-4 transition-colors ${deleteConfirmId === u.id ? 'bg-red-50/40' : 'hover:bg-red-50/20'}`}>
                 <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-red-100 border border-red-200 flex items-center justify-center text-red-600 font-bold shrink-0 text-base">
@@ -186,6 +188,13 @@ export function BannedPage({ token, lang }: Props) {
             </motion.div>
           ))}
         </div>
+        <AdminPagination
+          page={bannedPage.page}
+          totalPages={bannedPage.totalPages}
+          onPageChange={bannedPage.setPage}
+          total={bannedPage.total}
+          pageSize={bannedPage.pageSize}
+        />
       </AdminCard>
 
       {/* Proctoring review queue */}
@@ -216,7 +225,7 @@ export function BannedPage({ token, lang }: Props) {
             <p className="text-[14px] text-amber-500 py-2">{t.pendingAppealsEmpty}</p>
           ) : (
             <div className="space-y-4">
-              {appeals.map((a) => {
+              {appealsPage.pageItems.map((a) => {
                 const note = appealNotes[a.id] ?? '';
                 const busy = appealBusy[a.id] ?? false;
                 return (
@@ -249,6 +258,13 @@ export function BannedPage({ token, lang }: Props) {
             </div>
           )}
         </div>
+        <AdminPagination
+          page={appealsPage.page}
+          totalPages={appealsPage.totalPages}
+          onPageChange={appealsPage.setPage}
+          total={appealsPage.total}
+          pageSize={appealsPage.pageSize}
+        />
       </AdminCard>
 
       {/* Unban modal */}
