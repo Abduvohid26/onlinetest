@@ -253,6 +253,22 @@ class IMentorServiceTests(SimpleTestCase):
         rows = departments_from_catalog()
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["code"], "fiziologiya")
+        # Eski API `tests_count` bermasa — 0, lekin maydon doim bo'ladi.
+        self.assertEqual(rows[0]["tests_count"], 0)
+
+    @mock.patch("apps.api.imentor_service.imentor_configured", return_value=True)
+    @mock.patch("apps.api.imentor_service.imentor_catalog_departments")
+    def test_departments_with_tests_come_first(self, mock_depts, _cfg):
+        mock_depts.return_value = {
+            "results": [
+                {"code": "a-kafedra", "name": "A kafedra", "sort_order": 1, "subjects_count": 9, "tests_count": 0},
+                {"code": "b-kafedra", "name": "B kafedra", "sort_order": 5, "subjects_count": 2, "tests_count": 7},
+                {"code": "c-kafedra", "name": "C kafedra", "sort_order": 2, "subjects_count": 0, "tests_count": 0},
+            ]
+        }
+        rows = departments_from_catalog()
+        self.assertEqual([r["code"] for r in rows], ["b-kafedra", "a-kafedra", "c-kafedra"])
+        self.assertEqual(rows[0]["tests_count"], 7)
 
     @mock.patch("apps.api.imentor_service.imentor_published_test_count", return_value=0)
     @mock.patch("apps.api.imentor_service._build_subject_registry")

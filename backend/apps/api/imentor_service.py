@@ -275,9 +275,13 @@ def departments_from_catalog() -> list[dict]:
                 "name": str(row.get("name") or code).strip(),
                 "sort_order": int(row.get("sort_order") or 0),
                 "subjects_count": int(row.get("subjects_count") or 0),
+                # iMentor API `tests_count` beradi (eski versiyada yo'q — 0).
+                "tests_count": int(row.get("tests_count") or 0),
             }
         )
-    out.sort(key=lambda x: (x["sort_order"], x["name"].lower()))
+    # Testi bor kafedralar tepada: imtihon aynan ular ustida yaratiladi,
+    # qolganlari ro'yxatni to'ldirib turadigan "ochib bo'lmas" variantlar.
+    out.sort(key=lambda x: (0 if x["tests_count"] > 0 else 1, x["sort_order"], x["name"].lower()))
     return out
 
 

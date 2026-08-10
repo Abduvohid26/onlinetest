@@ -31,6 +31,8 @@ type ImentorDepartment = {
   name: string;
   sort_order?: number;
   subjects_count?: number;
+  /** Shu kafedrada e'lon qilingan testlar soni (iMentor API). */
+  tests_count?: number;
 };
 type ImentorTopic = { code: string; id?: string; title: string };
 type ImentorVariant = { label: string; file_name?: string; topics: ImentorTopic[] };
@@ -468,12 +470,19 @@ export function ImtixonTab({
                   disabled={!imentorConfigured}
                 >
                   <option value="">{t.imentorPickDepartment}</option>
-                  {imentorDepartments.map((d) => (
-                    <option key={d.code} value={d.code}>
-                      {d.name} ({d.subjects_count ?? 0}{' '}
-                      {t.subjectsShort})
-                    </option>
-                  ))}
+                  {imentorDepartments.map((d) => {
+                    const tests = d.tests_count ?? 0;
+                    // Test soni ko'rsatiladi: o'qituvchi kafedrani ochmasdan
+                    // turib unda imtihon uchun material bor-yo'qligini biladi.
+                    const meta = tests > 0
+                      ? `${d.subjects_count ?? 0} ${t.subjectsShort} · ${tests} ${t.testsShort}`
+                      : `${d.subjects_count ?? 0} ${t.subjectsShort} · ${t.imentorDepartmentNoTests}`;
+                    return (
+                      <option key={d.code} value={d.code}>
+                        {d.name} ({meta})
+                      </option>
+                    );
+                  })}
                 </AdminSelect>
                 <p className="text-[12px] text-gray-400 mt-1.5">{t.imentorDepartmentHint}</p>
                 {imentorConfigured && imentorDepartments.length === 0 && (
