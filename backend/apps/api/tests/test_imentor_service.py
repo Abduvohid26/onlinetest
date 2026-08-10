@@ -13,6 +13,7 @@ from apps.api.imentor_client import (
 )
 from apps.api.imentor_service import (
     _apply_imentor_builtin_translations,
+    _transform_imentor_multilang_questions,
     _transform_imentor_questions,
     departments_from_catalog,
     fetch_random_imentor_questions,
@@ -92,6 +93,106 @@ class IMentorServiceTests(SimpleTestCase):
         self.assertEqual(meta["translations_source"], "ai")
         self.assertTrue(meta.get("imentor_sample"))
         self.assertEqual(qs[0]["text"], "Savol?")
+
+    def _sample_multilang_question(self, *, langs=("uz", "ru", "en")) -> dict:
+        blocks = {
+            "uz": {
+                "question": "Savol?",
+                "options": ["A javob", "B javob"],
+                "explanation": "uz izoh",
+                "optionExplanations": ["A xato", "B to'g'ri"],
+            },
+            "ru": {
+                "question": "Вопрос?",
+                "options": ["Ответ А", "Ответ Б"],
+                "explanation": "ru izoh",
+            },
+            "en": {
+                "question": "Question?",
+                "options": ["Answer A", "Answer B"],
+            },
+        }
+        return {
+            "correctOptionIndex": 1,
+            "available_languages": list(langs),
+            "languages": {lg: blocks[lg] for lg in langs},
+            "references": [{"title": "Guyton", "pages": "114-118"}],
+            "source_test_id": 24,
+        }
+
+    def test_transform_multilang_questions_uses_api_languages(self):
+        rows, meta = _transform_imentor_multilang_questions([self._sample_multilang_question()])
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["text"], "Savol?")
+        self.assertEqual(row["text_ru"], "Вопрос?")
+        self.assertEqual(row["text_en"], "Question?")
+        self.assertEqual(row["options_ru"], ["Ответ А", "Ответ Б"])
+        # correctOptionIndex barcha tillarda bir xil
+        self.assertEqual(row["correct_answer_uz"], "B javob")
+        self.assertEqual(row["correct_answer_ru"], "Ответ Б")
+        self.assertEqual(row["correct_answer_en"], "Answer B")
+        self.assertEqual(row["explanation"], "uz izoh")
+        self.assertEqual(row["explanation_ru"], "ru izoh")
+        self.assertEqual(row["optionExplanations_uz"], ["A xato", "B to'g'ri"])
+        self.assertEqual(row["references"][0]["pages"], "114-118")
+        self.assertEqual(meta[0], {"src": "uz", "languages": ["en", "ru", "uz"]})
+
+    def test_transform_multilang_respects_source_language(self):
+        rows, meta = _transform_imentor_multilang_questions(
+            [self._sample_multilang_question()], source_language="ru"
+        )
+        self.assertEqual(rows[0]["text"], "Вопрос?")
+        self.assertEqual(rows[0]["correctAnswer"], "Ответ Б")
+        self.assertEqual(meta[0]["src"], "ru")
+
+    @mock.patch("apps.api.imentor_service.exam_questions_add_translations")
+    @mock.patch("apps.api.imentor_service.imentor_sample_questions")
+    @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
+    @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
+    @mock.patch("apps.api.imentor_service._build_subject_registry")
+    def test_fetch_sample_skips_ai_when_api_gives_all_languages(
+        self, mock_registry, _bounds, _resolve, mock_sample, mock_ai
+    ):
+        mock_registry.return_value = {"ANAT": {"subject_code": "ANAT", "test_count": 1}}
+        mock_sample.return_value = {
+            "subject_code": "ANAT",
+            "count_available": 1,
+            "count_returned": 1,
+            "tests_scanned": 1,
+            "questions": [self._sample_multilang_question()],
+        }
+        qs, meta = fetch_random_imentor_questions(["ANAT"], max_questions=10, add_translations=True)
+        mock_ai.assert_not_called()
+        self.assertEqual(meta["translations_source"], "imentor")
+        self.assertEqual(meta["available_languages"], ["en", "ru", "uz"])
+        self.assertEqual(qs[0]["text_ru"], "Вопрос?")
+
+    @mock.patch("apps.api.imentor_service.exam_questions_add_translations")
+    @mock.patch("apps.api.imentor_service.imentor_sample_questions")
+    @mock.patch("apps.api.imentor_service.resolve_imentor_subject_codes", return_value=["ANAT"])
+    @mock.patch("apps.api.imentor_service.question_limit_bounds", return_value={"min": 10, "max": 30})
+    @mock.patch("apps.api.imentor_service._build_subject_registry")
+    def test_fetch_sample_ai_fills_only_missing_language(
+        self, mock_registry, _bounds, _resolve, mock_sample, mock_ai
+    ):
+        mock_registry.return_value = {"ANAT": {"subject_code": "ANAT", "test_count": 1}}
+        mock_sample.return_value = {
+            "subject_code": "ANAT",
+            "questions": [self._sample_multilang_question(langs=("uz", "ru"))],
+        }
+        mock_ai.side_effect = lambda rows, _lang: [
+            {**r, "text_en": "AI english", "options_en": ["x", "y"], "correct_answer_en": "y"}
+            for r in rows
+        ]
+        qs, meta = fetch_random_imentor_questions(["ANAT"], max_questions=10, add_translations=True)
+        mock_ai.assert_called_once()
+        self.assertEqual(meta["translations_source"], "mixed")
+        # AI faqat yetishmagan tilni qo'shdi, API tarjimasi saqlanib qoldi
+        self.assertEqual(qs[0]["text_en"], "AI english")
+        self.assertEqual(qs[0]["text_ru"], "Вопрос?")
+        self.assertEqual(qs[0]["options_ru"], ["Ответ А", "Ответ Б"])
+        self.assertEqual(qs[0]["references"][0]["title"], "Guyton")
 
     def test_parse_question_limit_bounds_defaults(self):
         self.assertEqual(parse_question_limit_bounds({}), DEFAULT_QUESTION_LIMIT_BOUNDS)

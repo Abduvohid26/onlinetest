@@ -819,6 +819,9 @@ def _admin_exams_create_impl(request):
                 codes,
                 max_questions=bank_count,
                 add_translations=(lang == "auto"),
+                # Til belgilangan bo'lsa (uz/ru/en) — API o'sha tildagi matnni
+                # tayyor beradi, savol asosiy tili shu bo'lsin.
+                source_language=lang if lang in ("uz", "ru", "en") else None,
                 variant_label=selection.get("variant_label") or None,
                 topic_code=selection.get("topic_code") or None,
             )

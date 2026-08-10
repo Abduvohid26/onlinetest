@@ -538,6 +538,166 @@ def _transform_imentor_questions(raw_questions: list[dict]) -> list[dict]:
     return out
 
 
+#: iMentor `questions/sample/` javobida har savol shu tillarda kelishi mumkin.
+SUPPORTED_QUESTION_LANGUAGES = ("uz", "ru", "en")
+
+
+def _clean_options_with_index(raw: Any, correct_index: int) -> tuple[list[str], int]:
+    """Bo'sh variantlarni tashlaydi va to'g'ri javob indeksini shunga moslaydi."""
+    opts: list[str] = []
+    new_idx = -1
+    if isinstance(raw, list):
+        for i, o in enumerate(raw):
+            text = str(o).strip()
+            if not text:
+                continue
+            if i == correct_index:
+                new_idx = len(opts)
+            opts.append(text)
+    if not opts:
+        return [], 0
+    if new_idx < 0 or new_idx >= len(opts):
+        new_idx = 0
+    return opts, new_idx
+
+
+def _language_question_block(block: Any, correct_index: int) -> dict | None:
+    """`languages.<lang>` bloki → {text, options, correctAnswer, explanation, ...}."""
+    if not isinstance(block, dict):
+        return None
+    text = str(block.get("question") or block.get("text") or "").strip()
+    if not text:
+        return None
+    opts, idx = _clean_options_with_index(block.get("options"), correct_index)
+    if not opts:
+        return None
+    raw_oe = block.get("optionExplanations")
+    option_explanations: list[str] = []
+    if isinstance(raw_oe, list):
+        option_explanations = [str(x).strip() for x in raw_oe][: len(opts)]
+        if len(option_explanations) < len(opts):
+            option_explanations.extend([""] * (len(opts) - len(option_explanations)))
+        if not any(option_explanations):
+            option_explanations = []
+    return {
+        "text": text,
+        "options": opts,
+        "correctAnswer": opts[idx],
+        "explanation": str(block.get("explanation") or "").strip(),
+        "optionExplanations": option_explanations,
+    }
+
+
+def _pick_source_language(blocks: dict[str, dict], hint: str | None = None) -> str:
+    """Asosiy til: so'ralgan til bo'lsa u, aks holda uz → ru → en tartibida."""
+    h = str(hint or "").strip().lower()
+    order = [h] if h in SUPPORTED_QUESTION_LANGUAGES else []
+    order += [lg for lg in SUPPORTED_QUESTION_LANGUAGES if lg not in order]
+    for lang in order:
+        if blocks.get(lang):
+            return lang
+    return next(iter(blocks), "uz")
+
+
+def _transform_imentor_multilang_questions(
+    raw_questions: list[dict],
+    *,
+    source_language: str | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Yangi sample API shakli (`languages: {uz, ru, en}`) → imtihon savol formati.
+
+    Tillar API dan TAYYOR keladi, shuning uchun bu yerda tarjima qilinmaydi:
+    har til to'g'ridan-to'g'ri `text_<lang>` / `options_<lang>` /
+    `correct_answer_<lang>` maydonlariga tushadi. `correctOptionIndex` barcha
+    tillarda bir xil (API kafolati) — faqat matn tarjima qilinadi.
+
+    Qaytaradi: (savollar, har savol uchun {"src", "languages"} meta ro'yxati).
+    """
+    out: list[dict] = []
+    langs_meta: list[dict] = []
+    for q in raw_questions:
+        if not isinstance(q, dict):
+            continue
+        languages = q.get("languages")
+        if not isinstance(languages, dict) or not languages:
+            continue
+        try:
+            correct = int(q.get("correctOptionIndex", 0))
+        except (TypeError, ValueError):
+            correct = 0
+        blocks: dict[str, dict] = {}
+        for lang in SUPPORTED_QUESTION_LANGUAGES:
+            block = _language_question_block(languages.get(lang), correct)
+            if block:
+                blocks[lang] = block
+        if not blocks:
+            continue
+
+        src = _pick_source_language(blocks, source_language)
+        base = blocks[src]
+        row: dict[str, Any] = {
+            "id": len(out) + 1,
+            "text": base["text"],
+            "options": list(base["options"]),
+            "correctAnswer": base["correctAnswer"],
+        }
+        if base["explanation"]:
+            row["explanation"] = base["explanation"]
+        if base["optionExplanations"]:
+            row["optionExplanations"] = list(base["optionExplanations"])
+        for lang, block in blocks.items():
+            row[f"text_{lang}"] = block["text"]
+            row[f"options_{lang}"] = list(block["options"])
+            row[f"correct_answer_{lang}"] = block["correctAnswer"]
+            if block["explanation"]:
+                row[f"explanation_{lang}"] = block["explanation"]
+            if block["optionExplanations"]:
+                row[f"optionExplanations_{lang}"] = list(block["optionExplanations"])
+        refs = normalize_question_references(q.get("references"))
+        if refs:
+            row["references"] = refs
+        out.append(row)
+        langs_meta.append({"src": src, "languages": sorted(blocks.keys())})
+    return out, langs_meta
+
+
+def _merge_ai_translation_row(original: dict, ai_row: dict, known_languages: list[str]) -> dict:
+    """AI to'ldirgan savolga iMentor dan kelgan haqiqiy tillarni qaytarib qo'yadi."""
+    merged = dict(ai_row) if isinstance(ai_row, dict) else dict(original)
+    for lang in known_languages:
+        for key in (
+            f"text_{lang}",
+            f"options_{lang}",
+            f"correct_answer_{lang}",
+            f"explanation_{lang}",
+            f"optionExplanations_{lang}",
+        ):
+            if key in original:
+                value = original[key]
+                merged[key] = list(value) if isinstance(value, list) else value
+    if original.get("references"):
+        merged["references"] = [dict(r) for r in original["references"]]
+    merged["id"] = original.get("id", merged.get("id"))
+    return merged
+
+
+def _raw_question_text(q: dict) -> str:
+    """Dedup uchun savol matni — eski (tekis) va yangi (`languages`) shakl uchun."""
+    text = str(q.get("question") or q.get("text") or "").strip()
+    if text:
+        return text
+    languages = q.get("languages")
+    if isinstance(languages, dict):
+        for lang in SUPPORTED_QUESTION_LANGUAGES:
+            block = languages.get(lang)
+            if isinstance(block, dict):
+                candidate = str(block.get("question") or block.get("text") or "").strip()
+                if candidate:
+                    return candidate
+    return ""
+
+
 #: Bitta savolga biriktiriladigan manbalar soni chegarasi (JSON hajmi uchun).
 MAX_QUESTION_REFERENCES = 8
 
@@ -709,8 +869,9 @@ def fetch_random_imentor_questions(
     max_questions>0 bo'lsa count=10..30 API ga uzatiladi.
     variant_label / topic_code — ixtiyoriy filtrlash.
 
-    add_translations=True: sample javobida builtin translations yo'q —
-    AI fallback (yoki keyinroq iMentor tarjimasi qo'shilsa).
+    Sample javobida har savol `languages: {uz, ru, en}` bilan keladi — bu tillar
+    to'g'ridan-to'g'ri ishlatiladi, AI tarjima QILINMAYDI. AI faqat til yetishmay
+    qolgan (eski) savollar uchun zaxira sifatida chaqiriladi.
     """
     bounds = question_limit_bounds()
     question_limit = validate_question_limit_value(int(max_questions or 0), bounds=bounds)
@@ -803,7 +964,7 @@ def fetch_random_imentor_questions(
         seen: set[str] = set()
         deduped: list[dict] = []
         for q in raw_qs:
-            key = _normalize_question_text(str(q.get("question") or q.get("text") or ""))
+            key = _normalize_question_text(_raw_question_text(q))
             if not key or key in seen:
                 continue
             seen.add(key)
@@ -813,16 +974,38 @@ def fetch_random_imentor_questions(
             deduped = deduped[:question_limit]
         raw_qs = deduped
 
-    questions = _transform_imentor_questions(raw_qs)
+    # Yangi API: har savol `languages` bilan keladi. Eski (tekis) shakl ham
+    # qo'llab-quvvatlanadi — o'sha holda tillar yo'q va AI zaxira bo'ladi.
+    multilang = any(isinstance(q, dict) and isinstance(q.get("languages"), dict) for q in raw_qs)
+    if multilang:
+        questions, langs_meta = _transform_imentor_multilang_questions(
+            raw_qs, source_language=source_language
+        )
+    else:
+        questions = _transform_imentor_questions(raw_qs)
+        langs_meta = [{"src": "", "languages": []} for _ in questions]
     if not questions:
         raise IMentorApiError("Testdan foydali savol ajratib bo'lmadi")
 
-    used_builtin = False
+    used_builtin = any(len(m["languages"]) > 0 for m in langs_meta)
     used_ai = False
     if add_translations:
-        # Sample endpoint hozircha translations bermaydi — AI to'ldiradi.
-        questions = exam_questions_add_translations(questions, source_language)
-        used_ai = True
+        # AI faqat 3 tilning hammasi kelmagan savollar uchun — API tarjimasi ustun.
+        pending: dict[str, list[int]] = {}
+        for i, meta_row in enumerate(langs_meta):
+            if len(meta_row["languages"]) >= len(SUPPORTED_QUESTION_LANGUAGES):
+                continue
+            pending.setdefault(meta_row["src"], []).append(i)
+        for src, indexes in pending.items():
+            subset = [questions[i] for i in indexes]
+            translated = exam_questions_add_translations(subset, src or source_language)
+            used_ai = True
+            for pos, i in enumerate(indexes):
+                if pos >= len(translated):
+                    continue
+                questions[i] = _merge_ai_translation_row(
+                    questions[i], translated[pos], langs_meta[i]["languages"]
+                )
 
     meta = {
         "imentor_test_id": 0,
@@ -846,6 +1029,7 @@ def fetch_random_imentor_questions(
         "verification_code": "",
         "document_id": "",
         "tests_scanned": int(sample_meta.get("tests_scanned") or 0),
+        "available_languages": sorted({lg for m in langs_meta for lg in m["languages"]}),
         "translations_source": (
             "imentor" if used_builtin and not used_ai else ("mixed" if used_ai and used_builtin else ("ai" if used_ai else "none"))
         ),

@@ -698,6 +698,7 @@ def student_exams_start(request, pk: int):
                     codes,
                     max_questions=max_q,
                     add_translations=False,
+                    source_language=ex_lang if ex_lang in ("uz", "ru", "en") else None,
                     variant_label=selection.get("variant_label") or None,
                     topic_code=selection.get("topic_code") or None,
                 )
