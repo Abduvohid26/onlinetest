@@ -172,6 +172,19 @@ const FORMAL_WARN_AUTOCLOSE_MS = 10000;
  */
 const SPEECH_LEDGER_KEY = 'WHISPER_OR_CONVERSATION_SUSPECTED';
 
+/**
+ * OVOZSIZ og'iz qimirlashi (pichirlash, mikrofonsiz/jim gapirish, lab bilan
+ * "aytib berish") — mikrofonda nutq eshitilmasa ham gapirish hisoblanadi.
+ *
+ * Nega ovozli gapirishdan UZUNROQ tasdiq: bu yolg'iz VIDEO signali, ya'ni
+ * mikrofon tasdig'i yo'q. Esnash, yutinish, chuqur nafas, lab qimirlatish —
+ * hammasi og'iz harakati bo'lib chiqadi. Ovozli gapirishda (300ms/1800ms)
+ * ikkinchi mustaqil manba — Silero VAD — borligi uchun chegarani past qo'yish
+ * mumkin edi; bu yerda esa uzoq uzluksizlik yagona himoya.
+ */
+const MOUTH_ONLY_CONFIRM_MS = 2000;
+const MOUTH_ONLY_ESCALATE_MS = 6000;
+
 interface ExamRoomProps {
   exam: any;
   studentExamId: number;
@@ -1826,6 +1839,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const ambientTrackerRef = useRef<AmbientNoiseTracker | null>(null);
   const speechContinuousRef = useRef<ContinuousSignalTracker | null>(null);
   const ambientContinuousRef = useRef<ContinuousSignalTracker | null>(null);
+  /** Ovozsiz og'iz qimirlashi (mikrofonda nutq yo'q, lekin og'iz gapirayotgandek). */
+  const mouthOnlyContinuousRef = useRef<ContinuousSignalTracker | null>(null);
   /** Video (og'iz harakati) hozir "gapiryapti" deb hisoblanadimi — ovoz eskalatsiyasida
    *  WHISPER_OR_CONVERSATION_SUSPECTED (boshqa odam) vs MOUTH_MOVEMENT_TALKING (o'zi)
    *  ni ajratish uchun. */
@@ -1846,6 +1861,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     if (!speechContinuousRef.current) speechContinuousRef.current = new ContinuousSignalTracker(600);
     // Shovqin: grace QISQA (250ms)
     if (!ambientContinuousRef.current) ambientContinuousRef.current = new ContinuousSignalTracker(250);
+    // Ovozsiz og'iz: grace 400ms — jumlalar orasidagi pauzada og'iz bir zumga
+    // yopiladi, lekin gapirish davom etayotgan bo'ladi.
+    if (!mouthOnlyContinuousRef.current) mouthOnlyContinuousRef.current = new ContinuousSignalTracker(400);
 
     // AudioContext suspended bo'lishi mumkin — birinchi tickda tiklashga urinamiz.
     void audioContextRef.current?.resume?.().catch(() => {});
@@ -1890,6 +1908,18 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const ambientEscalateMs = Math.max(LIVE_SIGNAL_ESCALATE_MS, 5000);
 
       const speechSmall = speechMs >= speechConfirmMs;
+
+      // OVOZSIZ gapirish: og'iz qimirlayapti, lekin mikrofonda nutq yo'q
+      // (pichirlash, mikrofonni past/o'chirib gapirish, lab bilan aytib berish).
+      // Ovoz hisoblanayotgan paytda bu yo'l ishlamaydi — o'sha holat allaqachon
+      // yuqoridagi speech zanjirida hisoblanadi, ikki marta sanalmasin.
+      const mouthOnlyMs = mouthOnlyContinuousRef.current!.push(
+        mouthActiveRef.current && !speechCounted,
+        now,
+      );
+      const mouthOnlySmall = mouthOnlyMs >= MOUTH_ONLY_CONFIRM_MS;
+      // Chip/modal HISOBI bitta: ovozli ham, ovozsiz ham — «gapirish».
+      const talkSmall = speechSmall || mouthOnlySmall;
       // TASHQI shovqin nazorati imtihon sozlamasida o'chirilgan bo'lishi
       // mumkin (institut binosida tabiiy shovqin soxta ogohlantirish beradi).
       // DIQQAT: bu FAQAT tashqi shovqinga tegishli — talabaning o'zi gapirishi
@@ -1901,12 +1931,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       const frozenUi = smallWarnOpenRef.current;
 
       if (!frozenUi) {
-        if (speechSmall) noteSmallWarningRef.current(SPEECH_LEDGER_KEY);
+        if (talkSmall) noteSmallWarningRef.current(SPEECH_LEDGER_KEY);
         else smallWarningLedgerRef.current.noteCleared(SPEECH_LEDGER_KEY);
         if (ambientSmall) noteSmallWarningRef.current('SUSPICIOUS_AUDIO');
         else smallWarningLedgerRef.current.noteCleared('SUSPICIOUS_AUDIO');
 
-        if (speechSmall) {
+        if (talkSmall) {
           const label = withSmallCount(EXAM_L[langRef.current].liveTalking, SPEECH_LEDGER_KEY);
           setAudioLiveLabel(label);
           showSmallWarnRef.current('a:speech', SPEECH_LEDGER_KEY, label);
@@ -1927,8 +1957,19 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
         formalIssuedFor('SUSPICIOUS_AUDIO');
         void logViolationRef.current('SUSPICIOUS_AUDIO');
       }
+      // Ovozsiz gapirish rasmiy ogohlantirishga chiqadi — turi doim
+      // MOUTH_MOVEMENT_TALKING (manba talabaning O'Z og'zi, tashqi ovoz emas),
+      // shu sabab «tashqi shovqin nazorati» o'chirilgan imtihonda ham ishlaydi.
+      if (mouthOnlyMs >= MOUTH_ONLY_ESCALATE_MS) {
+        mouthOnlyContinuousRef.current!.reset();
+        speechContinuousRef.current!.reset();
+        formalIssuedFor(SPEECH_LEDGER_KEY);
+        void logViolationRef.current('MOUTH_MOVEMENT_TALKING');
+      }
+
       if (speechMs >= speechEscalateMs) {
         speechContinuousRef.current!.reset();
+        mouthOnlyContinuousRef.current!.reset();
         formalIssuedFor(SPEECH_LEDGER_KEY);
         // Tashqi shovqin o'chirilgan bo'lsa bu yerga FAQAT o'z nutqi yetib keladi
         // (yuqoridagi og'iz oynasi) — turi ham shunga mos bo'lsin.
