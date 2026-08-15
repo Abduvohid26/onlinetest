@@ -42,6 +42,14 @@ class Direction(models.Model):
         Kafedra, null=True, blank=True, on_delete=models.SET_NULL,
         db_column="kafedra_id", related_name="directions",
     )
+    # Excel katalog: bitta yo'nalish bir nechta kafedraga tegishli (DI 24 ta
+    # kafedrada o'qitiladi). `kafedra` FK — asosiy/primary (eng ko'p fan).
+    taught_kafedralar = models.ManyToManyField(
+        Kafedra,
+        blank=True,
+        related_name="taught_directions",
+        db_table="direction_kafedralar",
+    )
 
     class Meta:
         app_label = "core"

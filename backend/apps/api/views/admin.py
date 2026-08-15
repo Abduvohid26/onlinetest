@@ -599,6 +599,62 @@ def admin_level_detail(request, pk: int):
         return Response({"success": True})
 
 
+def _kafedra_direction_count(kf: Kafedra) -> int:
+    ids = set(kf.taught_directions.values_list("id", flat=True))
+    ids.update(kf.directions.values_list("id", flat=True))
+    return len(ids)
+
+
+def _parse_kafedra_ids(raw) -> list[int] | None:
+    """None = maydon yuborilmagan. Bo'sh ro'yxat = barcha bog'lanishni olib tashlash."""
+    if raw is None:
+        return None
+    if raw in ("", "null"):
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raw = [raw]
+    out: list[int] = []
+    seen: set[int] = set()
+    for item in raw:
+        if item in (None, "", "null"):
+            continue
+        try:
+            pk = int(item)
+        except (TypeError, ValueError):
+            continue
+        if pk not in seen:
+            seen.add(pk)
+            out.append(pk)
+    return out
+
+
+def _set_direction_kafedralar(dr: Direction, kafedra_ids: list[int]) -> None:
+    dr.taught_kafedralar.set(kafedra_ids)
+    primary = kafedra_ids[0] if kafedra_ids else None
+    if dr.kafedra_id != primary:
+        dr.kafedra_id = primary
+        dr.save(update_fields=["kafedra_id"])
+
+
+def _serialize_direction(dr: Direction, *, group_count: int | None = None) -> dict:
+    taught = list(dr.taught_kafedralar.all())
+    if not taught and dr.kafedra_id and dr.kafedra:
+        taught = [dr.kafedra]
+    payload = {
+        "id": dr.id,
+        "name": dr.name,
+        "kafedra_id": dr.kafedra_id or (taught[0].id if taught else None),
+        "kafedra_name": (
+            dr.kafedra.name if dr.kafedra_id and dr.kafedra else (taught[0].name if taught else None)
+        ),
+        "kafedra_ids": [k.id for k in taught],
+        "kafedra_names": [k.name for k in taught],
+    }
+    if group_count is not None:
+        payload["group_count"] = group_count
+    return payload
+
+
 @api_view(["GET", "POST"])
 @permission_classes([IsAuthenticated])
 def admin_kafedralar(request):
@@ -614,7 +670,7 @@ def admin_kafedralar(request):
                     "code": k.code,
                     "sort_order": k.sort_order,
                     "is_active": k.is_active,
-                    "direction_count": k.directions.count(),
+                    "direction_count": _kafedra_direction_count(k),
                 }
             )
         return Response(out)
@@ -664,7 +720,7 @@ def admin_kafedra_detail(request, pk: int):
                 "code": kf.code,
                 "sort_order": kf.sort_order,
                 "is_active": kf.is_active,
-                "direction_count": kf.directions.count(),
+                "direction_count": _kafedra_direction_count(kf),
             }
         )
     if request.method == "PATCH":
@@ -705,7 +761,7 @@ def admin_kafedra_detail(request, pk: int):
         audit(request, "update_kafedra", "kafedra", kf.id, kf.name, "changed: " + ", ".join(uf))
         return Response({"id": kf.id, "name": kf.name, "code": kf.code})
     if request.method == "DELETE":
-        direction_count = kf.directions.count()
+        direction_count = _kafedra_direction_count(kf)
         if direction_count > 0:
             return Response(
                 {
@@ -727,15 +783,8 @@ def admin_directions(request):
         return Response({"error": "Forbidden"}, status=403)
     if request.method == "GET":
         out = []
-        for dr in Direction.objects.select_related("kafedra").order_by("name"):
-            out.append(
-                {
-                    "id": dr.id,
-                    "name": dr.name,
-                    "kafedra_id": dr.kafedra_id,
-                    "kafedra_name": dr.kafedra.name if dr.kafedra_id else None,
-                }
-            )
+        for dr in Direction.objects.select_related("kafedra").prefetch_related("taught_kafedralar").order_by("name"):
+            out.append(_serialize_direction(dr))
         return Response(out)
     name = (request.data or {}).get("name")
     if not name or not str(name).strip():
@@ -746,15 +795,18 @@ def admin_directions(request):
             {"error": admin_api_msg("direction_name_exists", resolve_ui_language(request))},
             status=400,
         )
-    kafedra_id = (request.data or {}).get("kafedra_id")
-    if kafedra_id not in (None, "", "null"):
-        if not Kafedra.objects.filter(pk=kafedra_id).exists():
-            return Response({"error": "Invalid kafedra"}, status=400)
-    else:
-        kafedra_id = None
-    dr = Direction.objects.create(name=name, kafedra_id=kafedra_id)
+    data = request.data or {}
+    kafedra_ids = _parse_kafedra_ids(data.get("kafedra_ids"))
+    if kafedra_ids is None:
+        single = data.get("kafedra_id")
+        kafedra_ids = _parse_kafedra_ids([single] if single not in (None, "", "null") else [])
+    if kafedra_ids and Kafedra.objects.filter(pk__in=kafedra_ids).count() != len(kafedra_ids):
+        return Response({"error": "Invalid kafedra"}, status=400)
+    dr = Direction.objects.create(name=name, kafedra_id=kafedra_ids[0] if kafedra_ids else None)
+    if kafedra_ids:
+        dr.taught_kafedralar.set(kafedra_ids)
     audit(request, "create_direction", "direction", dr.id, dr.name)
-    return Response({"id": dr.id, "name": dr.name, "kafedra_id": dr.kafedra_id})
+    return Response(_serialize_direction(dr))
 
 
 @api_view(["GET", "PATCH", "DELETE"])
@@ -770,15 +822,7 @@ def admin_direction_detail(request, pk: int):
         )
     if request.method == "GET":
         group_count = Group.objects.filter(direction_id=pk).count()
-        return Response(
-            {
-                "id": dr.id,
-                "name": dr.name,
-                "kafedra_id": dr.kafedra_id,
-                "kafedra_name": dr.kafedra.name if dr.kafedra_id else None,
-                "group_count": group_count,
-            }
-        )
+        return Response(_serialize_direction(dr, group_count=group_count))
     if request.method == "PATCH":
         d = request.data or {}
         old_name = dr.name
@@ -794,20 +838,23 @@ def admin_direction_detail(request, pk: int):
                 )
             dr.name = name[:200]
             uf.append("name")
-        if "kafedra_id" in d:
-            kafedra_id = d["kafedra_id"]
-            if kafedra_id not in (None, "", "null"):
-                if not Kafedra.objects.filter(pk=kafedra_id).exists():
-                    return Response({"error": "Invalid kafedra"}, status=400)
-                dr.kafedra_id = kafedra_id
-            else:
-                dr.kafedra_id = None
+        kafedra_ids = _parse_kafedra_ids(d.get("kafedra_ids")) if "kafedra_ids" in d else None
+        if kafedra_ids is None and "kafedra_id" in d:
+            single = d["kafedra_id"]
+            kafedra_ids = _parse_kafedra_ids([] if single in (None, "", "null") else [single])
+        if kafedra_ids is not None:
+            if kafedra_ids and Kafedra.objects.filter(pk__in=kafedra_ids).count() != len(kafedra_ids):
+                return Response({"error": "Invalid kafedra"}, status=400)
+            if uf:
+                dr.save(update_fields=list(dict.fromkeys(uf)))
+            _set_direction_kafedralar(dr, kafedra_ids)
             uf.append("kafedra_id")
-        if not uf:
+        elif uf:
+            dr.save(update_fields=list(dict.fromkeys(uf)))
+        else:
             return Response({"error": "No fields to update"}, status=400)
-        dr.save(update_fields=list(dict.fromkeys(uf)))
         audit(request, "rename_direction", "direction", dr.id, dr.name, f"{old_name!r} → {dr.name!r}")
-        return Response({"id": dr.id, "name": dr.name, "kafedra_id": dr.kafedra_id})
+        return Response(_serialize_direction(dr))
     if request.method == "DELETE":
         group_count = Group.objects.filter(direction_id=pk).count()
         if group_count > 0:

@@ -14,6 +14,8 @@ export type Direction = {
   name: string;
   kafedra_id?: number | null;
   kafedra_name?: string | null;
+  kafedra_ids?: number[];
+  kafedra_names?: string[];
 };
 
 export type Group = {

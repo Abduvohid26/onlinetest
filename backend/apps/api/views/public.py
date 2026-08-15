@@ -41,14 +41,20 @@ def public_academic_catalog(request):
         )
 
     directions_by_kafedra: dict[int | None, list[dict]] = {}
-    for d in Direction.objects.select_related("kafedra").order_by("name"):
-        directions_by_kafedra.setdefault(d.kafedra_id, []).append(
-            {
-                "id": d.id,
-                "name": d.name,
-                "groups": groups_by_direction.get(d.id, []),
-            }
-        )
+    for d in Direction.objects.select_related("kafedra").prefetch_related("taught_kafedralar").order_by("name"):
+        payload = {
+            "id": d.id,
+            "name": d.name,
+            "groups": groups_by_direction.get(d.id, []),
+        }
+        kafedra_ids = [k.id for k in d.taught_kafedralar.all()]
+        if not kafedra_ids and d.kafedra_id:
+            kafedra_ids = [d.kafedra_id]
+        if not kafedra_ids:
+            directions_by_kafedra.setdefault(None, []).append(payload)
+            continue
+        for kid in kafedra_ids:
+            directions_by_kafedra.setdefault(kid, []).append(payload)
 
     kafedralar = []
     for kf in Kafedra.objects.filter(is_active=True):

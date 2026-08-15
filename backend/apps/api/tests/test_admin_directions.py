@@ -5,7 +5,7 @@ import bcrypt
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.core.models import AppUser, Direction, Group, Level
+from apps.core.models import AppUser, Direction, Group, Kafedra, Level
 
 PROFILE = (
     "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlcZ/"
@@ -141,3 +141,46 @@ class AdminDirectionsTests(TestCase):
         self.assertEqual(r.status_code, 200, r.content)
         grp.refresh_from_db()
         self.assertIsNone(grp.direction_id)
+
+    def test_create_direction_with_kafedra_ids(self):
+        k1 = Kafedra.objects.create(name="Kafedra A")
+        k2 = Kafedra.objects.create(name="Kafedra B")
+        r = self.client.post(
+            "/api/admin/directions",
+            {"name": "DI", "kafedra_ids": [k1.id, k2.id]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(sorted(body["kafedra_ids"]), sorted([k1.id, k2.id]))
+        self.assertEqual(body["kafedra_id"], k1.id)
+        dr = Direction.objects.get(pk=body["id"])
+        self.assertEqual(set(dr.taught_kafedralar.values_list("id", flat=True)), {k1.id, k2.id})
+        self.assertEqual(dr.kafedra_id, k1.id)
+
+    def test_patch_kafedra_ids_updates_m2m_and_primary(self):
+        k1 = Kafedra.objects.create(name="Kafedra C")
+        k2 = Kafedra.objects.create(name="Kafedra D")
+        dr = Direction.objects.create(name="TPI", kafedra=k1)
+        dr.taught_kafedralar.set([k1])
+        r = self.client.patch(
+            f"/api/admin/directions/{dr.id}",
+            {"kafedra_ids": [k2.id, k1.id]},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        body = r.json()
+        self.assertEqual(sorted(body["kafedra_ids"]), sorted([k2.id, k1.id]))
+        self.assertEqual(body["kafedra_id"], k2.id)
+        dr.refresh_from_db()
+        self.assertEqual(dr.kafedra_id, k2.id)
+
+    def test_legacy_kafedra_id_still_works(self):
+        kf = Kafedra.objects.create(name="Kafedra E")
+        r = self.client.post(
+            "/api/admin/directions",
+            {"name": "OHI", "kafedra_id": kf.id},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(r.json()["kafedra_ids"], [kf.id])

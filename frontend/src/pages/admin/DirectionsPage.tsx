@@ -5,7 +5,7 @@ import { apiUrl } from '../../lib/apiUrl';
 import { authHeaders } from '../../lib/uiLangHeader';
 import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import {
-  AdminInput, AdminSelect, AdminField, AdminBtn, AdminCard,
+  AdminInput, AdminField, AdminBtn, AdminCard,
   AdminEmpty, AdminPageMessage, AdminPagination, usePagedList, PlusIcon,
 } from './ui';
 import type { Direction, Group, Kafedra } from './types';
@@ -27,13 +27,13 @@ export function DirectionsPage({ token, lang }: Props) {
   const [groups, setGroups] = useState<Group[]>([]);
   const [kafedralar, setKafedralar] = useState<Kafedra[]>([]);
   const [newName, setNewName] = useState('');
-  const [newKafedraId, setNewKafedraId] = useState('');
+  const [newKafedraIds, setNewKafedraIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
-  const [editKafedraId, setEditKafedraId] = useState('');
+  const [editKafedraIds, setEditKafedraIds] = useState<number[]>([]);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState('');
 
@@ -57,6 +57,10 @@ export function DirectionsPage({ token, lang }: Props) {
 
   useEffect(() => { reload(); }, [reload]);
 
+  const toggleId = (ids: number[], id: number) => (
+    ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]
+  );
+
   const addDirection = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -67,14 +71,14 @@ export function DirectionsPage({ token, lang }: Props) {
       headers: { 'Content-Type': 'application/json', ...h },
       body: JSON.stringify({
         name: newName.trim(),
-        kafedra_id: newKafedraId ? Number(newKafedraId) : null,
+        kafedra_ids: newKafedraIds,
       }),
     });
     setSaving(false);
     if (!checkAdminAuthResponse(res)) return;
     if (res.ok) {
       setNewName('');
-      setNewKafedraId('');
+      setNewKafedraIds([]);
       setMsg({ type: 'success', text: t.directionAddedOk });
       reload();
     } else {
@@ -86,7 +90,7 @@ export function DirectionsPage({ token, lang }: Props) {
   const startEdit = (dr: Direction) => {
     setEditingId(dr.id);
     setEditName(dr.name);
-    setEditKafedraId(dr.kafedra_id ? String(dr.kafedra_id) : '');
+    setEditKafedraIds(dr.kafedra_ids?.length ? dr.kafedra_ids : (dr.kafedra_id ? [dr.kafedra_id] : []));
     setEditError('');
     setDeleteConfirmId(null);
   };
@@ -94,7 +98,7 @@ export function DirectionsPage({ token, lang }: Props) {
   const cancelEdit = () => {
     setEditingId(null);
     setEditName('');
-    setEditKafedraId('');
+    setEditKafedraIds([]);
     setEditError('');
   };
 
@@ -107,7 +111,7 @@ export function DirectionsPage({ token, lang }: Props) {
       headers: { 'Content-Type': 'application/json', ...h },
       body: JSON.stringify({
         name: editName.trim(),
-        kafedra_id: editKafedraId ? Number(editKafedraId) : null,
+        kafedra_ids: editKafedraIds,
       }),
     });
     setEditSaving(false);
@@ -165,12 +169,20 @@ export function DirectionsPage({ token, lang }: Props) {
                 />
               </AdminField>
               <AdminField label={t.directionKafedraLabel}>
-                <AdminSelect value={newKafedraId} onChange={(e) => setNewKafedraId(e.target.value)}>
-                  <option value="">{t.directionKafedraNone}</option>
-                  {kafedralar.map((kf) => (
-                    <option key={kf.id} value={String(kf.id)}>{kf.name}</option>
+                <div className="max-h-44 overflow-y-auto rounded-lg border border-gray-200 bg-white px-2 py-1.5 space-y-0.5">
+                  {kafedralar.length === 0 ? (
+                    <p className="text-[12px] text-gray-400 px-1 py-1">{t.directionKafedraNone}</p>
+                  ) : kafedralar.map((kf) => (
+                    <label key={kf.id} className="flex items-center gap-2 px-1 py-1 rounded hover:bg-gray-50 text-[13px] text-gray-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={newKafedraIds.includes(kf.id)}
+                        onChange={() => setNewKafedraIds((prev) => toggleId(prev, kf.id))}
+                      />
+                      <span className="truncate">{kf.name}</span>
+                    </label>
                   ))}
-                </AdminSelect>
+                </div>
               </AdminField>
               <AdminBtn type="submit" variant="blue" size="lg" loading={saving} icon={<PlusIcon size={16} />} className="w-full">
                 {t.kontingentAddDirection}
@@ -215,16 +227,18 @@ export function DirectionsPage({ token, lang }: Props) {
                             if (e.key === 'Escape') cancelEdit();
                           }}
                         />
-                        <AdminSelect
-                          value={editKafedraId}
-                          onChange={(e) => setEditKafedraId(e.target.value)}
-                          className="!w-[180px]"
-                        >
-                          <option value="">{t.directionKafedraNone}</option>
+                        <div className="w-full max-h-36 overflow-y-auto rounded-lg border border-gray-200 bg-white px-2 py-1 space-y-0.5">
                           {kafedralar.map((kf) => (
-                            <option key={kf.id} value={String(kf.id)}>{kf.name}</option>
+                            <label key={kf.id} className="flex items-center gap-2 px-1 py-0.5 text-[12px] text-gray-700 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={editKafedraIds.includes(kf.id)}
+                                onChange={() => setEditKafedraIds((prev) => toggleId(prev, kf.id))}
+                              />
+                              <span className="truncate">{kf.name}</span>
+                            </label>
                           ))}
-                        </AdminSelect>
+                        </div>
                         <AdminBtn variant="blue" size="sm" loading={editSaving} onClick={() => saveEdit(dr.id)}>
                           {t.save}
                         </AdminBtn>
@@ -238,7 +252,12 @@ export function DirectionsPage({ token, lang }: Props) {
                         <div className="flex-1 min-w-[130px] min-w-0">
                           <p className="font-semibold text-gray-900 text-[14px] sm:text-[15px] truncate">{dr.name}</p>
                           <p className="text-[12px] sm:text-[13px] text-gray-400 mt-0.5">
-                            {dr.kafedra_name ? `${dr.kafedra_name} · ` : ''}{gCount} {t.kontingentGroups}
+                            {(() => {
+                              const names = dr.kafedra_names?.length
+                                ? dr.kafedra_names.join(', ')
+                                : (dr.kafedra_name || '');
+                              return names ? `${names} · ${gCount} ${t.kontingentGroups}` : `${gCount} ${t.kontingentGroups}`;
+                            })()}
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5">
