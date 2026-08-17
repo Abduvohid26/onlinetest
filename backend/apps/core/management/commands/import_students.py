@@ -49,7 +49,7 @@ HEADER_ALIASES = {
     "student_id": ["talaba id"],
     "passport": ["pasport raqami"],
     "pinfl": ["jshshir-kod", "jshshir kod", "jshshir"],
-    "group": ["guruh"],
+    "group": ["guruh", "gurux"],
     "kurs": ["kurs"],
     "faculty": ["fakultet"],
 }

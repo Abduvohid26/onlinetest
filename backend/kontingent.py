@@ -40,16 +40,12 @@ from django.core.management import call_command  # noqa: E402
 FILES = [
     ("1-kurs.xlsx", "Talabalar", "1-kurs", 2025),
     ("2-kurs.xlsx", "Talabalar", None, 2024),
+    ("3-kurs.xlsx", "Talabalar", "3-kurs", 2023),
     ("4 kurslar.xlsx", "Talabalar", None, 2022),
     ("5 kurslar.xlsx", "Talabalar", "5-kurs", 2021),
 ]
 
-SKIPPED_NOTE = (
-    "3-kurs.xlsx ATAYLAB o'tkazib yuborildi:\n"
-    "  - 'xalqaro' sheet: 256 qatorning barchasi bo'sh (shablon).\n"
-    "  - 'Talabalar' sheet: 1073 ta real talaba bor, lekin 'Guruh' ustuni YO'Q.\n"
-    "  Bu faylni alohida, qo'lda tekshirib import qilish kerak."
-)
+SKIPPED_NOTE = ""
 
 
 def default_data_dir() -> Path:
