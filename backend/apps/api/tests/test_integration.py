@@ -1345,6 +1345,99 @@ class ExamFlowApiTests(TestCase):
         self.assertIsNotNone(se.completed_at)
 
 
+    @mock.patch.dict(os.environ, {"VAC_STRICT_MODE": "0"}, clear=False)
+    def test_identity_substitution_logged_when_strict_mode_off(self):
+        """VAC_STRICT_MODE=0 — identity darhol ban EMAS, lekin baribir yoziladi.
+
+        Regressiya: `IDENTITY_SUBSTITUTION` faqat `instant_ban_types` da edi va u
+        ro'yxat strict rejimda bo'sh bo'lardi — natijada eng jiddiy qoidabuzarlik
+        400 "Unknown or disallowed violation_type" bilan jimgina yo'qolar,
+        ViolationLog'ga tushmas va admin uni hech qachon ko'rmasdi.
+        """
+        hp = bcrypt.hashpw(b"vstudent-id", bcrypt.gensalt(rounds=10)).decode("ascii")
+        st = AppUser.objects.create(
+            id="itest_student_ident_soft",
+            password=hp,
+            role="student",
+            name="Ident Soft",
+            status="Active",
+            group_id=self.group.id,
+            profile_image=PROFILE,
+        )
+        r0 = self.client.post(
+            "/api/auth/login",
+            {"id": "itest_student_ident_soft", "password": "vstudent-id"},
+            format="json",
+        )
+        self.assertEqual(r0.status_code, 200)
+        tok = r0.json()["token"]
+        self._start_exam_session(tok, self.exam_a.id, st.id)
+
+        r = self.client.post(
+            "/api/student/violations",
+            {"exam_id": self.exam_a.id, "violation_type": "IDENTITY_SUBSTITUTION"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        # Darhol ban emas — oddiy ogohlantirish oqimi.
+        self.assertFalse(body.get("banned"))
+        self.assertEqual(body.get("warningNumber"), 1)
+        # Eng muhimi: hodisa audit uchun yozilgan.
+        self.assertTrue(
+            ViolationLog.objects.filter(
+                student_id=st.id,
+                exam_id=self.exam_a.id,
+                violation_type="IDENTITY_SUBSTITUTION",
+            ).exists()
+        )
+
+    def test_proctor_engine_status_records_unavailable(self):
+        """Brauzer engine yuklanmasa — sessiyada belgilanadi (jazo emas)."""
+        hp = bcrypt.hashpw(b"vstudent-eng", bcrypt.gensalt(rounds=10)).decode("ascii")
+        st = AppUser.objects.create(
+            id="itest_student_engine",
+            password=hp,
+            role="student",
+            name="Engine Student",
+            status="Active",
+            group_id=self.group.id,
+            profile_image=PROFILE,
+        )
+        r0 = self.client.post(
+            "/api/auth/login",
+            {"id": "itest_student_engine", "password": "vstudent-eng"},
+            format="json",
+        )
+        self.assertEqual(r0.status_code, 200)
+        self._start_exam_session(r0.json()["token"], self.exam_a.id, st.id)
+
+        r = self.client.post(
+            "/api/student/proctor-engine-status",
+            {"exam_id": self.exam_a.id, "status": "unavailable"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        se = StudentExam.objects.get(student_id=st.id, exam_id=self.exam_a.id)
+        self.assertEqual(se.proctor_engine_status, "unavailable")
+        self.assertIsNotNone(se.proctor_engine_reported_at)
+
+        # Noma'lum qiymat qabul qilinmaydi.
+        bad = self.client.post(
+            "/api/student/proctor-engine-status",
+            {"exam_id": self.exam_a.id, "status": "hacked"},
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
+        se.refresh_from_db()
+        self.assertEqual(se.proctor_engine_status, "unavailable")
+
+        # Bu qoidabuzarlik EMAS — hech qanday ViolationLog yozilmasligi kerak.
+        self.assertFalse(
+            ViolationLog.objects.filter(student_id=st.id, exam_id=self.exam_a.id).exists()
+        )
+
+
 class BankExamOptionsTests(TestCase):
   def test_bank_row_empty_uz_options_fallback(self):
     from apps.api.services import bank_row_to_exam_dict

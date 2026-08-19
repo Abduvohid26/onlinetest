@@ -1,5 +1,11 @@
 import { useEffect } from 'react';
-import { RealtimeProctor, type RealtimeViolation, type FaceStatusLive, type LiveSignalType } from './realtimeProctor';
+import {
+  RealtimeProctor,
+  type RealtimeViolation,
+  type FaceStatusLive,
+  type LiveSignalType,
+  type GazeDebugInfo,
+} from './realtimeProctor';
 
 interface UseRealtimeProctoringOpts {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -21,6 +27,8 @@ interface UseRealtimeProctoringOpts {
   eyeBaseline?: number | null;
   disabled?: boolean;
   onReady?: (ok: boolean) => void;
+  /** Sozlash rejimi (VITE_GAZE_DEBUG) — xom nigoh o'lchovlari. */
+  onDebug?: (info: GazeDebugInfo) => void;
 }
 
 /**
@@ -40,6 +48,7 @@ export function useRealtimeProctoring({
   eyeBaseline = null,
   disabled = false,
   onReady,
+  onDebug,
 }: UseRealtimeProctoringOpts): void {
   useEffect(() => {
     if (disabled) return;
@@ -55,6 +64,7 @@ export function useRealtimeProctoring({
       onMouthActivity,
       onSmallWarningStage,
       onReady,
+      onDebug,
       onStatus: (m) => console.info('[realtime-proctor]', m),
     }, eyeBaseline);
 

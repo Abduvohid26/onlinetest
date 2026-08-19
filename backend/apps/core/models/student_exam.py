@@ -37,6 +37,12 @@ class StudentExam(models.Model):
     proctor_official_warnings = models.PositiveSmallIntegerField(default=0)
     proctor_last_warning_at = models.DateTimeField(null=True, blank=True)
     proctor_last_frame_at = models.DateTimeField(null=True, blank=True)
+    #: Brauzerdagi real-time proctoring engine (MediaPipe) holati: "" (hali
+    #: xabar yo'q) | "ok" | "unavailable". Engine model yuklay olmasa nazoratning
+    #: bir qismi (gaze/pozitsiya/qo'l/ob'ekt) jimgina o'chib qolardi va buni hech
+    #: kim bilmasdi — endi klient bu holatni xabar qiladi, admin ko'ra oladi.
+    proctor_engine_status = models.CharField(max_length=16, blank=True, default="")
+    proctor_engine_reported_at = models.DateTimeField(null=True, blank=True)
     technical_retakes_used = models.PositiveSmallIntegerField(default=0)
     bonus_technical_retakes = models.PositiveSmallIntegerField(default=0)
     identity_retakes_used = models.PositiveSmallIntegerField(default=0)

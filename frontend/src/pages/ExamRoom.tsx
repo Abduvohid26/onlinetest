@@ -15,6 +15,8 @@ import {
 import { SmallWarningLedger, SMALL_WARNINGS_BEFORE_FORMAL } from '../lib/smallWarningLedger';
 import { SileroVad } from '../lib/sileroVad';
 import { ForbiddenObjectProctor } from '../lib/forbiddenObjectProctor';
+import { GazeDebugPanel } from '../components/GazeDebugPanel';
+import type { GazeDebugInfo } from '../lib/realtimeProctor';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { OwnSpeechGate } from '../lib/ownSpeechGate';
@@ -39,7 +41,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string; engineDegraded: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -67,6 +69,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     livePhone: "Telefon aniqlandi — telefon ishlatmang",
     liveBook: "Kitob/daftar aniqlandi — olib qo'ying",
     liveLaptop: "Noutbuk aniqlandi — olib qo'ying",
+    engineDegraded: "Real-time nazorat ishlamayapti — server nazorati davom etmoqda",
   },
   ru: {
     answered: 'Отвечено',
@@ -95,6 +98,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     livePhone: 'Обнаружен телефон — не пользуйтесь телефоном',
     liveBook: 'Обнаружена книга/тетрадь — уберите',
     liveLaptop: 'Обнаружен ноутбук — уберите',
+    engineDegraded: 'Наблюдение в реальном времени недоступно — серверный контроль продолжается',
   },
   en: {
     answered: 'Answered',
@@ -123,6 +127,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     livePhone: 'Phone detected — do not use a phone',
     liveBook: 'Book/notebook detected — put it away',
     liveLaptop: 'Laptop detected — put it away',
+    engineDegraded: 'Real-time monitoring unavailable — server proctoring continues',
   },
 };
 
@@ -1248,6 +1253,17 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** MediaPipe ObjectDetector — telefon/kitob/noutbuk (brauzerda, real-time). */
   const objectProctorRef = useRef<ForbiddenObjectProctor | null>(null);
   const [objectLiveLabel, setObjectLiveLabel] = useState<string | null>(null);
+  /**
+   * Brauzerdagi MediaPipe engine'lari ishga tushdimi (null = hali noma'lum).
+   * Ilgari model yuklanmasa engine JIMGINA o'chardi: nigoh/pozitsiya/qo'l/ob'ekt
+   * nazorati yo'q bo'lardi va buni na talaba, na admin bilardi. Endi holat
+   * talabaga ko'rsatiladi va serverga xabar qilinadi.
+   */
+  /** Nigoh sozlash paneli — faqat VITE_GAZE_DEBUG=1 da. Talabaga ko'rinmaydi. */
+  const gazeDebugEnabled = String((import.meta as any).env?.VITE_GAZE_DEBUG || '') === '1';
+  const [gazeDebug, setGazeDebug] = useState<GazeDebugInfo | null>(null);
+  const [realtimeEngineOk, setRealtimeEngineOk] = useState<boolean | null>(null);
+  const [objectEngineOk, setObjectEngineOk] = useState<boolean | null>(null);
   
   const identityCheckBusyRef = useRef(false);
   const logViolationRef = useRef<(type: string) => Promise<void>>(async () => {});
@@ -2288,7 +2304,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     objectProctorRef.current = proctor;
 
     void proctor.init().then((ok) => {
-      if (cancelled || !ok) return;
+      if (cancelled) return;
+      setObjectEngineOk(ok);
+      if (!ok) return;
       proctor.start();
     });
 
@@ -2334,6 +2352,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     streamRevision: proctorStreamRevision,
     eyeBaseline,
     disabled: banned || !sessionStarted,
+    onReady: setRealtimeEngineOk,
+    onDebug: gazeDebugEnabled ? setGazeDebug : undefined,
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
       formalIssuedFor(type);
@@ -2383,6 +2403,41 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       showSmallWarnRef.current(`v:${type}`, violationType, label);
     },
   });
+
+  /**
+   * Engine holati serverga — talaba aybdor emas, shuning uchun bu QOIDABUZARLIK
+   * EMAS: alohida endpoint'ga yoziladi va admin panelida ko'rinadi. Holat
+   * o'zgarmasa qayta yuborilmaydi.
+   */
+  const engineStatusSentRef = useRef<string | null>(null);
+  const engineDegraded = realtimeEngineOk === false || objectEngineOk === false;
+
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    // Ikkala engine ham javob berguncha kutamiz (biri "false" bo'lsa darhol xabar).
+    if (!engineDegraded && (realtimeEngineOk === null || objectEngineOk === null)) return;
+
+    const status = engineDegraded ? 'unavailable' : 'ok';
+    if (engineStatusSentRef.current === status) return;
+    engineStatusSentRef.current = status;
+
+    void (async () => {
+      const path = '/api/student/proctor-engine-status';
+      try {
+        await fetch(apiUrl(path), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(await nextGuardHeaders('POST', path)),
+          },
+          body: JSON.stringify({ exam_id: exam.id, status }),
+        });
+      } catch {
+        // Tarmoq xatosi — keyingi holat o'zgarishida qayta urinadi.
+        engineStatusSentRef.current = null;
+      }
+    })();
+  }, [banned, sessionStarted, engineDegraded, realtimeEngineOk, objectEngineOk, exam.id, nextGuardHeaders]);
 
   // --- Periodic identity match (Gemini serverda) ---
   // 90 soniyada bir marta; faqat yuz aniqlanganida.
@@ -3531,6 +3586,19 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                     </span>
                   )}
                 </div>
+                {gazeDebugEnabled && (
+                  <div className="px-2 py-2 border-b border-slate-700">
+                    <GazeDebugPanel info={gazeDebug} />
+                  </div>
+                )}
+                {engineDegraded && (
+                  <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-300 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-slate-500 shrink-0" />
+                    <span className="text-[11px] font-medium text-slate-700 truncate">
+                      {EXAM_L[lang].engineDegraded}
+                    </span>
+                  </div>
+                )}
                 {liveSignalLabel && (
                   <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0" />

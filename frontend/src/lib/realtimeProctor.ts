@@ -9,9 +9,12 @@
  * Graceful degradation: model yuklanmasa (CDN bloklangan, eski qurilma) engine
  * jim o'chadi — server proctoring ishlayveradi. Hech qachon imtihonni buzmaydi.
  *
- * Modellar CDN'dan lazy-load qilinadi (env bilan self-host qilish mumkin):
- *   VITE_MEDIAPIPE_WASM_BASE, VITE_MEDIAPIPE_FACE_MODEL, VITE_MEDIAPIPE_HAND_MODEL
+ * Modellar avval O'Z domenimizdan (`public/mediapipe/`, build paytida
+ * `scripts/sync-mediapipe-assets.mjs` tayyorlaydi), u ochilmasa CDN zaxirasidan
+ * lazy-load qilinadi — `lib/mediapipeAssets.ts` ga qarang.
  */
+import { mediapipeAssetSources } from './mediapipeAssets';
+import { ProctorWorkerClient } from './proctorWorkerClient';
 
 export type RealtimeViolation =
   | 'FACE_NOT_VISIBLE'
@@ -129,16 +132,6 @@ const CHIP_SIGNAL_TYPES = new Set<LiveSignalType>([
   'MULTI_FACE',
 ]);
 
-const env = (import.meta as any).env || {};
-const WASM_BASE: string =
-  env.VITE_MEDIAPIPE_WASM_BASE ||
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
-const FACE_MODEL: string =
-  env.VITE_MEDIAPIPE_FACE_MODEL ||
-  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const HAND_MODEL: string =
-  env.VITE_MEDIAPIPE_HAND_MODEL ||
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
 // Detection tezligi va bardoshlilik. Tez aniqlash uchun streak/cooldown kichik.
 const DETECT_INTERVAL_MS = 150; // ~6.5 fps (yuk/tezlik balansi — proctoring uchun yetarli)
@@ -270,6 +263,39 @@ export function isIrisGazeAway(iris: { dx: number; dy: number } | null): boolean
   return Math.abs(iris.dx) >= IRIS_GAZE_X || iris.dy >= IRIS_GAZE_DOWN;
 }
 
+/**
+ * Ishlab chiquvchi uchun xom nigoh o'lchovlari (har kadrda).
+ *
+ * FAQAT sozlash uchun: chegaralarni "havoda" tanlash o'rniga real qiymatlarni
+ * ko'rib tanlash imkonini beradi. Talabaga hech qachon ko'rsatilmaydi —
+ * `VITE_GAZE_DEBUG=1` bayrog'i ortida (`ExamRoom`).
+ */
+export interface GazeDebugInfo {
+  /** Qorachiqning ko'z markazidan siljishi. `null` = ko'z yumuq/iris o'qilmadi. */
+  iris: { dx: number; dy: number } | null;
+  /** Ko'z shunchalik toraydi-ki iris ishonchsiz (pastga qarash belgisi). */
+  eyesNarrow: boolean;
+  /** Imtihon oldi tekshiruvida o'lchangan tabiiy ko'z ochiqligi. */
+  eyeBaseline: number | null;
+  /** Bosh pozasi: yaw = gorizontal og'ish (0 = markaz), pitch = vertikal (0.5 = markaz). */
+  head: { yaw: number; pitch: number };
+  /** Yuz balandligi kadrga nisbatan — MASOFA ko'rsatkichi (katta = yaqin). */
+  faceHeight: number;
+  /** Joriy qattiq chegaralar — grafikda chizish uchun. */
+  thresholds: {
+    irisX: number;
+    irisDown: number;
+    pitchUp: number;
+    pitchDown: number;
+    yawTurn: number;
+    yawHard: number;
+  };
+  /** Hozir qaysi yo'nalish faol (chegaradan o'tgan). */
+  active: { up: boolean; down: boolean; left: boolean; right: boolean; turn: boolean };
+  /** Har yo'nalish bo'yicha uzluksiz davomiylik (ms) — eskalatsiya holati. */
+  ms: { up: number; down: number; left: number; right: number; turn: number };
+}
+
 export interface RealtimeProctorCallbacks {
   onViolation: (type: RealtimeViolation) => void;
   /** Yuz almashishi shubhasi (yo'qolib qayta paydo bo'ldi yoki ko'p yuz) —
@@ -288,6 +314,8 @@ export interface RealtimeProctorCallbacks {
   onSmallWarningStage?: (types: LiveSignalType[]) => void;
   onReady?: (ok: boolean) => void;
   onStatus?: (msg: string) => void;
+  /** Sozlash uchun xom o'lchovlar (VITE_GAZE_DEBUG). Prod'da berilmaydi. */
+  onDebug?: (info: GazeDebugInfo) => void;
 }
 
 interface FaceLandmark {
@@ -341,6 +369,11 @@ export class RealtimeProctor {
    *  chegara odamlar orasida soxta ogohlantirish berardi. */
   private eyeBaseline: number | null = null;
 
+  /** Inference worker'i (bo'lsa). `null` — asosiy oqim yo'li (zaxira). */
+  private workerClient: ProctorWorkerClient | null = null;
+  /** Bir vaqtda bitta kadr tahlil qilinsin (worker javobi kutilayotganda yangisi boshlanmasin). */
+  private busy = false;
+
   constructor(
     video: HTMLVideoElement,
     cb: RealtimeProctorCallbacks,
@@ -352,48 +385,77 @@ export class RealtimeProctor {
   }
 
   async init(): Promise<boolean> {
-    try {
-      const vision = await import('@mediapipe/tasks-vision');
-      const { FilesetResolver, FaceLandmarker, HandLandmarker } = vision;
-      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-
-      this.faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
-        runningMode: 'VIDEO',
-        // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
-        // izlash har kadrda ortiqcha yuk edi.
-        numFaces: 2,
-        outputFaceBlendshapes: true,
-        outputFacialTransformationMatrixes: false,
-      });
-
-      // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
-      try {
-        this.handLandmarker = await HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
-          runningMode: 'VIDEO',
-          // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
-          numHands: 1,
-        });
-      } catch {
-        this.handLandmarker = null;
-      }
-
+    // 1-urinish: inference'ni WORKER'ga chiqaramiz — asosiy oqim (imtihon UI,
+    // taymer, savol bosish) og'ir model hisobidan ozod bo'ladi.
+    // Worker ko'tarilmasa (eski brauzer, OffscreenCanvas yo'q, WASM xatosi)
+    // `create()` `null` qaytaradi va pastdagi eski yo'l ishlaydi — nazorat
+    // hech qachon worker sababli o'chib qolmaydi.
+    this.workerClient = await ProctorWorkerClient.create(['face']);
+    if (this.workerClient) {
       if (this.disposed) {
         this.dispose();
         return false;
       }
+      this.cb.onStatus?.('Realtime proctor tayyor (worker).');
       this.cb.onReady?.(true);
       return true;
-    } catch (err) {
-      this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
-      this.cb.onReady?.(false);
-      return false;
     }
+
+    // 2-urinish (zaxira): asosiy oqimda. Manbalar tartib bilan sinaladi —
+    // avval o'z domenimiz, so'ng CDN.
+    let lastErr: unknown = null;
+    for (const src of mediapipeAssetSources()) {
+      try {
+        const vision = await import('@mediapipe/tasks-vision');
+        const { FilesetResolver, FaceLandmarker, HandLandmarker } = vision;
+        const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
+
+        this.faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: src.faceModel, delegate: 'GPU' },
+          runningMode: 'VIDEO',
+          // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
+          // izlash har kadrda ortiqcha yuk edi.
+          numFaces: 2,
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: false,
+        });
+
+        // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
+        try {
+          this.handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+            baseOptions: { modelAssetPath: src.handModel, delegate: 'GPU' },
+            runningMode: 'VIDEO',
+            // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
+            numHands: 1,
+          });
+        } catch {
+          this.handLandmarker = null;
+        }
+
+        if (this.disposed) {
+          this.dispose();
+          return false;
+        }
+        this.cb.onStatus?.(`Realtime proctor tayyor (manba: ${src.origin}).`);
+        this.cb.onReady?.(true);
+        return true;
+      } catch (err) {
+        lastErr = err;
+        this.faceLandmarker = null;
+        this.handLandmarker = null;
+        this.cb.onStatus?.(`Realtime proctor manbasi ishlamadi: ${src.origin}`);
+      }
+    }
+
+    console.warn('[realtime-proctor] barcha manbalar qulaydi:', lastErr);
+    this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
+    this.cb.onReady?.(false);
+    return false;
   }
 
   start(): void {
-    if (this.running || !this.faceLandmarker) return;
+    // Worker yo'lida `faceLandmarker` bo'sh — shart ikkalasini ham qamrasin.
+    if (this.running || (!this.faceLandmarker && !this.workerClient)) return;
     this.running = true;
 
     // MUHIM: og'ir MediaPipe inference'i requestAnimationFrame ichida BAJARILMAYDI.
@@ -405,17 +467,23 @@ export class RealtimeProctor {
     // Endi rAF faqat "sahifa ko'rinyapti va chizilyapti" darvozasi sifatida
     // ishlatiladi (fon tabda rAF chaqirilmaydi — bekorga CPU yemaymiz), tahlil esa
     // kadr chizilgandan KEYIN, alohida makrotaskda ishlaydi.
-    const analyse = () => {
+    // Worker yo'lida `detectOnce` async — keyingi kadrni AVVALGISI TUGAGACH
+    // rejalashtiramiz, aks holda javob kutilayotganda navbat o'sib ketardi.
+    const analyse = async () => {
       if (!this.running) return;
-      this.detectOnce();
-      schedule();
+      try {
+        await this.detectOnce();
+      } catch {
+        /* bitta kadr xatosi loopni to'xtatmasin */
+      }
+      if (this.running) schedule();
     };
 
     const schedule = () => {
       this.timer = window.setTimeout(() => {
         this.rafId = window.requestAnimationFrame(() => {
           if (!this.running) return;
-          this.timer = window.setTimeout(analyse, 0);
+          this.timer = window.setTimeout(() => void analyse(), 0);
         });
       }, DETECT_INTERVAL_MS);
     };
@@ -434,6 +502,10 @@ export class RealtimeProctor {
   dispose(): void {
     this.disposed = true;
     this.stop();
+    // Worker o'z modellarini yopadi va o'zini to'xtatadi (aks holda imtihon
+    // tugagach ham fon jarayoni kamera kadrlarini kutib turardi).
+    this.workerClient?.dispose();
+    this.workerClient = null;
     try {
       this.faceLandmarker?.close?.();
       this.handLandmarker?.close?.();
@@ -482,43 +554,83 @@ export class RealtimeProctor {
     return 0;
   }
 
-  private detectOnce(): void {
+  /**
+   * Bitta kadr: INFERENCE (worker yoki asosiy oqim) → TAHLIL.
+   *
+   * Inference qayerda bajarilishidan qat'i nazar tahlil bir xil — shuning uchun
+   * `analyseFrame` ikkala yo'l uchun yagona. Nigoh chegaralari o'zgarganda faqat
+   * o'sha funksiya o'zgaradi, worker'ga tegilmaydi.
+   */
+  private async detectOnce(): Promise<void> {
     const v = this.video;
     if (!v || v.readyState < 2 || v.videoWidth === 0) return;
-    const ts = performance.now();
+    // Worker javobi kutilayotganda yangi kadr boshlanmasin (navbat o'smasin).
+    if (this.busy) return;
+    this.busy = true;
+    try {
+      const ts = performance.now();
 
-    // 0) Qo'l/imo-ishora — YUZDAN OLDIN tekshiramiz: qo'l yuzga yaqin/ustida bo'lsa,
-    // FaceLandmarker og'iz nuqtalarini noto'g'ri o'qib, soxta "gapiryapti" signali
-    // berishi mumkin (occlusion) — shu holatni og'iz tekshiruviga xabar beramiz.
-    // Performance: qo'l modeli har HAND_DETECT_EVERY kadrda ishlaydi (oradagi kadrlarda
-    // oxirgi natija ishlatiladi — qo'l holati 260ms da keskin o'zgarmaydi).
-    this.frameCount += 1;
-    let handsPresent = this.lastHandsPresent;
-    if (this.handLandmarker && this.frameCount % HAND_DETECT_EVERY === 0) {
-      try {
-        const hres = this.handLandmarker.detectForVideo(v, ts + 0.001);
-        handsPresent = (hres?.landmarks?.length || 0) > 0;
-        this.lastHandsPresent = handsPresent;
-      } catch {
-        /* ignore */
+      // Qo'l modeli har HAND_DETECT_EVERY kadrda ishlaydi (oradagi kadrlarda oxirgi
+      // natija ishlatiladi — qo'l holati 260ms da keskin o'zgarmaydi).
+      this.frameCount += 1;
+      const withHands = this.frameCount % HAND_DETECT_EVERY === 0;
+
+      let faces: FaceLandmark[][] = [];
+      let faceBlendshapes: Array<{ categoryName: string; score: number }> | undefined;
+      let handsPresent = this.lastHandsPresent;
+
+      if (this.workerClient) {
+        const r = await this.workerClient.detect(v, ts, withHands);
+        // Kadr yo'qoldi (xato/kechikish) — o'tkazib yuboramiz. `trackContinuous`
+        // qisqa uzilishga toqat qiladi, shuning uchun bitta kadr sezilmaydi.
+        if (!r) return;
+        faces = r.faces as FaceLandmark[][];
+        faceBlendshapes = r.blendshapes;
+        if (r.handsPresent !== null) {
+          handsPresent = r.handsPresent;
+          this.lastHandsPresent = handsPresent;
+        }
+      } else {
+        // Zaxira yo'l: asosiy oqimda (worker ko'tarilmagan).
+        // Qo'l YUZDAN OLDIN tekshiriladi: qo'l yuzga yaqin/ustida bo'lsa,
+        // FaceLandmarker og'iz nuqtalarini noto'g'ri o'qib, soxta "gapiryapti"
+        // signali berishi mumkin (occlusion).
+        if (this.handLandmarker && withHands) {
+          try {
+            const hres = this.handLandmarker.detectForVideo(v, ts + 0.001);
+            handsPresent = (hres?.landmarks?.length || 0) > 0;
+            this.lastHandsPresent = handsPresent;
+          } catch {
+            /* ignore */
+          }
+        }
+        try {
+          const res = this.faceLandmarker.detectForVideo(v, ts);
+          faces = res?.faceLandmarks || [];
+          faceBlendshapes = res?.faceBlendshapes?.[0]?.categories;
+        } catch {
+          return;
+        }
       }
+
+      this.analyseFrame(faces, faceBlendshapes, handsPresent);
+    } finally {
+      this.busy = false;
     }
+  }
+
+  /** Kadr natijalari ustidan barcha qарorlar — inference manbasidan mustaqil. */
+  private analyseFrame(
+    faces: FaceLandmark[][],
+    faceBlendshapes: Array<{ categoryName: string; score: number }> | undefined,
+    handsPresent: boolean,
+  ): void {
     // Qo'l ko'tarish — endi ham kichik→katta eskalatsiya qoidasiga bo'ysunadi
     // (README.md "Proctoring eskalatsiya qoidasi"): 1.5s kichik, 3s rasmiy.
     // Oldin darhol (~0.4s) rasmiy ogohlantirish berardi — qo'lni bir zum ko'tarish
     // ham darhol blokka olib kelardi, bu qonunga zid edi.
     this.liveMs.HAND = this.trackContinuous('hand', handsPresent);
     if (this.liveMs.HAND >= LIVE_SIGNAL_ESCALATE_MS) this.emit('HAND_GESTURE_SUSPECTED');
-
-    let faces: FaceLandmark[][] = [];
-    let faceBlendshapes: Array<{ categoryName: string; score: number }> | undefined;
-    try {
-      const res = this.faceLandmarker.detectForVideo(v, ts);
-      faces = res?.faceLandmarks || [];
-      faceBlendshapes = res?.faceBlendshapes?.[0]?.categories;
-    } catch {
-      return;
-    }
 
     const faceCount = faces.length;
 
@@ -678,12 +790,47 @@ export class RealtimeProctor {
     if (gazeLMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_LEFT');
     if (gazeRMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_RIGHT');
 
-    const gazeUpMs = this.trackContinuous('gazeUp', noseRelY <= PITCH_UP);
-    const gazeDownMs = this.trackContinuous('gazeDown', noseRelY >= PITCH_DOWN || irisDown);
+    const gazeUpActive = noseRelY <= PITCH_UP;
+    const gazeDownActive = noseRelY >= PITCH_DOWN || irisDown;
+    const gazeUpMs = this.trackContinuous('gazeUp', gazeUpActive);
+    const gazeDownMs = this.trackContinuous('gazeDown', gazeDownActive);
     if (gazeUpMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_UP');
     if (gazeDownMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_DOWN');
 
     this.liveMs.HEAD_AWAY = Math.max(turnMs, gazeLMs, gazeRMs, gazeUpMs, gazeDownMs);
+
+    // Sozlash rejimi — xom qiymatlarni tashqariga beramiz (talabaga ko'rinmaydi).
+    if (this.cb.onDebug) {
+      this.cb.onDebug({
+        iris,
+        eyesNarrow,
+        eyeBaseline: this.eyeBaseline,
+        head: { yaw: noseRelX, pitch: noseRelY },
+        faceHeight: Math.abs(height),
+        thresholds: {
+          irisX: IRIS_GAZE_X,
+          irisDown: IRIS_GAZE_DOWN,
+          pitchUp: PITCH_UP,
+          pitchDown: PITCH_DOWN,
+          yawTurn: YAW_TURN,
+          yawHard: YAW_HARD,
+        },
+        active: {
+          up: gazeUpActive,
+          down: gazeDownActive,
+          left: gazeLActive,
+          right: gazeRActive,
+          turn: absYaw >= YAW_HARD,
+        },
+        ms: {
+          up: gazeUpMs,
+          down: gazeDownMs,
+          left: gazeLMs,
+          right: gazeRMs,
+          turn: turnMs,
+        },
+      });
+    }
 
     // 3) Ortiqcha qimirlash: burun nuqtasining frame'lararo siljishi (EMA bilan tekislash).
     // Oddiy o'tirishdagi mayda harakat (charchoq, holatni to'g'irlash) jazolanmasin —

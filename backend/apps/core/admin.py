@@ -183,8 +183,9 @@ class StudentExamAdmin(admin.ModelAdmin):
         "score",
         "result_public_id",
         "draft_updated_at",
+        "proctor_engine_status",
     )
-    list_filter = ("status",)
+    list_filter = ("status", "proctor_engine_status")
     search_fields = ("student__id", "exam__title", "result_public_id")
     raw_id_fields = ("student", "exam")
     readonly_fields = (
@@ -198,6 +199,8 @@ class StudentExamAdmin(admin.ModelAdmin):
         "session_challenge",
         "proctor_official_warnings",
         "proctor_last_warning_at",
+        "proctor_engine_status",
+        "proctor_engine_reported_at",
     )
     fieldsets = (
         (None, {"fields": ("student", "exam", "status", "score")}),
@@ -236,6 +239,10 @@ class StudentExamAdmin(admin.ModelAdmin):
                     "session_challenge",
                     "proctor_official_warnings",
                     "proctor_last_warning_at",
+                    # "unavailable" = talabaning brauzerida real-time engine
+                    # yuklanmagan: nigoh/pozitsiya/qo'l/ob'ekt nazorati ishlamagan.
+                    "proctor_engine_status",
+                    "proctor_engine_reported_at",
                 ),
                 "classes": ("collapse",),
             },

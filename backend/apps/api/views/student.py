@@ -361,6 +361,47 @@ def student_proctor_config(request):
             "warn_suppress_seconds": warn_suppress_seconds(),
         }
     )
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def student_proctor_engine_status(request):
+    """Brauzerdagi real-time engine (MediaPipe) ishga tushdimi — klient xabari.
+
+    Bu QOIDABUZARLIK EMAS: talaba aybdor emas (tarmoq CDN'ni bloklagan, eski
+    qurilma, GPU yo'q). Lekin engine o'chiq bo'lsa nazoratning bir qismi
+    (nigoh/pozitsiya/qo'l/ob'ekt) ishlamaydi — ilgari buni faqat talabaning
+    brauzer konsoli bilardi. Endi holat sessiyada saqlanadi va admin ko'radi.
+    """
+    u = request.user
+    if not _is_student_user(u):
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
+
+    d = request.data or {}
+    try:
+        exam_id_int = int(d.get("exam_id"))
+    except (TypeError, ValueError):
+        return Response({"error": "Invalid exam_id"}, status=400)
+
+    status_raw = str(d.get("status") or "").strip().lower()
+    if status_raw not in ("ok", "unavailable"):
+        return Response({"error": "Invalid status"}, status=400)
+
+    se = StudentExam.objects.filter(student_id=u.id, exam_id=exam_id_int).first()
+    if not se or se.status != "In Progress":
+        return Response({"error": student_api_msg("no_active_session", resolve_ui_language(request))}, status=409)
+
+    mismatch = _enforce_bound_device_or_403(se, request)
+    if mismatch is not None:
+        return mismatch
+
+    StudentExam.objects.filter(pk=se.pk).update(
+        proctor_engine_status=status_raw,
+        proctor_engine_reported_at=dj_tz.now(),
+    )
+    return _exam_guarded_response(request, Response({"ok": True, "status": status_raw}))
+
+
 @api_view(["POST"])
 @permission_classes([IsAuthenticated])
 def student_exams_start(request, pk: int):
@@ -1107,6 +1148,12 @@ def student_violations(request):
     instant_ban_types = frozenset({"IDENTITY_SUBSTITUTION"}) if vac_strict_mode else frozenset()
     warn_types = frozenset(
         {
+            # Yuz almashtirish. Strict rejimda yuqoridagi `instant_ban_types` uni
+            # oldinroq ushlaydi (darhol ban), lekin VAC_STRICT_MODE=0 bo'lganda
+            # ham hodisa YOZILISHI va ogohlantirish berishi shart — aks holda eng
+            # jiddiy qoidabuzarlik 400 "Unknown violation_type" bilan jimgina
+            # yo'qolib ketardi (log yo'q, admin ko'rmaydi).
+            "IDENTITY_SUBSTITUTION",
             "TAB_SWITCH_HARD",
             "TAB_SWITCH_SOFT",
             "FULLSCREEN_EXIT_HARD",

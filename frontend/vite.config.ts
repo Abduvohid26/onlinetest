@@ -39,6 +39,12 @@ export default defineConfig(({ mode }) => {
               path: '/__vite_hmr',
             },
     },
+    // Proctoring inference worker'i (`src/lib/proctorWorker.ts`) MediaPipe'ni
+    // dinamik `import()` bilan yuklaydi — bu code-splitting talab qiladi, Vite'ning
+    // standart `iife` worker formati esa uni qo'llab-quvvatlamaydi.
+    worker: {
+      format: 'es' as const,
+    },
     build: {
       // Production build: console.* larni butunlay o'chirish (minifier darajasida)
       minify: 'terser',
