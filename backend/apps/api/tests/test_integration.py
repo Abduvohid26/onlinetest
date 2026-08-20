@@ -1438,6 +1438,59 @@ class ExamFlowApiTests(TestCase):
         )
 
 
+    def test_proctor_gaze_calibration_lost_is_recorded(self):
+        """Ekran o'zgarib nigoh xaritasi bekor bo'lgani yoziladi (jazo emas).
+
+        Kelishuv: talabaga hech narsa ko'rsatilmaydi va qayta o'lchash
+        so'ralmaydi — nazorat jimgina eski chegaralarga qaytadi. Lekin holat
+        serverda qolishi SHART, aks holda oyna o'lchamini ataylab o'zgartirib
+        nigoh nazoratini o'chirish butunlay ko'rinmas bo'lardi.
+        """
+        hp = bcrypt.hashpw(b"vstudent-gaze", bcrypt.gensalt(rounds=10)).decode("ascii")
+        st = AppUser.objects.create(
+            id="itest_student_gaze",
+            password=hp,
+            role="student",
+            name="Gaze Student",
+            status="Active",
+            group_id=self.group.id,
+            profile_image=PROFILE,
+        )
+        r0 = self.client.post(
+            "/api/auth/login",
+            {"id": "itest_student_gaze", "password": "vstudent-gaze"},
+            format="json",
+        )
+        self.assertEqual(r0.status_code, 200)
+        self._start_exam_session(r0.json()["token"], self.exam_a.id, st.id)
+
+        r = self.client.post(
+            "/api/student/proctor-engine-status",
+            {"exam_id": self.exam_a.id, "status": "ok", "gaze_calibration": "lost"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, 200)
+        se = StudentExam.objects.get(student_id=st.id, exam_id=self.exam_a.id)
+        self.assertEqual(se.proctor_gaze_status, "lost")
+        # Engine holati alohida maydon — aralashib ketmasligi kerak.
+        self.assertEqual(se.proctor_engine_status, "ok")
+
+        # Noma'lum qiymat rad etiladi va eski holat saqlanadi.
+        bad = self.client.post(
+            "/api/student/proctor-engine-status",
+            {"exam_id": self.exam_a.id, "status": "ok", "gaze_calibration": "disabled"},
+            format="json",
+        )
+        self.assertEqual(bad.status_code, 400)
+        se.refresh_from_db()
+        self.assertEqual(se.proctor_gaze_status, "lost")
+
+        # Bu qoidabuzarlik EMAS.
+        self.assertFalse(
+            ViolationLog.objects.filter(student_id=st.id, exam_id=self.exam_a.id).exists()
+        )
+
+
 class BankExamOptionsTests(TestCase):
   def test_bank_row_empty_uz_options_fallback(self):
     from apps.api.services import bank_row_to_exam_dict

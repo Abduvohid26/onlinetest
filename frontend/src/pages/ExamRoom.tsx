@@ -17,6 +17,12 @@ import { SileroVad } from '../lib/sileroVad';
 import { ForbiddenObjectProctor } from '../lib/forbiddenObjectProctor';
 import { GazeDebugPanel } from '../components/GazeDebugPanel';
 import type { GazeDebugInfo } from '../lib/realtimeProctor';
+import {
+  GazeSampleBuffer,
+  fitGazeModel,
+  type GazeFeature,
+  type GazeModel,
+} from '../lib/gazeMapping';
 import { analyzeVoiceFrame, AmbientNoiseTracker, VoiceActivityTracker } from '../lib/voiceActivity';
 import { ContinuousSignalTracker } from '../lib/continuousSignal';
 import { OwnSpeechGate } from '../lib/ownSpeechGate';
@@ -1262,6 +1268,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   /** Nigoh sozlash paneli — faqat VITE_GAZE_DEBUG=1 da. Talabaga ko'rinmaydi. */
   const gazeDebugEnabled = String((import.meta as any).env?.VITE_GAZE_DEBUG || '') === '1';
   const [gazeDebug, setGazeDebug] = useState<GazeDebugInfo | null>(null);
+  /**
+   * O'RGANILADIGAN NIGOH XARITASI.
+   *
+   * Talaba javob variantini bosganda u o'sha joyga qaragan bo'ladi — bosish
+   * koordinatasi va o'sha ondagi nigoh belgilari juftlashtiriladi. Yetarli
+   * namuna to'plangach xarita quriladi va qattiq chegaralar o'rniga ishlaydi.
+   * Talaba uchun qo'shimcha qadam yo'q.
+   */
+  const gazeFeatureRef = useRef<{ f: GazeFeature; at: number } | null>(null);
+  const gazeBufferRef = useRef(new GazeSampleBuffer());
+  const [gazeModel, setGazeModel] = useState<GazeModel | null>(null);
+  /** Ekran/oyna o'lchami — xarita shunga bog'liq, o'zgarsa yaroqsiz bo'ladi. */
+  const gazeGeometryRef = useRef<string>('');
+  /** Serverga bir xil holat qayta-qayta yuborilmasin. */
+  const gazeStatusSentRef = useRef<string | null>(null);
+
   const [realtimeEngineOk, setRealtimeEngineOk] = useState<boolean | null>(null);
   const [objectEngineOk, setObjectEngineOk] = useState<boolean | null>(null);
   
@@ -2354,6 +2376,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     disabled: banned || !sessionStarted,
     onReady: setRealtimeEngineOk,
     onDebug: gazeDebugEnabled ? setGazeDebug : undefined,
+    onGazeFeature: (f) => {
+      gazeFeatureRef.current = { f, at: Date.now() };
+    },
+    gazeModel,
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
       formalIssuedFor(type);
@@ -2403,6 +2429,99 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       showSmallWarnRef.current(`v:${type}`, violationType, label);
     },
   });
+
+  /** Joriy ekran geometriyasi — xarita shu o'lchamda o'rganilgan. */
+  const gazeGeometry = useCallback(
+    () => `${window.innerWidth}x${window.innerHeight}@${window.devicePixelRatio || 1}`,
+    [],
+  );
+
+  /**
+   * Nigoh xaritasini bekor qiladi va serverga xabar beradi.
+   *
+   * Kelishuv bo'yicha talabaga HECH NARSA ko'rsatilmaydi va qayta o'lchash
+   * so'ralmaydi — nazorat jimgina eski chegaralarga qaytadi. Lekin holat
+   * serverga yoziladi: aks holda oyna o'lchamini ataylab o'zgartirib nigoh
+   * nazoratini o'chirib qo'yish butunlay ko'rinmas bo'lib qolardi.
+   */
+  const invalidateGazeModel = useCallback(
+    (reason: 'lost' | 'ok') => {
+      gazeBufferRef.current.clear();
+      setGazeModel(null);
+      if (gazeStatusSentRef.current === reason) return;
+      gazeStatusSentRef.current = reason;
+      void (async () => {
+        const path = '/api/student/proctor-engine-status';
+        try {
+          await fetch(apiUrl(path), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(await nextGuardHeaders('POST', path)),
+            },
+            body: JSON.stringify({
+              exam_id: exam.id,
+              status: realtimeEngineOk === false ? 'unavailable' : 'ok',
+              gaze_calibration: reason,
+            }),
+          });
+        } catch {
+          gazeStatusSentRef.current = null;
+        }
+      })();
+    },
+    [exam.id, nextGuardHeaders, realtimeEngineOk],
+  );
+
+  // Bosishlardan namuna yig'ish. Har bir handler'ga tegmaymiz — bitta global
+  // tinglovchi ancha ko'p namuna beradi (javob variantlari, navigatsiya,
+  // tugmalar) va kod bir joyda qoladi.
+  useEffect(() => {
+    if (banned || !sessionStarted) return;
+    gazeGeometryRef.current = gazeGeometry();
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (bannedRef.current || !sessionStartedRef.current) return;
+      // Klaviatura orqali "bosish" koordinatasiz keladi — namuna emas.
+      if (e.clientX === 0 && e.clientY === 0) return;
+      const snap = gazeFeatureRef.current;
+      // Eskirgan belgi (kamera to'xtagan/kadr kelmagan) juftlashtirilmaydi.
+      if (!snap || Date.now() - snap.at > 500) return;
+
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (w < 2 || h < 2) return;
+      const sx = e.clientX / w;
+      const sy = e.clientY / h;
+      if (sx < 0 || sx > 1 || sy < 0 || sy > 1) return;
+
+      gazeBufferRef.current.push({ f: snap.f, sx, sy });
+      const res = fitGazeModel(gazeBufferRef.current.all());
+      // Model qurilmasa `null` — eski qattiq chegaralar ishlaydi.
+      setGazeModel(res.ok ? res.model : null);
+      if (res.ok) {
+        gazeStatusSentRef.current = null; // yana "lost" bo'lsa qayta xabar bersin
+      }
+    };
+
+    // Ekran/oyna o'zgarsa xarita yaroqsiz: o'rganilgan koordinatalar boshqa
+    // o'lchamga tegishli edi.
+    const onGeometryChange = () => {
+      const now = gazeGeometry();
+      if (now === gazeGeometryRef.current) return;
+      gazeGeometryRef.current = now;
+      invalidateGazeModel('lost');
+    };
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('resize', onGeometryChange);
+    document.addEventListener('fullscreenchange', onGeometryChange);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('resize', onGeometryChange);
+      document.removeEventListener('fullscreenchange', onGeometryChange);
+    };
+  }, [banned, sessionStarted, gazeGeometry, invalidateGazeModel]);
 
   /**
    * Engine holati serverga — talaba aybdor emas, shuning uchun bu QOIDABUZARLIK

@@ -184,8 +184,9 @@ class StudentExamAdmin(admin.ModelAdmin):
         "result_public_id",
         "draft_updated_at",
         "proctor_engine_status",
+        "proctor_gaze_status",
     )
-    list_filter = ("status", "proctor_engine_status")
+    list_filter = ("status", "proctor_engine_status", "proctor_gaze_status")
     search_fields = ("student__id", "exam__title", "result_public_id")
     raw_id_fields = ("student", "exam")
     readonly_fields = (
@@ -201,6 +202,7 @@ class StudentExamAdmin(admin.ModelAdmin):
         "proctor_last_warning_at",
         "proctor_engine_status",
         "proctor_engine_reported_at",
+        "proctor_gaze_status",
     )
     fieldsets = (
         (None, {"fields": ("student", "exam", "status", "score")}),
@@ -243,6 +245,8 @@ class StudentExamAdmin(admin.ModelAdmin):
                     # yuklanmagan: nigoh/pozitsiya/qo'l/ob'ekt nazorati ishlamagan.
                     "proctor_engine_status",
                     "proctor_engine_reported_at",
+                    # "lost" = ekran o'zgargani uchun o'rganilgan nigoh xaritasi bekor bo'ldi.
+                    "proctor_gaze_status",
                 ),
                 "classes": ("collapse",),
             },

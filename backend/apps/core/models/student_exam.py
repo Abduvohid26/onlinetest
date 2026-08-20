@@ -43,6 +43,12 @@ class StudentExam(models.Model):
     #: kim bilmasdi — endi klient bu holatni xabar qiladi, admin ko'ra oladi.
     proctor_engine_status = models.CharField(max_length=16, blank=True, default="")
     proctor_engine_reported_at = models.DateTimeField(null=True, blank=True)
+    #: O'rganiladigan nigoh xaritasi holati: "" (xabar yo'q) | "ok" | "lost".
+    #: "lost" = imtihon o'rtasida ekran/oyna o'lchami o'zgargani uchun xarita
+    #: bekor qilindi va nigoh nazorati eski (kuchsizroq) chegaralarga qaytdi.
+    #: Talabaga ko'rinmaydi; ataylab qayta-qayta o'lchamni o'zgartirish shu
+    #: yerda ko'rinib qoladi.
+    proctor_gaze_status = models.CharField(max_length=16, blank=True, default="")
     technical_retakes_used = models.PositiveSmallIntegerField(default=0)
     bonus_technical_retakes = models.PositiveSmallIntegerField(default=0)
     identity_retakes_used = models.PositiveSmallIntegerField(default=0)

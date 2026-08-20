@@ -70,10 +70,12 @@ export function GazeDebugPanel({ info }: { info: GazeDebugInfo | null }) {
         <line x1={xRight} y1={0} x2={xRight} y2={SIZE} stroke="#38bdf8" strokeDasharray="3 2" />
         <line x1={0} y1={yDown} x2={SIZE} y2={yDown} stroke="#38bdf8" strokeDasharray="3 2" />
 
-        {/* TEPA chegarasi yo'q — teshik ko'rinib tursin */}
-        <text x={4} y={12} fill="#f87171" fontSize="9">
-          tepa chegarasi YO'Q
-        </text>
+        {/* Model yo'q ekan — tepa chegarasi ham yo'q (eski qattiq chegaralar). */}
+        {!info.model && (
+          <text x={4} y={12} fill="#f87171" fontSize="9">
+            tepa chegarasi YO'Q
+          </text>
+        )}
 
         {dotX !== null && dotY !== null ? (
           <circle cx={dotX} cy={dotY} r={4} fill={anyActive ? '#fbbf24' : '#4ade80'} />
@@ -93,6 +95,67 @@ export function GazeDebugPanel({ info }: { info: GazeDebugInfo | null }) {
         <Row label="pitch" value={fmt(head.pitch)} warn={active.up} />
         <Row label="masofa (yuz h)" value={fmt(info.faceHeight)} />
       </div>
+
+      {/* O'rganilgan xarita: ekran to'rtburchagi va bashorat nuqtasi. */}
+      {info.model && (
+        <div className="pt-1 border-t border-slate-700 space-y-1">
+          <div className="text-slate-300">
+            xarita: {info.model.samples} namuna
+          </div>
+          <svg width={SIZE} height={SIZE} className="bg-slate-950 rounded mx-auto block">
+            {(() => {
+              const mx = info.model!.marginX;
+              const my = info.model!.marginY;
+              // Ko'rish maydoni: ekran (0..1) + har tomondan oraliq.
+              const lo = -Math.max(mx, my) - 0.15;
+              const hi = 1 + Math.max(mx, my) + 0.15;
+              const p = (v: number) => ((v - lo) / (hi - lo)) * SIZE;
+              const px = p(info.model!.sx);
+              const py = p(info.model!.sy);
+              const inside =
+                info.model!.sx >= -mx &&
+                info.model!.sx <= 1 + mx &&
+                info.model!.sy >= -my &&
+                info.model!.sy <= 1 + my;
+              return (
+                <>
+                  {/* Oraliq bilan kengaytirilgan ruxsat sohasi */}
+                  <rect
+                    x={p(-mx)}
+                    y={p(-my)}
+                    width={p(1 + mx) - p(-mx)}
+                    height={p(1 + my) - p(-my)}
+                    fill="none"
+                    stroke="#38bdf8"
+                    strokeDasharray="3 2"
+                  />
+                  {/* Haqiqiy ekran */}
+                  <rect
+                    x={p(0)}
+                    y={p(0)}
+                    width={p(1) - p(0)}
+                    height={p(1) - p(0)}
+                    fill="#0f172a"
+                    stroke="#475569"
+                  />
+                  <text x={p(0) + 3} y={p(0) + 10} fill="#475569" fontSize="8">
+                    ekran
+                  </text>
+                  <circle cx={px} cy={py} r={4} fill={inside ? '#4ade80' : '#f87171'} />
+                </>
+              );
+            })()}
+          </svg>
+          <Row
+            label="bashorat"
+            value={`${info.model.sx.toFixed(2)}, ${info.model.sy.toFixed(2)}`}
+          />
+          <Row
+            label="oraliq"
+            value={`${info.model.marginX.toFixed(2)} / ${info.model.marginY.toFixed(2)}`}
+          />
+        </div>
+      )}
 
       <div className="pt-1 border-t border-slate-700 space-y-0.5">
         <Row label="tepa" value={`${active.up ? '●' : '·'} ${Math.round(ms.up)}ms`} warn={active.up} />

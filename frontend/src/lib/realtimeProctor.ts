@@ -15,6 +15,7 @@
  */
 import { mediapipeAssetSources } from './mediapipeAssets';
 import { ProctorWorkerClient } from './proctorWorkerClient';
+import { classifyGaze, gazeMargins, type GazeFeature, type GazeModel } from './gazeMapping';
 
 export type RealtimeViolation =
   | 'FACE_NOT_VISIBLE'
@@ -294,6 +295,8 @@ export interface GazeDebugInfo {
   active: { up: boolean; down: boolean; left: boolean; right: boolean; turn: boolean };
   /** Har yo'nalish bo'yicha uzluksiz davomiylik (ms) — eskalatsiya holati. */
   ms: { up: number; down: number; left: number; right: number; turn: number };
+  /** O'rganilgan model bashorati (bo'lsa): ekran nuqtasi 0..1 va oraliq. */
+  model: { sx: number; sy: number; marginX: number; marginY: number; samples: number } | null;
 }
 
 export interface RealtimeProctorCallbacks {
@@ -316,6 +319,12 @@ export interface RealtimeProctorCallbacks {
   onStatus?: (msg: string) => void;
   /** Sozlash uchun xom o'lchovlar (VITE_GAZE_DEBUG). Prod'da berilmaydi. */
   onDebug?: (info: GazeDebugInfo) => void;
+  /**
+   * Har kadrdagi nigoh belgilari (iris o'qilgan bo'lsa). `ExamRoom` shuni
+   * saqlab turadi va talaba javob bosganda bosish koordinatasi bilan
+   * juftlashtiradi — o'rganiladigan xarita namunasi shunday yig'iladi.
+   */
+  onGazeFeature?: (f: GazeFeature) => void;
 }
 
 interface FaceLandmark {
@@ -368,6 +377,13 @@ export class RealtimeProctor {
    *  Nigoh ("pastga qaradi") nazorati shunga NISBATAN ishlaydi — mutlaq
    *  chegara odamlar orasida soxta ogohlantirish berardi. */
   private eyeBaseline: number | null = null;
+
+  /**
+   * O'rganilgan nigoh xaritasi. `null` bo'lsa (hali yetarli namuna yo'q, yoki
+   * ekran o'zgarib bekor qilingan) eski qattiq chegaralar ishlaydi — nazorat
+   * hech qachon model yo'qligi sababli o'chmaydi.
+   */
+  private gazeModel: GazeModel | null = null;
 
   /** Inference worker'i (bo'lsa). `null` — asosiy oqim yo'li (zaxira). */
   private workerClient: ProctorWorkerClient | null = null;
@@ -451,6 +467,11 @@ export class RealtimeProctor {
     this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
     this.cb.onReady?.(false);
     return false;
+  }
+
+  /** O'rganilgan xaritani o'rnatadi/bekor qiladi (`null` = eski chegaralarga qaytish). */
+  setGazeModel(model: GazeModel | null): void {
+    this.gazeModel = model;
   }
 
   start(): void {
@@ -781,17 +802,41 @@ export class RealtimeProctor {
     const eyesNarrow = eyesTooNarrowForGaze(lm, this.eyeBaseline);
     const irisDown = (iris != null && iris.dy >= IRIS_GAZE_DOWN) || eyesNarrow;
 
+    // Namuna yig'ish uchun belgilarni tashqariga beramiz (iris o'qilganda).
+    const feature: GazeFeature | null =
+      iris != null ? { dx: iris.dx, dy: iris.dy, yaw: noseRelX, pitch: noseRelY } : null;
+    if (feature) this.cb.onGazeFeature?.(feature);
+
+    // O'RGANILGAN XARITA (bo'lsa) qattiq chegaralarning O'RNIGA ishlaydi.
+    // Bosh kuchli burilgan bo'lsa model ishlatilmaydi: bunday poza o'quv
+    // namunalaridan uzoq (talaba bosayotganda ekranga qaragan bo'ladi), ya'ni
+    // bashorat ekstrapolyatsiya bo'lib ishonchsiz. U holatni FACE_TURNED_AWAY
+    // allaqachon qoplaydi.
+    const verdict =
+      this.gazeModel && feature && absYaw < YAW_HARD
+        ? classifyGaze(this.gazeModel, feature)
+        : null;
+
     const headGazeL = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX >= 0;
     const headGazeR = absYaw >= YAW_TURN && absYaw < YAW_HARD && noseRelX < 0;
-    const gazeLActive = (headGazeL || irisLeft) && absYaw < YAW_HARD;
-    const gazeRActive = (headGazeR || irisRight) && absYaw < YAW_HARD;
+    const gazeLActive = verdict
+      ? verdict.side === 'LEFT_OF'
+      : (headGazeL || irisLeft) && absYaw < YAW_HARD;
+    const gazeRActive = verdict
+      ? verdict.side === 'RIGHT_OF'
+      : (headGazeR || irisRight) && absYaw < YAW_HARD;
     const gazeLMs = this.trackContinuous('gazeL', gazeLActive);
     const gazeRMs = this.trackContinuous('gazeR', gazeRActive);
     if (gazeLMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_LEFT');
     if (gazeRMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_RIGHT');
 
-    const gazeUpActive = noseRelY <= PITCH_UP;
-    const gazeDownActive = noseRelY >= PITCH_DOWN || irisDown;
+    const gazeUpActive = verdict ? verdict.side === 'ABOVE' : noseRelY <= PITCH_UP;
+    // MUHIM: `eyesNarrow` model yo'lida ham saqlanadi. Talaba pastga qaraganda
+    // qovoq tushadi, iris umuman o'qilmaydi va model hech narsa deya olmaydi —
+    // shu holat aynan tizzadagi telefonga qarash edi. Uni yo'qotib bo'lmaydi.
+    const gazeDownActive = verdict
+      ? verdict.side === 'BELOW' || eyesNarrow
+      : noseRelY >= PITCH_DOWN || irisDown;
     const gazeUpMs = this.trackContinuous('gazeUp', gazeUpActive);
     const gazeDownMs = this.trackContinuous('gazeDown', gazeDownActive);
     if (gazeUpMs >= LIVE_SIGNAL_ESCALATE_MS) this.emit('GAZE_AWAY_UP');
@@ -829,6 +874,16 @@ export class RealtimeProctor {
           right: gazeRMs,
           turn: turnMs,
         },
+        model:
+          this.gazeModel && verdict
+            ? {
+                sx: verdict.sx,
+                sy: verdict.sy,
+                marginX: gazeMargins(this.gazeModel).x,
+                marginY: gazeMargins(this.gazeModel).y,
+                samples: this.gazeModel.samples,
+              }
+            : null,
       });
     }
 

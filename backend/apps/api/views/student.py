@@ -387,6 +387,13 @@ def student_proctor_engine_status(request):
     if status_raw not in ("ok", "unavailable"):
         return Response({"error": "Invalid status"}, status=400)
 
+    # Ixtiyoriy: o'rganiladigan nigoh xaritasi holati. Bu ham qoidabuzarlik emas —
+    # ekran o'lchami o'zgarsa xarita yaroqsiz bo'ladi va nazorat eski chegaralarga
+    # qaytadi. Talabaga bildirilmaydi, lekin admin ko'rishi kerak.
+    gaze_raw = str(d.get("gaze_calibration") or "").strip().lower()
+    if gaze_raw and gaze_raw not in ("ok", "lost"):
+        return Response({"error": "Invalid gaze_calibration"}, status=400)
+
     se = StudentExam.objects.filter(student_id=u.id, exam_id=exam_id_int).first()
     if not se or se.status != "In Progress":
         return Response({"error": student_api_msg("no_active_session", resolve_ui_language(request))}, status=409)
@@ -395,11 +402,16 @@ def student_proctor_engine_status(request):
     if mismatch is not None:
         return mismatch
 
-    StudentExam.objects.filter(pk=se.pk).update(
-        proctor_engine_status=status_raw,
-        proctor_engine_reported_at=dj_tz.now(),
+    fields = {
+        "proctor_engine_status": status_raw,
+        "proctor_engine_reported_at": dj_tz.now(),
+    }
+    if gaze_raw:
+        fields["proctor_gaze_status"] = gaze_raw
+    StudentExam.objects.filter(pk=se.pk).update(**fields)
+    return _exam_guarded_response(
+        request, Response({"ok": True, "status": status_raw, "gazeCalibration": gaze_raw or None})
     )
-    return _exam_guarded_response(request, Response({"ok": True, "status": status_raw}))
 
 
 @api_view(["POST"])
