@@ -39,7 +39,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string; engineLoading: string; engineReady: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -67,6 +67,8 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     livePhone: "Telefon aniqlandi — telefon ishlatmang",
     liveBook: "Kitob/daftar aniqlandi — olib qo'ying",
     liveLaptop: "Noutbuk aniqlandi — olib qo'ying",
+    engineLoading: "Nazorat tizimi yuklanmoqda",
+    engineReady: "Nazorat tizimi tayyor",
   },
   ru: {
     answered: 'Отвечено',
@@ -95,6 +97,8 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     livePhone: 'Обнаружен телефон — не пользуйтесь телефоном',
     liveBook: 'Обнаружена книга/тетрадь — уберите',
     liveLaptop: 'Обнаружен ноутбук — уберите',
+    engineLoading: 'Система наблюдения загружается',
+    engineReady: 'Система наблюдения готова',
   },
   en: {
     answered: 'Answered',
@@ -123,6 +127,8 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     livePhone: 'Phone detected — do not use a phone',
     liveBook: 'Book/notebook detected — put it away',
     liveLaptop: 'Laptop detected — put it away',
+    engineLoading: 'Monitoring system loading',
+    engineReady: 'Monitoring system ready',
   },
 };
 
@@ -572,7 +578,22 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     return () => window.clearTimeout(id);
   }, [sessionStarted, banned, startMediaGateDone, proctorMediaReady]);
 
-  const questionsUnlocked = proctorMediaReady || (startMediaGateDone && !mediaLostSustained);
+  /**
+   * Real-time engine (MediaPipe) yuklandimi. `onReady` dan keladi.
+   * Imtihon SHU tayyor bo'lmaguncha ochilmaydi — aks holda talaba nazoratsiz
+   * javob bera boshlardi va buni hech kim sezmasdi.
+   */
+  const [realtimeEngineReady, setRealtimeEngineReady] = useState(false);
+
+  /** Engine talab qilinsinmi. Xavfsizlik klapani: `VITE_REQUIRE_REALTIME_ENGINE=0`
+   *  bo'lsa eski xulq (engine kutilmaydi) — engine hech qachon yuklanmaydigan
+   *  qurilma imtihonni butunlay bloklab qo'ymasin. Default: TALAB QILINADI. */
+  const requireRealtimeEngine =
+    String((import.meta as any).env?.VITE_REQUIRE_REALTIME_ENGINE || '') !== '0';
+  const engineRequirementMet = !requireRealtimeEngine || realtimeEngineReady;
+
+  const questionsUnlocked =
+    engineRequirementMet && (proctorMediaReady || (startMediaGateDone && !mediaLostSustained));
   const showExamMediaGate = Boolean(sessionStarted && !banned && !questionsUnlocked);
 
   useEffect(() => {
@@ -934,6 +955,23 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const needsFullscreenRef = useRef(false);
   /** Bloklovchi qoplama ko'rsatilsinmi (render uchun). */
   const [needsFullscreen, setNeedsFullscreen] = useState(false);
+
+  /**
+   * Nazorat MOTORLARI ishga tushishi mumkinmi.
+   *
+   * `!needsFullscreen` SHART: ilgari motorlar sessiya boshlanishi bilan
+   * ishga tushardi va talaba hali to'liq ekranga o'tmagan bo'lsa ham ovoz/nigoh
+   * ogohlantirishlari to'liq-ekran qoplamasi USTIGA chiqib kelardi. Endi
+   * nazorat faqat talaba haqiqatan to'liq ekranga o'tgach boshlanadi.
+   */
+  const proctorEnginesArmed = Boolean(
+    sessionStarted && !banned && !needsFullscreen && proctorMediaReady,
+  );
+
+
+  /** Imtihon HAQIQATAN boshlandi: fullscreen'da, media tayyor, engine yuklangan. */
+  const examArmed = Boolean(proctorEnginesArmed && engineRequirementMet);
+
   /** Bu sessiyada fullscreen'ga kamida bir marta kirilganmi — qoplama matnini
    *  tanlaydi (birinchi kirish "boshlash", keyingilari "qayting"). */
   const [fullscreenEverEntered, setFullscreenEverEntered] = useState(false);
@@ -1915,7 +1953,10 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [audioLiveLabel, setAudioLiveLabel] = useState<string | null>(null);
 
   useEffect(() => {
-    if (banned || !sessionStarted) return;
+    // `examArmed`: fullscreen'da + media tayyor + engine yuklangan. Ilgari bu
+    // sikl sessiya boshlanishi bilan ishlardi va ovoz ogohlantirishlari
+    // to'liq-ekran qoplamasi ustiga chiqib kelardi.
+    if (!examArmed) return;
     // analyserRef dependency sifatida ishlamaydi — micReady state orqali qayta ulanamiz.
     if (!micReady) return;
     const analyser = analyserRef.current;
@@ -2020,7 +2061,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
     }, 200);
     return () => clearInterval(id);
-  }, [banned, micReady, sessionStarted]);
+  }, [examArmed, micReady]);
 
   // Mikrofon o'chgan yoki tahlil yo'q — gapirish nazorati ishlamaydi. Davomiy holat
   // (mikrofon tuzatilmaguncha davom etadi) — qonun bo'yicha uzluksiz kuzatiladi,
@@ -2028,7 +2069,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // so'ng yana to'liq muddatdan keyin qayta yuboriladi (tinimsiz spam bo'lmasin).
   const micDownContinuousRef = useRef<ContinuousSignalTracker | null>(null);
   useEffect(() => {
-    if (banned || !sessionStarted) return;
+    if (!examArmed) return;
     const graceUntil = Date.now() + 12_000;
     if (!micDownContinuousRef.current) micDownContinuousRef.current = new ContinuousSignalTracker(1000);
     const id = window.setInterval(() => {
@@ -2055,7 +2096,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   // Qonun (README.md): har bir tur uchun 1.5s uzluksiz → kamera panelida kichik yorliq,
   // 4s → rasmiy (logViolation), so'ng reset (tinimsiz takrorlanmasin).
   useEffect(() => {
-    if (banned || !sessionStarted) return;
+    if (!examArmed) return;
     if (!eventGateRef.current) {
       eventGateRef.current = new ViolationGate(LIVE_SIGNAL_CONFIRM_MS, LIVE_SIGNAL_ESCALATE_MS);
     }
@@ -2110,7 +2151,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       }
     }, 250);
     return () => clearInterval(id);
-  }, [banned, sessionStarted]);
+  }, [examArmed]);
 
   const [identityTerminated, setIdentityTerminated] = useState(false);
 
@@ -2330,7 +2371,8 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
 
   // --- Taqiqlangan ob'ektlar (telefon/kitob/noutbuk) — brauzer MediaPipe ObjectDetector ---
   useEffect(() => {
-    if (banned || !sessionStarted) return;
+    // Motor: fullscreen + media yetarli (o'zi ham engine, tayyorligini kutmaydi).
+    if (!proctorEnginesArmed) return;
     const video = videoRef.current;
     if (!video) return;
 
@@ -2379,7 +2421,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       if (objectProctorRef.current === proctor) objectProctorRef.current = null;
       setObjectLiveLabel(null);
     };
-  }, [banned, sessionStarted, proctorStreamRevision]);
+  }, [proctorEnginesArmed, proctorStreamRevision]);
 
   // --- Server-side kadr tahlili (har 15s): yuz + telefon/kitob/noutbuk (Vision) ---
   useServerProctoring({
@@ -2390,9 +2432,9 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       for (const t of types) void logViolationRef.current(t);
     },
     intervalMs: 15_000,
-    // Sessiya boshlanmagan (lobbi) — nazorat yo'q: savol ko'rinmayotgan paytda
+    // Savol ko'rinmayotgan paytda (lobbi, to'liq-ekran kutuvi, engine yuklanishi)
     // ogohlantirish/strike berilmasligi kerak.
-    disabled: banned || !sessionStarted,
+    disabled: !examArmed,
   });
 
   // --- Real-time brauzer proctoring (MediaPipe): gaze/bosh burilishi, qimirlash,
@@ -2414,8 +2456,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     videoRef,
     streamRevision: proctorStreamRevision,
     eyeBaseline,
-    disabled: banned || !sessionStarted,
-    onReady: (ok, detail) => void reportProctorDiag('realtime-proctor', ok, detail),
+    // Motor: fullscreen + media yetarli. Uning tayyorligi `examArmed` ni ochadi.
+    disabled: !proctorEnginesArmed,
+    onReady: (ok, detail) => {
+      setRealtimeEngineReady(ok);
+      void reportProctorDiag('realtime-proctor', ok, detail);
+    },
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
       formalIssuedFor(type);
@@ -3438,6 +3484,14 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                           <span className={`w-1.5 h-1.5 rounded-full ${micReady ? 'bg-emerald-500' : 'bg-gray-400 animate-pulse'}`} />
                           {micReady ? t.preExamMicActive : t.preExamMicInactive}
                         </span>
+                        {/* Nazorat tizimi (MediaPipe) — imtihon shu tayyor bo'lguncha
+                            ochilmaydi. Talaba nima kutilayotganini ko'rib tursin. */}
+                        {requireRealtimeEngine && (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${realtimeEngineReady ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${realtimeEngineReady ? 'bg-emerald-500' : 'bg-gray-400 animate-pulse'}`} />
+                            {realtimeEngineReady ? EXAM_L[lang].engineReady : EXAM_L[lang].engineLoading}
+                          </span>
+                        )}
                       </div>
                     </div>
                     {/* Kamera darrov barqarorlashmasa — talaba kutib qolmasin. */}
