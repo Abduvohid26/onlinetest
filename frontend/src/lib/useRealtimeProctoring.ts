@@ -20,7 +20,8 @@ interface UseRealtimeProctoringOpts {
   /** Imtihon oldi tekshiruvida o'lchangan tabiiy ko'z ochiqligi (nisbiy nigoh nazorati). */
   eyeBaseline?: number | null;
   disabled?: boolean;
-  onReady?: (ok: boolean) => void;
+  /** Engine holati (+ yiqilgan bo'lsa sabab) — server logiga yuborish uchun. */
+  onReady?: (ok: boolean, detail?: string) => void;
 }
 
 /**

@@ -638,6 +638,37 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   );
 
   /**
+   * Brauzerdagi proctoring engine holatini SERVER LOGIGA yuboradi.
+   *
+   * Nega kerak: engine yiqilsa xato faqat talaba brauzerining konsolida qolardi,
+   * ustiga production build `console.warn/info` ni butunlay olib tashlaydi
+   * (`vite.config.ts` `pure_funcs`) — ya'ni sabab hech qayerda ko'rinmasdi.
+   * Endi u `docker compose logs` da chiqadi: [PROCTOR-DIAG].
+   *
+   * Yuborish o'zi hech qachon imtihonni buzmasin — xatolari yutiladi.
+   */
+  const sentDiagRef = useRef(new Set<string>());
+  const reportProctorDiag = useCallback(
+    async (stage: string, ok: boolean, detail?: string) => {
+      const key = `${stage}:${ok}:${detail || ''}`;
+      if (sentDiagRef.current.has(key)) return; // takror yubormaymiz
+      sentDiagRef.current.add(key);
+      const path = '/api/student/proctor-diagnostics';
+      try {
+        await fetch(apiUrl(path), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(await nextGuardHeaders('POST', path)) },
+          body: JSON.stringify({ stage, ok, detail: detail || '', exam_id: exam.id }),
+        });
+      } catch {
+        /* diagnostika imtihonga xalaqit bermasin */
+      }
+    },
+    [nextGuardHeaders, exam.id],
+  );
+
+
+  /**
    * Barcha VAC-imzoli imtihon so'rovlari SHU navbat orqali serializatsiya qilinadi.
    * Server bitta monoton `session_request_seq`ni talab qiladi (prod'da VAC_SEQ_GUARD
    * default yoqilgan) — parallel timerlar (identity 3s, proctor 20s, autosave, clock,
@@ -2314,6 +2345,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     objectProctorRef.current = proctor;
 
     void proctor.init().then((ok) => {
+      void reportProctorDiag('object-proctor', ok);
       if (cancelled || !ok) return;
       proctor.start();
     });
@@ -2360,6 +2392,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     streamRevision: proctorStreamRevision,
     eyeBaseline,
     disabled: banned || !sessionStarted,
+    onReady: (ok, detail) => void reportProctorDiag('realtime-proctor', ok, detail),
     onViolation: (type) => {
       // Uzluksiz eskalatsiya bo'yicha rasmiy berildi — shu tur hisobi nolga qaytadi.
       formalIssuedFor(type);

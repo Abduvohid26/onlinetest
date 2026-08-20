@@ -1345,6 +1345,64 @@ class ExamFlowApiTests(TestCase):
         self.assertIsNotNone(se.completed_at)
 
 
+    def test_proctor_diagnostics_logs_engine_failure(self):
+        """Brauzerdagi engine yiqilsa sabab SERVER LOGIGA tushadi.
+
+        Bu qoidabuzarlik emas va bazaga hech narsa yozmaydi — maqsad faqat
+        nosozlikni ko'rinadigan qilish. Ilgari sabab talaba brauzerining
+        konsolida qolar, prod build esa `console.*` ni olib tashlagani uchun
+        hech qayerda ko'rinmasdi.
+        """
+        hp = bcrypt.hashpw(b"vstudent-diag", bcrypt.gensalt(rounds=10)).decode("ascii")
+        st = AppUser.objects.create(
+            id="itest_student_diag",
+            password=hp,
+            role="student",
+            name="Diag Student",
+            status="Active",
+            group_id=self.group.id,
+            profile_image=PROFILE,
+        )
+        r0 = self.client.post(
+            "/api/auth/login",
+            {"id": "itest_student_diag", "password": "vstudent-diag"},
+            format="json",
+        )
+        self.assertEqual(r0.status_code, 200)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {r0.json()['token']}")
+
+        with self.assertLogs("apps.api", level="ERROR") as cm:
+            r = self.client.post(
+                "/api/student/proctor-diagnostics",
+                {
+                    "stage": "realtime-proctor",
+                    "ok": False,
+                    "detail": "GPU delegate yaratilmadi",
+                    "exam_id": self.exam_a.id,
+                },
+                format="json",
+            )
+        self.assertEqual(r.status_code, 200)
+        logged = "\n".join(cm.output)
+        self.assertIn("[PROCTOR-DIAG]", logged)
+        self.assertIn("realtime-proctor", logged)
+        self.assertIn("GPU delegate yaratilmadi", logged)
+        self.assertIn(st.id, logged)
+
+        # Muvaffaqiyat holati — INFO darajasida, xato emas.
+        with self.assertLogs("apps.api", level="INFO") as cm2:
+            ok_res = self.client.post(
+                "/api/student/proctor-diagnostics",
+                {"stage": "realtime-proctor", "ok": True, "exam_id": self.exam_a.id},
+                format="json",
+            )
+        self.assertEqual(ok_res.status_code, 200)
+        self.assertIn("ok=True", "\n".join(cm2.output))
+
+        # Hech qanday qoidabuzarlik yozilmasligi SHART.
+        self.assertFalse(ViolationLog.objects.filter(student_id=st.id).exists())
+
+
 class BankExamOptionsTests(TestCase):
   def test_bank_row_empty_uz_options_fallback(self):
     from apps.api.services import bank_row_to_exam_dict

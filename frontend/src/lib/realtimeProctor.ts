@@ -286,7 +286,10 @@ export interface RealtimeProctorCallbacks {
   /** Hozir "kichik ogohlantirish" bosqichidagi BARCHA signallar (chipsizlari ham).
    *  `SmallWarningLedger` shular asosida "3 kichik → 4-si rasmiy" qonunini qo'llaydi. */
   onSmallWarningStage?: (types: LiveSignalType[]) => void;
-  onReady?: (ok: boolean) => void;
+  /** Engine ishga tushdimi. `detail` — yiqilgan bo'lsa xato matni (server logiga
+   *  yuboriladi: prod build `console.*` ni olib tashlaydi, ya'ni sabab boshqa
+   *  hech qayerda ko'rinmaydi). */
+  onReady?: (ok: boolean, detail?: string) => void;
   onStatus?: (msg: string) => void;
 }
 
@@ -387,7 +390,7 @@ export class RealtimeProctor {
       return true;
     } catch (err) {
       this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
-      this.cb.onReady?.(false);
+      this.cb.onReady?.(false, String((err as Error)?.message || err).slice(0, 500));
       return false;
     }
   }

@@ -350,6 +350,48 @@ def student_exams_list(request):
     return Response(out)
 
 
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def student_proctor_diagnostics(request):
+    """Brauzerdagi proctoring engine holatini SERVER LOGIGA yozadi.
+
+    NEGA KERAK: real-time engine (MediaPipe) talaba brauzerida yiqilsa, xato
+    faqat o'sha brauzer konsolida qolardi — va production build `console.warn`
+    ni butunlay olib tashlaydi (`vite.config.ts` `pure_funcs`), ya'ni xato
+    hech qayerda ko'rinmasdi. Natijada nazorat jimgina o'chib turishi mumkin
+    edi va buni hech kim bilmasdi.
+
+    Endi klient sababni shu yerga yuboradi va u `docker compose logs` da
+    ko'rinadi. Qidirish uchun: [PROCTOR-DIAG].
+
+    DIQQAT: bu QOIDABUZARLIK EMAS va bazaga hech narsa yozmaydi — faqat log.
+    Talaba aybdor emas (eski qurilma, GPU yo'q, tarmoq CDN'ni bloklagan).
+    """
+    u = request.user
+    if not _is_student_user(u):
+        return Response({"error": student_api_msg("forbidden", resolve_ui_language(request))}, status=403)
+
+    d = request.data or {}
+    stage = str(d.get("stage") or "")[:40]
+    ok = bool(d.get("ok"))
+    detail = str(d.get("detail") or "")[:600]
+    exam_id = str(d.get("exam_id") or "")[:20]
+
+    line = (
+        f"[PROCTOR-DIAG] student={getattr(u, 'id', '?')} exam={exam_id or '-'} "
+        f"stage={stage or '-'} ok={ok} detail={detail or '-'}"
+    )
+    # Yiqilish `error` darajasida — prod log filtrlarida ham ko'rinsin.
+    if ok:
+        logger.info(line)
+    else:
+        logger.error(line)
+    # Konteyner stdout'iga ham (gunicorn/uvicorn logger sozlamalaridan qat'i nazar).
+    print(line, flush=True)
+
+    return Response({"ok": True})
+
+
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def student_proctor_config(request):

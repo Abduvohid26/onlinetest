@@ -17,6 +17,7 @@ urlpatterns = [
     path("student/exams/<int:pk>/save-progress", views.student_exam_save_progress),
     path("student/exams/<int:pk>/start", views.student_exams_start),
     path("student/proctor-config", views.student_proctor_config),
+    path("student/proctor-diagnostics", views.student_proctor_diagnostics),
     path("student/exams/<int:pk>/submit", views.student_exams_submit),
     path("student/results", views.student_results),
     path("student/exams/<int:exam_id>/result-details", views.student_result_details),
