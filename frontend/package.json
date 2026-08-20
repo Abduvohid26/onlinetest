@@ -9,9 +9,9 @@
   },
   "scripts": {
     "preinstall": "node ../scripts/check-node.mjs",
-    "predev": "node scripts/sync-vad-assets.mjs",
+    "predev": "node scripts/sync-vad-assets.mjs && node scripts/sync-mediapipe-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/sync-vad-assets.mjs",
+    "prebuild": "node scripts/sync-vad-assets.mjs && node scripts/sync-mediapipe-assets.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

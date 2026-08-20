@@ -78,6 +78,16 @@ test.describe('MediaPipe real-time engine', () => {
       Object.defineProperty(navigator, 'webdriver', { get: () => false });
     });
 
+    // TASHQI CDN'NI BLOKLAYMIZ — ishlab turgan tizimdagi holatni taqlid qiladi.
+    // Talabalar tarmog'idan `cdn.jsdelivr.net` ochilmaydi (serverga yuborilgan
+    // diagnostika buni ko'rsatdi: MediaPipe `[object Event]` bilan yiqilardi,
+    // ya'ni skript yuklanmagani hodisasi). Shu holatda ham nazorat ishlashi
+    // SHART — modellar o'z domenimizdan berilishi kerak.
+    if (process.env.E2E_ALLOW_CDN !== '1') {
+      await page.route('**cdn.jsdelivr.net/**', (route) => route.abort());
+      await page.route('**storage.googleapis.com/**', (route) => route.abort());
+    }
+
     // Login → dashboard → imtihon oldi tekshiruvi (kamera shu yerda ochiladi).
     await page.goto(base);
     await page.locator('input[autocomplete="username"]').fill('demo_student');

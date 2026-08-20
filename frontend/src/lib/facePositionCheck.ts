@@ -12,6 +12,8 @@
  * gate'ni o'tkazib yuborishi (skip) kerak, imtihon bloklanmasligi uchun.
  */
 
+import { createWithDelegateFallback } from './mediapipeDelegate';
+import { mediapipeAssetSources } from './mediapipeAssets';
 import {
   LivenessSequence,
   averageEar,
@@ -30,14 +32,6 @@ export type FacePositionStatus =
   | 'OFF_CENTER'
   | 'TURNED'
   | 'OK';
-
-const env = (import.meta as any).env || {};
-const WASM_BASE: string =
-  env.VITE_MEDIAPIPE_WASM_BASE ||
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
-const FACE_MODEL: string =
-  env.VITE_MEDIAPIPE_FACE_MODEL ||
-  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 
 const DETECT_INTERVAL_MS = 180; // ~5-6 fps
 const OK_STREAK_NEEDED = 6; // ~1s barqaror OK
@@ -125,21 +119,21 @@ export function isSmiling(lm: any[], minRatio = SMILE_RATIO_MIN): boolean {
 
 async function createFaceLandmarker(numFaces = 1): Promise<any | null> {
   const { FilesetResolver, FaceLandmarker } = await import('@mediapipe/tasks-vision');
-  const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-  const base = {
-    baseOptions: { modelAssetPath: FACE_MODEL },
-    runningMode: 'VIDEO' as const,
-    numFaces,
-  };
-  for (const delegate of ['GPU', 'CPU'] as const) {
+  // Manbalar tartib bilan: avval o'z domenimiz, so'ng CDN zaxira — talabalar
+  // tarmog'idan CDN ochilmasligi mumkin (`lib/mediapipeAssets.ts`).
+  for (const src of mediapipeAssetSources()) {
+    let fileset: any;
     try {
-      return await FaceLandmarker.createFromOptions(fileset, {
-        ...base,
-        baseOptions: { ...base.baseOptions, delegate },
-      });
+      fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
     } catch {
-      /* keyingi delegate */
+      continue; // WASM olinmadi — keyingi manba
     }
+    const lm = await createWithDelegateFallback(FaceLandmarker, fileset, {
+      baseOptions: { modelAssetPath: src.faceModel },
+      runningMode: 'VIDEO' as const,
+      numFaces,
+    });
+    if (lm) return lm;
   }
   return null;
 }

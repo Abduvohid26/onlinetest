@@ -10,6 +10,7 @@
 
 import { ContinuousSignalTracker } from './continuousSignal';
 import { createWithDelegateFallback } from './mediapipeDelegate';
+import { mediapipeAssetSources } from './mediapipeAssets';
 
 const WASM_BASE =
   (import.meta as any).env?.VITE_MEDIAPIPE_WASM_BASE ||
@@ -121,11 +122,12 @@ export class ForbiddenObjectProctor {
         console.warn('[object-proctor] ObjectDetector mavjud emas');
         return false;
       }
-      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      const src = mediapipeAssetSources()[0];
+      const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
       // GPU → CPU zaxirasi (realtimeProctor bilan bir xil sabab).
       this.detector = await createWithDelegateFallback(ObjectDetector, fileset, {
         baseOptions: {
-          modelAssetPath: OBJECT_MODEL,
+          modelAssetPath: src.objectModel,
         },
         scoreThreshold: DETECTOR_MIN_SCORE,
         runningMode: 'VIDEO',

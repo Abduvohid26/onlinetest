@@ -9,11 +9,13 @@
  * Graceful degradation: model yuklanmasa (CDN bloklangan, eski qurilma) engine
  * jim o'chadi — server proctoring ishlayveradi. Hech qachon imtihonni buzmaydi.
  *
- * Modellar CDN'dan lazy-load qilinadi (env bilan self-host qilish mumkin):
- *   VITE_MEDIAPIPE_WASM_BASE, VITE_MEDIAPIPE_FACE_MODEL, VITE_MEDIAPIPE_HAND_MODEL
+ * Modellar avval O'Z domenimizdan (`public/mediapipe/`, build paytida
+ * `scripts/sync-mediapipe-assets.mjs` tayyorlaydi), u ochilmasa CDN zaxirasidan
+ * lazy-load qilinadi — `lib/mediapipeAssets.ts` ga qarang.
  */
 
 import { createWithDelegateFallback } from './mediapipeDelegate';
+import { mediapipeAssetSources } from './mediapipeAssets';
 
 export type RealtimeViolation =
   | 'FACE_NOT_VISIBLE'
@@ -131,16 +133,6 @@ const CHIP_SIGNAL_TYPES = new Set<LiveSignalType>([
   'MULTI_FACE',
 ]);
 
-const env = (import.meta as any).env || {};
-const WASM_BASE: string =
-  env.VITE_MEDIAPIPE_WASM_BASE ||
-  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
-const FACE_MODEL: string =
-  env.VITE_MEDIAPIPE_FACE_MODEL ||
-  'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-const HAND_MODEL: string =
-  env.VITE_MEDIAPIPE_HAND_MODEL ||
-  'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
 // Detection tezligi va bardoshlilik. Tez aniqlash uchun streak/cooldown kichik.
 const DETECT_INTERVAL_MS = 150; // ~6.5 fps (yuk/tezlik balansi — proctoring uchun yetarli)
@@ -357,48 +349,59 @@ export class RealtimeProctor {
   }
 
   async init(): Promise<boolean> {
-    try {
-      const vision = await import('@mediapipe/tasks-vision');
-      const { FilesetResolver, FaceLandmarker, HandLandmarker } = vision;
-      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+    // Manbalar tartib bilan sinaladi: avval o'z domenimiz, so'ng CDN zaxira
+    // (`lib/mediapipeAssets.ts`). Talabalar tarmog'idan CDN ochilmasligi
+    // mumkin — o'shanda lokal nusxa nazoratni saqlab qoladi.
+    let lastErr: unknown = null;
+    for (const src of mediapipeAssetSources()) {
+      try {
+        const vision = await import('@mediapipe/tasks-vision');
+        const { FilesetResolver, FaceLandmarker, HandLandmarker } = vision;
+        const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
 
-      // GPU → CPU zaxirasi SHART: GPU-only chaqiruv apparat tezlashtirish
-      // o'chiq mashinada model olishdan OLDIN yiqiladi va butun real-time
-      // nazorat jimgina o'chib qolardi (`facePositionCheck.ts` da bu zaxira
-      // bor edi — shuning uchun imtihon oldi tekshiruvi ishlar, imtihon
-      // ichidagi nazorat esa ishlamasdi).
-      this.faceLandmarker = await createWithDelegateFallback(FaceLandmarker, fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL },
-        runningMode: 'VIDEO',
-        // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
-        // izlash har kadrda ortiqcha yuk edi.
-        numFaces: 2,
-        outputFaceBlendshapes: true,
-        outputFacialTransformationMatrixes: false,
-      });
-      if (!this.faceLandmarker) {
-        throw new Error('face landmarker: GPU va CPU delegate ikkalasi ham ishlamadi');
+        // GPU → CPU zaxirasi SHART: GPU-only chaqiruv apparat tezlashtirish
+        // o'chiq mashinada model olishdan OLDIN yiqiladi va butun real-time
+        // nazorat jimgina o'chib qolardi.
+        this.faceLandmarker = await createWithDelegateFallback(FaceLandmarker, fileset, {
+          baseOptions: { modelAssetPath: src.faceModel },
+          runningMode: 'VIDEO',
+          // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
+          // izlash har kadrda ortiqcha yuk edi.
+          numFaces: 2,
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: false,
+        });
+        if (!this.faceLandmarker) {
+          throw new Error('face landmarker: GPU va CPU delegate ikkalasi ham ishlamadi');
+        }
+
+        // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
+        this.handLandmarker = await createWithDelegateFallback(HandLandmarker, fileset, {
+          baseOptions: { modelAssetPath: src.handModel },
+          runningMode: 'VIDEO',
+          // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
+          numHands: 1,
+        });
+
+        if (this.disposed) {
+          this.dispose();
+          return false;
+        }
+        this.cb.onStatus?.(`Realtime proctor tayyor (manba: ${src.origin}).`);
+        this.cb.onReady?.(true);
+        return true;
+      } catch (err) {
+        lastErr = err;
+        this.faceLandmarker = null;
+        this.handLandmarker = null;
       }
-
-      // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
-      this.handLandmarker = await createWithDelegateFallback(HandLandmarker, fileset, {
-        baseOptions: { modelAssetPath: HAND_MODEL },
-        runningMode: 'VIDEO',
-        // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
-        numHands: 1,
-      });
-
-      if (this.disposed) {
-        this.dispose();
-        return false;
-      }
-      this.cb.onReady?.(true);
-      return true;
-    } catch (err) {
-      this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
-      this.cb.onReady?.(false, String((err as Error)?.message || err).slice(0, 500));
-      return false;
     }
+
+    const detail = String((lastErr as Error)?.message || lastErr || 'unknown').slice(0, 500);
+    console.error('[realtime-proctor] barcha manbalar qulaydi:', lastErr);
+    this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
+    this.cb.onReady?.(false, detail);
+    return false;
   }
 
   start(): void {

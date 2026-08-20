@@ -51,5 +51,7 @@ tools/vad-benchmark/venv/
 # Silero VAD artefaktlari — build paytida hosil bo'ladi (frontend/scripts/sync-vad-assets.mjs)
 frontend/public/ort/
 frontend/public/models/
+# MediaPipe artefaktlari — build paytida hosil bo'ladi (frontend/scripts/sync-mediapipe-assets.mjs)
+frontend/public/mediapipe/
 frontend/vendor/
 data/
