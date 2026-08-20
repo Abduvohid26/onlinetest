@@ -11,6 +11,8 @@ from apps.api.proctor_escalation import (
     notify_banned as _notify_banned,
 )
 from apps.api.proctor_exam_retake import (
+    exam_identity_retakes_allowed,
+    exam_violation_retakes_allowed,
     IDENTITY_VIOLATION_TYPE,
     try_apply_exam_retake,
     notify_exam_retake,
@@ -306,9 +308,9 @@ def student_exams_list(request):
         else:
             v_used = 0
             id_used = 0
-            v_budget = int(getattr(e, "technical_retakes_allowed", 3) or 3)
+            v_budget = exam_violation_retakes_allowed(e)
             v_remaining = v_budget
-            id_remaining = int(getattr(e, "identity_retakes_allowed", 1) or 1)
+            id_remaining = exam_identity_retakes_allowed(e)
         last_vtype = last_violations.get(e.id, "")
         out.append(
             {

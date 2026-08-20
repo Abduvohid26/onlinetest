@@ -2,6 +2,8 @@
 from datetime import timedelta
 
 from apps.api.proctor_exam_retake import (
+    exam_identity_retakes_allowed,
+    exam_violation_retakes_allowed,
     IDENTITY_VIOLATION_TYPE,
     try_apply_exam_retake,
     violation_retakes_remaining,
@@ -60,6 +62,42 @@ class ExamRetakeTests(TestCase):
         self.assertEqual(self.se.status, "Pending")
         self.assertEqual(self.se.technical_retakes_used, 1)
         self.assertEqual(violation_retakes_remaining(self.se, self.exam), 2)
+
+    def test_admin_zero_retakes_is_respected_everywhere(self):
+        """Admin 0 qo'ysa — 0 bo'lib qolsin, jimgina 3 ga aylanmasin.
+
+        REGRESSIYA: byudjet hisoblovchi kod `int(x or 0)` ishlatardi (0 → 0),
+        talabaga/adminga ko'rsatuvchi kod esa `int(x or 3)` (0 → 3). Natijada
+        admin "Qoidabuzarlik uchun qayta urinishlar = 0" qo'ysa, hamma joyda
+        "3 ta imkoniyat" deb ko'rsatilar, lekin birinchi qoidabuzarlikdayoq
+        ban bo'lardi. Endi yagona manba: `exam_violation_retakes_allowed`.
+        """
+        self.exam.technical_retakes_allowed = 0
+        self.exam.identity_retakes_allowed = 0
+        self.exam.save(update_fields=["technical_retakes_allowed", "identity_retakes_allowed"])
+
+        self.assertEqual(exam_violation_retakes_allowed(self.exam), 0)
+        self.assertEqual(exam_identity_retakes_allowed(self.exam), 0)
+        self.assertEqual(violation_retakes_remaining(self.se, self.exam), 0)
+        self.assertEqual(identity_retakes_remaining(self.se, self.exam), 0)
+
+        # Retake yo'q — chaqiruvchi ban qilishi uchun None qaytadi.
+        self.assertIsNone(
+            try_apply_exam_retake(
+                self.se,
+                self.exam,
+                reason_text="Nol byudjet",
+                violations_count=1,
+                violation_type="TAB_SWITCH_HARD",
+            )
+        )
+
+    def test_admin_value_is_used_not_default(self):
+        """Ruxsat soni imtihon maydonidan olinadi (qattiq 3 emas)."""
+        self.exam.technical_retakes_allowed = 5
+        self.exam.save(update_fields=["technical_retakes_allowed"])
+        self.assertEqual(exam_violation_retakes_allowed(self.exam), 5)
+        self.assertEqual(violation_retakes_remaining(self.se, self.exam), 5)
 
     def test_identity_retake_once(self):
         payload = try_apply_exam_retake(

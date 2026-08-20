@@ -1886,12 +1886,7 @@ def admin_exams_results(request, pk: int):
                 "technical_retakes_used": int(getattr(se, "technical_retakes_used", 0) or 0),
                 "bonus_technical_retakes": int(getattr(se, "bonus_technical_retakes", 0) or 0),
                 "identity_retakes_used": int(getattr(se, "identity_retakes_used", 0) or 0),
-                "violation_retakes_remaining": max(
-                    0,
-                    int(getattr(e, "technical_retakes_allowed", 3) or 3)
-                    + int(getattr(se, "bonus_technical_retakes", 0) or 0)
-                    - int(getattr(se, "technical_retakes_used", 0) or 0),
-                ),
+                "violation_retakes_remaining": violation_retakes_remaining(se, e),
                 "technical_retakes_remaining": max(
                     0,
                     int(getattr(e, "technical_retakes_allowed", 3) or 3)

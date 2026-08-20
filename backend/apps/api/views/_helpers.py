@@ -53,6 +53,11 @@ from apps.api.throttles import (
 from apps.api.certificate_pdf import build_ban_report_pdf, build_certificate_pdf, PASS_PERCENT_THRESHOLD, result_questions_to_pdf_rows
 from apps.api.pdf_i18n import resolve_pdf_language
 from apps.api.identity_log import log_identity
+from apps.api.proctor_exam_retake import (
+    exam_identity_retakes_allowed,
+    exam_violation_retakes_allowed,
+    violation_retakes_remaining,
+)
 from apps.api.face_embedding import analyze_proctor_frame_local
 from apps.api.gemini_tools import (
     analyze_proctor_frame,
@@ -715,8 +720,9 @@ def _exam_row_dict(e: Exam, teacher_name: str | None = None):
         "imentor_subject_codes": safe_json_loads(getattr(e, "imentor_subject_codes", None) or "[]", []),
         "direction_id": e.direction_id,
         "direction_name": e.direction.name if e.direction_id else None,
-        "technical_retakes_allowed": int(getattr(e, "technical_retakes_allowed", 3) or 3),
-        "identity_retakes_allowed": int(getattr(e, "identity_retakes_allowed", 1) or 1),
+        # Yagona manba — `or 3` yozilsa admin qo'ygan 0 jimgina 3 ga aylanardi.
+        "technical_retakes_allowed": exam_violation_retakes_allowed(e),
+        "identity_retakes_allowed": exam_identity_retakes_allowed(e),
         "proctor_profile": str(getattr(e, "proctor_profile", "") or "standard"),
         "ambient_audio_enabled": bool(getattr(e, "ambient_audio_enabled", True)),
         "languages_ready": _exam_languages_ready(e),

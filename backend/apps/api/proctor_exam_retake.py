@@ -7,10 +7,39 @@ from apps.core.models import Exam, StudentExam
 IDENTITY_VIOLATION_TYPE = "IDENTITY_SUBSTITUTION"
 
 
+#: Maydon umuman bo'lmasa ishlatiladigan qiymatlar (model default'lari).
+DEFAULT_VIOLATION_RETAKES = 3
+DEFAULT_IDENTITY_RETAKES = 1
+#: Admin formasidagi yuqori chegara (`views/admin.py` bilan bir xil).
+MAX_RETAKES = 20
+
+
+def exam_violation_retakes_allowed(exam: Exam) -> int:
+    """Imtihonning "Qoidabuzarlik uchun qayta urinishlar" maydoni — YAGONA manba.
+
+    DIQQAT: `int(x or 3)` YOZMANG. Admin ataylab **0** qo'ygan bo'lsa
+    (`0 or 3 == 3`) u jimgina 3 ga aylanardi. Aynan shu sabab talabaga va
+    adminga hamma joyda "3 ta imkoniyat bor" deb ko'rsatilar, lekin haqiqiy
+    qaror qabul qiluvchi kod 0 ni ishlatib birinchi qoidabuzarlikdayoq ban
+    qilardi. Standart qiymat FAQAT maydon umuman bo'lmaganda qo'llanadi.
+    """
+    raw = getattr(exam, "technical_retakes_allowed", None)
+    if raw is None:
+        raw = DEFAULT_VIOLATION_RETAKES
+    return max(0, min(MAX_RETAKES, int(raw)))
+
+
+def exam_identity_retakes_allowed(exam: Exam) -> int:
+    """Imtihonning "Shaxs almashtirish uchun qayta urinishlar" maydoni."""
+    raw = getattr(exam, "identity_retakes_allowed", None)
+    if raw is None:
+        raw = DEFAULT_IDENTITY_RETAKES
+    return max(0, min(MAX_RETAKES, int(raw)))
+
+
 def violation_retakes_budget(se: StudentExam, exam: Exam) -> int:
-    allowed = max(0, int(getattr(exam, "technical_retakes_allowed", 3) or 0))
     bonus = max(0, int(getattr(se, "bonus_technical_retakes", 0) or 0))
-    return allowed + bonus
+    return exam_violation_retakes_allowed(exam) + bonus
 
 
 def violation_retakes_remaining(se: StudentExam, exam: Exam) -> int:
@@ -19,7 +48,7 @@ def violation_retakes_remaining(se: StudentExam, exam: Exam) -> int:
 
 
 def identity_retakes_budget(exam: Exam) -> int:
-    return max(0, int(getattr(exam, "identity_retakes_allowed", 1) or 0))
+    return exam_identity_retakes_allowed(exam)
 
 
 def identity_retakes_remaining(se: StudentExam, exam: Exam) -> int:
