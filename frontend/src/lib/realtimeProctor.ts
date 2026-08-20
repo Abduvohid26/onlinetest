@@ -459,12 +459,15 @@ export class RealtimeProctor {
         lastErr = err;
         this.faceLandmarker = null;
         this.handLandmarker = null;
-        console.warn(`[realtime-proctor] manba ishlamadi (${src.origin}):`, err);
+        console.error(`[realtime-proctor] manba ishlamadi (${src.origin}):`, err);
         this.cb.onStatus?.(`Realtime proctor manbasi ishlamadi: ${src.origin}`);
       }
     }
 
-    console.warn('[realtime-proctor] barcha manbalar qulaydi:', lastErr);
+    console.error(
+      "[realtime-proctor] BARCHA manbalar qulaydi — nigoh/pozitsiya nazorati o'chdi:",
+      lastErr,
+    );
     this.cb.onStatus?.('Realtime proctor modeli yuklanmadi (server proctoring ishlaydi).');
     this.cb.onReady?.(false);
     return false;

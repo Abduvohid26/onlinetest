@@ -161,7 +161,7 @@ export class ForbiddenObjectProctor {
         this.detector = null;
       }
     }
-    console.warn('[object-proctor] yuklanmadi:', lastErr);
+    console.error('[object-proctor] yuklanmadi — ob\'ekt nazorati o\'chdi:', lastErr);
     this.ready = false;
     return false;
   }

@@ -91,7 +91,7 @@ export class ProctorWorkerClient {
     try {
       worker = new Worker(new URL('./proctorWorker.ts', import.meta.url), { type: 'module' });
     } catch (err) {
-      console.warn('[proctor-worker] worker yaratilmadi:', err);
+      console.error('[proctor-worker] worker yaratilmadi:', err);
       return null;
     }
 
@@ -105,7 +105,10 @@ export class ProctorWorkerClient {
 
     const ready = await new Promise<boolean>((resolve) => {
       const timer = window.setTimeout(() => {
-        console.warn(
+        // console.error — prod build'da faqat shu saqlanadi (vite.config.ts
+        // `pure_funcs` warn/info/log ni olib tashlaydi). Nazorat yiqilgani
+        // deploy qilingan tizimda ham ko'rinishi SHART.
+        console.error(
           `[proctor-worker] init ${INIT_TIMEOUT_MS}ms ichida tugamadi (${kinds.join(',')}) — asosiy oqim yo'liga o'tamiz`,
         );
         resolve(false);
@@ -114,7 +117,7 @@ export class ProctorWorkerClient {
         if (ev.data?.type !== 'ready') return;
         clearTimeout(timer);
         if (!ev.data.ok) {
-          console.warn(`[proctor-worker] init muvaffaqiyatsiz (${kinds.join(',')}):`, ev.data.reason);
+          console.error(`[proctor-worker] init muvaffaqiyatsiz (${kinds.join(',')}):`, ev.data.reason);
         } else {
           console.info(`[proctor-worker] tayyor (${kinds.join(',')}), manba:`, ev.data.origin);
         }
@@ -122,7 +125,7 @@ export class ProctorWorkerClient {
       };
       worker.onerror = (e) => {
         clearTimeout(timer);
-        console.warn(`[proctor-worker] worker xatosi (${kinds.join(',')}):`, e?.message || e);
+        console.error(`[proctor-worker] worker xatosi (${kinds.join(',')}):`, e?.message || e);
         resolve(false);
       };
       worker.postMessage({
