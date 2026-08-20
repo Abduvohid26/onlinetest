@@ -97,6 +97,32 @@ export function PreExamCheck({
   const [error, setError] = useState('');
   const [identityError, setIdentityError] = useState('');
   const [starting, setStarting] = useState(false);
+
+  /**
+   * Imtihon muddati tugadimi — sahifa QULFLANADI.
+   *
+   * Muammo: imtihon oldi tekshiruvi (kamera, shaxs tasdiqlash, jonlilik) bir
+   * necha daqiqa oladi. Shu vaqtda imtihon tugab qolishi mumkin edi va talaba
+   * hamma bosqichni o'tib, oxirida `/start` dan "Imtihon allaqachon tugagan"
+   * xatosini olardi — kamera esa ochiq qolar, "Kirish" tugmasi bosilaverar,
+   * har urinishda shaxs tasdiqlash (server + AI) qayta sarflanardi.
+   *
+   * Muddat `access_until` dan olinadi: umumiy tugash vaqti yoki faol retake
+   * oynasining oxiri (qaysi kechroq). `end_time` ga qarab bo'lmaydi — retake
+   * oynasi berilgan talaba umumiy vaqtdan keyin ham haqli ravishda kiradi.
+   */
+  const accessUntilMs = (() => {
+    const raw = exam?.access_until || exam?.end_time;
+    if (!raw) return null;
+    const ms = new Date(raw).getTime();
+    return Number.isFinite(ms) ? ms : null;
+  })();
+  const [examOver, setExamOver] = useState(
+    () => accessUntilMs != null && Date.now() > accessUntilMs,
+  );
+  /** Server "tugagan" deb javob berdi — soat farqidan qat'i nazar qulflaymiz. */
+  const [serverSaysOver, setServerSaysOver] = useState(false);
+  const locked = examOver || serverSaysOver;
   /** Kamera bor, mikrofon ochilmagan — qizil xato emas, ogohlantirish */
   const [mediaHint, setMediaHint] = useState('');
   const [verifying, setVerifying] = useState(false);
@@ -748,6 +774,13 @@ export function PreExamCheck({
       if (!res.ok || !data?.exam || data.studentExamId == null) {
         setError(data?.error || t.preExamStartError);
         discardPrewarmedProctorStream();
+        // 403 — imtihon oynasi yopilgan (tugagan yoki hali boshlanmagan).
+        // Sahifani qulflaymiz: qayta-qayta urinish faqat server va AI'ni
+        // bekorga yuklaydi, natija o'zgarmaydi.
+        if (res.status === 403) {
+          setServerSaysOver(true);
+          setShowRulesModal(false);
+        }
         return;
       }
       if (data.deviceToken) {
@@ -784,6 +817,28 @@ export function PreExamCheck({
       setStarting(false);
     }
   };
+
+  // Muddat sahifada turganda ham o'tib ketishi mumkin — kuzatib boramiz.
+  useEffect(() => {
+    if (accessUntilMs == null || examOver) return;
+    const tick = () => {
+      if (Date.now() > accessUntilMs) setExamOver(true);
+    };
+    tick();
+    const id = window.setInterval(tick, 5_000);
+    return () => window.clearInterval(id);
+  }, [accessUntilMs, examOver]);
+
+  // Qulflangach kamera/mikrofonni DARHOL bo'shatamiz — imtihon tugagan bo'lsa
+  // talabani kuzatib turishning ma'nosi yo'q va qurilma band qolmasin.
+  useEffect(() => {
+    if (!locked) return;
+    const v = videoRef.current;
+    const stream = v?.srcObject as MediaStream | null;
+    stream?.getTracks().forEach((t) => t.stop());
+    if (v) v.srcObject = null;
+    setCameraReady(false);
+  }, [locked]);
 
   async function openRulesModal() {
     setError('');
@@ -834,12 +889,42 @@ export function PreExamCheck({
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
   if (imageQuality !== 'OK') blocked.push(t.preExamBlockedQuality);
   if (netStatus !== 'OK') blocked.push(t.preExamBlockedNetwork);
-  const canStart = blocked.length === 0;
+  const canStart = blocked.length === 0 && !locked;
 
   const studentDisplayName = (user.name || user.id || '').toString().trim();
   const nameParts = studentDisplayName.split(/\s+/).filter(Boolean);
   const studentFirstName = nameParts[0] || studentDisplayName;
   const studentLastName = nameParts.slice(1).join(' ');
+
+  // Imtihon yopilgan — tekshiruv sahifasini KO'RSATMAYMIZ. Ilgari sahifa to'liq
+  // ochiq qolar, kamera ishlab turar, "Kirish" bosilaverar va har urinishda
+  // shaxs tasdiqlash (server + AI) bekorga sarflanardi.
+  if (locked) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="w-full min-h-[60dvh] flex items-center justify-center p-4"
+      >
+        <div className="w-full max-w-lg rounded-2xl border border-gray-200 bg-white shadow-sm p-6 sm:p-8 text-center space-y-4">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+            <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900">{t.preExamClosedTitle}</h2>
+            <p className="mt-2 text-sm text-gray-500 leading-relaxed">{t.preExamClosedBody}</p>
+          </div>
+          {error && <AdminAlert type="error" compact>{error}</AdminAlert>}
+          <AdminBtn variant="blue" size="lg" className="w-full" onClick={onCancel}>
+            {t.cancel}
+          </AdminBtn>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

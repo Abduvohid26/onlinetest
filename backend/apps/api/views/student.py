@@ -287,8 +287,27 @@ def student_exams_list(request):
             eid = row["exam_id"]
             if eid not in last_violations:
                 last_violations[eid] = str(row.get("violation_type") or "")
-    out = []
+    # Faol retake oynalari — talaba imtihonning UMUMIY vaqti tugagach ham
+    # kirishi mumkin bo'lgan holat. Klient haqiqiy muddatni bilmasa, imtihon
+    # oldi tekshiruvida kamera/AI sarflab, oxirida "Imtihon allaqachon tugagan"
+    # xatosiga urilardi (yoki aksincha — haqli retake'ni bloklardi).
     now = dj_tz.now()
+    retake_window_end: dict[int, object] = {}
+    for row in (
+        ExamRetakeWindow.objects.filter(
+            student_id=u.id, exam_id__in=assigned_ids, window_end__gte=now
+        )
+        .order_by("exam_id", "-window_end")
+        .values("exam_id", "window_start", "window_end")
+    ):
+        eid = row["exam_id"]
+        if eid in retake_window_end:
+            continue
+        if row["window_start"] and row["window_start"] > now:
+            continue  # hali ochilmagan oyna
+        retake_window_end[eid] = row["window_end"]
+
+    out = []
     ui_lang = resolve_ui_language(request)
     for e in exams_qs:
         se = ses_by_exam.get(e.id)
@@ -318,6 +337,18 @@ def student_exams_list(request):
                 "title": e.title,
                 "start_time": e.start_time.isoformat() if e.start_time else None,
                 "end_time": e.end_time.isoformat() if e.end_time else None,
+                # Talaba UCHUN haqiqiy oxirgi muddat: umumiy tugash vaqti yoki
+                # (agar berilgan bo'lsa) faol retake oynasining oxiri — qaysi
+                # kechroq bo'lsa. Klient shu bo'yicha imtihon tugaganini biladi.
+                "access_until": (
+                    max(e.end_time, retake_window_end[e.id]).isoformat()
+                    if e.end_time and e.id in retake_window_end
+                    else (
+                        retake_window_end[e.id].isoformat()
+                        if e.id in retake_window_end
+                        else (e.end_time.isoformat() if e.end_time else None)
+                    )
+                ),
                 "duration_minutes": e.duration_minutes,
                 "language": e.language,
                 "custom_rules": e.custom_rules,

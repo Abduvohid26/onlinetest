@@ -1403,6 +1403,39 @@ class ExamFlowApiTests(TestCase):
         self.assertFalse(ViolationLog.objects.filter(student_id=st.id).exists())
 
 
+    def test_student_exams_expose_access_until(self):
+        """`access_until` — talaba UCHUN haqiqiy oxirgi muddat.
+
+        Klient shu bo'yicha imtihon tugaganini biladi. `end_time` ga qarab
+        bo'lmaydi: retake oynasi berilgan talaba umumiy vaqtdan keyin ham haqli
+        ravishda kiradi, aks holda imtihon oldi sahifasi uni noto'g'ri bloklardi.
+        """
+        from apps.core.models import ExamRetakeWindow
+
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.student_token}")
+        r = self.client.get("/api/student/exams")
+        self.assertEqual(r.status_code, 200)
+        row = next((x for x in r.json() if x["id"] == self.exam_a.id), None)
+        self.assertIsNotNone(row)
+        self.assertIn("access_until", row)
+        # Retake oynasi yo'q — umumiy tugash vaqti bilan bir xil.
+        self.assertEqual(row["access_until"], row["end_time"])
+
+        # Retake oynasi umumiy vaqtdan KEYIN tugasa — muddat cho'ziladi.
+        later = self.exam_a.end_time + timedelta(hours=3)
+        ExamRetakeWindow.objects.create(
+            exam=self.exam_a,
+            student=self.student,
+            window_start=dj_tz.now() - timedelta(minutes=1),
+            window_end=later,
+        )
+        r2 = self.client.get("/api/student/exams")
+        row2 = next((x for x in r2.json() if x["id"] == self.exam_a.id), None)
+        self.assertIsNotNone(row2)
+        self.assertNotEqual(row2["access_until"], row2["end_time"])
+        self.assertEqual(row2["access_until"], later.isoformat())
+
+
 class BankExamOptionsTests(TestCase):
   def test_bank_row_empty_uz_options_fallback(self):
     from apps.api.services import bank_row_to_exam_dict
