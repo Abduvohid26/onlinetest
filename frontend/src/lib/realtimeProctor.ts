@@ -459,6 +459,7 @@ export class RealtimeProctor {
         lastErr = err;
         this.faceLandmarker = null;
         this.handLandmarker = null;
+        console.warn(`[realtime-proctor] manba ishlamadi (${src.origin}):`, err);
         this.cb.onStatus?.(`Realtime proctor manbasi ishlamadi: ${src.origin}`);
       }
     }

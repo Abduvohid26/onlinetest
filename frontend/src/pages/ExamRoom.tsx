@@ -47,7 +47,7 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { cleanQuestionPrompt, normalizeQuestionOptions, optionLetter } from '../lib/examQuestionUtils';
 
 // Savol panjarasi izohi (uz/ru/en) — katta i18n fayliga tegmasdan.
-const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string; engineDegraded: string }> = {
+const EXAM_L: Record<Language, { answered: string; flagged: string; empty: string; faceOk: string; faceWaiting: string; faceNoFace: string; faceMulti: string; faceTooFar: string; faceTooClose: string; liveTalking: string; liveHeadAway: string; liveTooFar: string; liveTooClose: string; liveOffCenter: string; liveMovement: string; liveAmbientNoise: string; liveHand: string; liveNoFace: string; liveMultiFace: string; liveScreenshot: string; liveClipboard: string; liveDevtools: string; liveTabSwitch: string; livePhone: string; liveBook: string; liveLaptop: string; engineDegraded: string; objectEngineDegraded: string }> = {
   uz: {
     answered: 'Javob berilgan',
     flagged: 'Belgilangan',
@@ -76,6 +76,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveBook: "Kitob/daftar aniqlandi — olib qo'ying",
     liveLaptop: "Noutbuk aniqlandi — olib qo'ying",
     engineDegraded: "Real-time nazorat ishlamayapti — server nazorati davom etmoqda",
+    objectEngineDegraded: "Ob'ekt nazorati ishlamayapti — qolgan nazorat davom etmoqda",
   },
   ru: {
     answered: 'Отвечено',
@@ -105,6 +106,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveBook: 'Обнаружена книга/тетрадь — уберите',
     liveLaptop: 'Обнаружен ноутбук — уберите',
     engineDegraded: 'Наблюдение в реальном времени недоступно — серверный контроль продолжается',
+    objectEngineDegraded: 'Обнаружение предметов недоступно — остальной контроль продолжается',
   },
   en: {
     answered: 'Answered',
@@ -134,6 +136,7 @@ const EXAM_L: Record<Language, { answered: string; flagged: string; empty: strin
     liveBook: 'Book/notebook detected — put it away',
     liveLaptop: 'Laptop detected — put it away',
     engineDegraded: 'Real-time monitoring unavailable — server proctoring continues',
+    objectEngineDegraded: 'Object detection unavailable — other monitoring continues',
   },
 };
 
@@ -3714,7 +3717,12 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                   <div className="px-3 py-1.5 bg-slate-100 border-b border-slate-300 flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-slate-500 shrink-0" />
                     <span className="text-[11px] font-medium text-slate-700 truncate">
-                      {EXAM_L[lang].engineDegraded}
+                      {/* Qaysi engine yiqilgani aniq aytilsin: ob'ekt detektori
+                          yiqilsa yuz/nigoh nazorati baribir ishlaydi va uni
+                          "ishlamayapti" deyish noto'g'ri bo'lardi. */}
+                      {realtimeEngineOk === false
+                        ? EXAM_L[lang].engineDegraded
+                        : EXAM_L[lang].objectEngineDegraded}
                     </span>
                   </div>
                 )}

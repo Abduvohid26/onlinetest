@@ -18,7 +18,13 @@ import type {
 } from './proctorWorker';
 import { mediapipeAssetSources } from './mediapipeAssets';
 
-const INIT_TIMEOUT_MS = 12_000;
+/**
+ * Sovuq yuklashda worker ~11MB WASM + modellarni oladi va kompilyatsiya qiladi.
+ * Ikkita worker (yuz va ob'ekt) buni bir vaqtda qiladi, ustiga asosiy oqim ham
+ * ishlaydi — sekin diskda/tarmoqda bu uzoq cho'zilishi mumkin. Chegara qisqa
+ * bo'lsa worker bekorga "yiqildi" deb hisoblanardi.
+ */
+const INIT_TIMEOUT_MS = 45_000;
 const DETECT_TIMEOUT_MS = 4_000;
 
 /**
@@ -84,7 +90,8 @@ export class ProctorWorkerClient {
     let worker: Worker;
     try {
       worker = new Worker(new URL('./proctorWorker.ts', import.meta.url), { type: 'module' });
-    } catch {
+    } catch (err) {
+      console.warn('[proctor-worker] worker yaratilmadi:', err);
       return null;
     }
 
@@ -97,19 +104,25 @@ export class ProctorWorkerClient {
     }));
 
     const ready = await new Promise<boolean>((resolve) => {
-      const timer = window.setTimeout(() => resolve(false), INIT_TIMEOUT_MS);
+      const timer = window.setTimeout(() => {
+        console.warn(
+          `[proctor-worker] init ${INIT_TIMEOUT_MS}ms ichida tugamadi (${kinds.join(',')}) — asosiy oqim yo'liga o'tamiz`,
+        );
+        resolve(false);
+      }, INIT_TIMEOUT_MS);
       worker.onmessage = (ev: MessageEvent<WorkerOutMsg>) => {
         if (ev.data?.type !== 'ready') return;
         clearTimeout(timer);
         if (!ev.data.ok) {
-          console.warn('[proctor-worker] init muvaffaqiyatsiz:', ev.data.reason);
+          console.warn(`[proctor-worker] init muvaffaqiyatsiz (${kinds.join(',')}):`, ev.data.reason);
         } else {
-          console.info('[proctor-worker] tayyor, manba:', ev.data.origin);
+          console.info(`[proctor-worker] tayyor (${kinds.join(',')}), manba:`, ev.data.origin);
         }
         resolve(ev.data.ok);
       };
-      worker.onerror = () => {
+      worker.onerror = (e) => {
         clearTimeout(timer);
+        console.warn(`[proctor-worker] worker xatosi (${kinds.join(',')}):`, e?.message || e);
         resolve(false);
       };
       worker.postMessage({
