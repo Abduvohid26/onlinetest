@@ -141,6 +141,9 @@ const TAB_AWAY_VIOLATION_MS = 1200;
  *  bu vaqt ichida boshqa nazorat signallari yozilmaydi; shu sabab "qoplama
  *  ostida cheksiz o'tirib nazoratni to'xtatib turish" yo'li yopiladi. */
 const FULLSCREEN_GRACE_MS = 10_000;
+/** Kamera/mikrofon shuncha vaqt uzluksiz uzilsa savollar qayta yopiladi.
+ *  Qisqa qotishlar uchun darvoza miltillamasin. */
+const MEDIA_LOSS_RELOCK_MS = 2500;
 
 /** Javob o'zgargandan keyin serverga saqlashgacha kutish (tinch pauza). */
 const AUTOSAVE_DEBOUNCE_MS = 8000;
@@ -545,8 +548,31 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   });
 
   const proctorMediaReady = cameraPreviewOk && micReady && !cameraErrorHint;
-  /** Latch: bir marta ochilgach mid-exam media uzilishida savollarni yashirmaymiz. */
-  const questionsUnlocked = startMediaGateDone || proctorMediaReady;
+
+  /**
+   * Kamera/mikrofon imtihon O'RTASIDA uzilib qolsa savollar QAYTA yopiladi.
+   *
+   * Ilgari `startMediaGateDone` bir tomonlama latch edi: bir marta ochilgach
+   * media butunlay uzilsa ham savollar ochiq qolaverardi — ya'ni talaba
+   * kamerasiz imtihon topshirishda davom eta olardi va proktorlik ko'r bo'lib
+   * qolardi.
+   *
+   * Qisqa uzilish (kamera bir zumga qotdi, qurilma qayta ulandi) darvozani
+   * yopmasin deb kechikish bor — faqat uzluksiz uzilish hisoblanadi.
+   */
+  const [mediaLostSustained, setMediaLostSustained] = useState(false);
+
+  useEffect(() => {
+    if (!sessionStarted || banned || !startMediaGateDone) return;
+    if (proctorMediaReady) {
+      setMediaLostSustained(false);
+      return;
+    }
+    const id = window.setTimeout(() => setMediaLostSustained(true), MEDIA_LOSS_RELOCK_MS);
+    return () => window.clearTimeout(id);
+  }, [sessionStarted, banned, startMediaGateDone, proctorMediaReady]);
+
+  const questionsUnlocked = proctorMediaReady || (startMediaGateDone && !mediaLostSustained);
   const showExamMediaGate = Boolean(sessionStarted && !banned && !questionsUnlocked);
 
   useEffect(() => {
@@ -3517,19 +3543,43 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           {(() => {
             const fsCfg = FACE_STATUS_CFG[faceStatus] ?? FACE_STATUS_CFG.WAITING;
             const isOk = faceStatus === 'OK';
-            const isWaiting = faceStatus === 'WAITING';
+            // Indikator KAMERA/MIKROFON holatini ko'rsatadi, yuz aniqlashni emas.
+            // Ilgari u `faceStatus` ga bog'langan edi: real-time engine (MediaPipe)
+            // ishga tushmagan mashinada `WAITING` da qotib qolar, nuqta abadiy
+            // qizil turar va yozuv `!isWaiting` sharti bilan YASHIRILARDI — ya'ni
+            // talaba "qizil, lekin nima muammo ekani noma'lum" holatni ko'rardi.
+            // Endi rang haqiqiy media holatidan keladi va yozuv HAR DOIM bo'ladi.
+            const mediaLabel = !cameraPreviewOk
+              ? t.examCameraLoadingPreview
+              : !micReady
+                ? t.preExamMicInactive
+                : null;
             return (
               <div className="shrink-0 bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
                 <div className="px-3 py-2 border-b border-gray-100 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${isOk ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`} />
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        !proctorMediaReady
+                          ? 'bg-red-500 animate-pulse'
+                          : isOk
+                            ? 'bg-green-500'
+                            : 'bg-amber-500'
+                      }`}
+                    />
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 truncate">{t.examPanelCamera}</span>
                   </div>
-                  {!isWaiting && (
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${isOk ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800'}`}>
-                      {fsCfg.label}
-                    </span>
-                  )}
+                  <span
+                    className={`text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0 ${
+                      !proctorMediaReady
+                        ? 'bg-red-50 text-red-700'
+                        : isOk
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    {mediaLabel ?? fsCfg.label}
+                  </span>
                 </div>
                 {liveSignalLabel && (
                   <div className="px-3 py-1.5 bg-amber-50 border-b border-amber-100 flex items-center gap-1.5">
