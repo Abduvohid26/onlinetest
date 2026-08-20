@@ -13,7 +13,7 @@
  */
 
 import { ContinuousSignalTracker } from './continuousSignal';
-import { mediapipeAssetSources } from './mediapipeAssets';
+import { createWithDelegateFallback, mediapipeAssetSources } from './mediapipeAssets';
 import { ProctorWorkerClient } from './proctorWorkerClient';
 
 /** COCO label (kichik harf) → rasmiy violation. */
@@ -138,17 +138,17 @@ export class ForbiddenObjectProctor {
           return false;
         }
         const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
-        this.detector = await ObjectDetector.createFromOptions(fileset, {
-          baseOptions: {
-            modelAssetPath: src.objectModel,
-            delegate: 'GPU',
-          },
+        // GPU → CPU zaxirasi: apparat tezlashtirish o'chiq mashinalarda
+        // GPU-only chaqiruv xato beradi va ob'ekt nazorati butunlay o'chadi.
+        this.detector = await createWithDelegateFallback(ObjectDetector, fileset, {
+          baseOptions: { modelAssetPath: src.objectModel },
           scoreThreshold: DETECTOR_MIN_SCORE,
           runningMode: 'VIDEO',
           // Kadrda ko'p ob'ekt bo'lsa (stol, monitor, odam) telefon ro'yxatdan
           // tushib qolmasin — chegara kengaytirildi.
           maxResults: 16,
         });
+        if (!this.detector) throw new Error('object detector: GPU va CPU ikkalasi ham ishlamadi');
         if (this.disposed) {
           this.dispose();
           return false;

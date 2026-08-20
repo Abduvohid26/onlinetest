@@ -80,3 +80,30 @@ export function mediapipeAssetSources(): MediapipeAssetSet[] {
   }
   return String(env.VITE_MEDIAPIPE_LOCAL_FIRST || '') === '1' ? [LOCAL, CDN] : [CDN, LOCAL];
 }
+
+/**
+ * MediaPipe task'ini avval GPU, so'ng CPU delegate bilan yaratishga urinadi.
+ *
+ * GPU (WebGL) har muhitda mavjud emas: apparat tezlashtirish o'chirilgan
+ * Chrome, virtual mashina, eski drayver, ba'zi Linux konfiguratsiyalari.
+ * Bunday joyda GPU-only chaqiruv xato beradi va nazorat butunlay o'chadi —
+ * CPU sekinroq bo'lsa ham nazoratsiz qolishdan yaxshiroq.
+ *
+ * `null` = ikkalasi ham ishlamadi.
+ */
+export async function createWithDelegateFallback(Task: any, fileset: any, opts: any): Promise<any | null> {
+  if (!Task?.createFromOptions) return null;
+  let lastErr: unknown = null;
+  for (const delegate of ['GPU', 'CPU'] as const) {
+    try {
+      return await Task.createFromOptions(fileset, {
+        ...opts,
+        baseOptions: { ...opts.baseOptions, delegate },
+      });
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  console.error('[mediapipe] GPU va CPU delegate ikkalasi ham ishlamadi:', lastErr);
+  return null;
+}

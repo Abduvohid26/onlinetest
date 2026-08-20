@@ -13,7 +13,7 @@
  * `scripts/sync-mediapipe-assets.mjs` tayyorlaydi), u ochilmasa CDN zaxirasidan
  * lazy-load qilinadi — `lib/mediapipeAssets.ts` ga qarang.
  */
-import { mediapipeAssetSources } from './mediapipeAssets';
+import { createWithDelegateFallback, mediapipeAssetSources } from './mediapipeAssets';
 import { ProctorWorkerClient } from './proctorWorkerClient';
 import { classifyGaze, gazeMargins, type GazeFeature, type GazeModel } from './gazeMapping';
 
@@ -426,8 +426,15 @@ export class RealtimeProctor {
         const { FilesetResolver, FaceLandmarker, HandLandmarker } = vision;
         const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
 
-        this.faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: src.faceModel, delegate: 'GPU' },
+        // GPU → CPU zaxirasi SHART. Ilgari bu yerda faqat `delegate: 'GPU'`
+        // bor edi va apparat tezlashtirish o'chiq bo'lgan mashinalarda (Linux
+        // Chrome'da tez-tez uchraydi) `createFromOptions` model faylini
+        // OLISHDAN OLDIN xato berardi — natijada butun real-time nazorat
+        // jimgina o'chib qolardi. `facePositionCheck.ts` da bu zaxira bor edi,
+        // shu sabab imtihon oldi tekshiruvi ishlab, imtihon ichidagi nazorat
+        // ishlamasdi.
+        this.faceLandmarker = await createWithDelegateFallback(FaceLandmarker, fileset, {
+          baseOptions: { modelAssetPath: src.faceModel },
           runningMode: 'VIDEO',
           // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
           // izlash har kadrda ortiqcha yuk edi.
@@ -435,18 +442,15 @@ export class RealtimeProctor {
           outputFaceBlendshapes: true,
           outputFacialTransformationMatrixes: false,
         });
+        if (!this.faceLandmarker) throw new Error('face landmarker: GPU va CPU ikkalasi ham ishlamadi');
 
         // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
-        try {
-          this.handLandmarker = await HandLandmarker.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath: src.handModel, delegate: 'GPU' },
-            runningMode: 'VIDEO',
-            // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
-            numHands: 1,
-          });
-        } catch {
-          this.handLandmarker = null;
-        }
+        this.handLandmarker = await createWithDelegateFallback(HandLandmarker, fileset, {
+          baseOptions: { modelAssetPath: src.handModel },
+          runningMode: 'VIDEO',
+          // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
+          numHands: 1,
+        });
 
         if (this.disposed) {
           this.dispose();

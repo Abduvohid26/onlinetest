@@ -128,16 +128,18 @@ async function initTasks(msg: WorkerInitMsg): Promise<{ ok: boolean; origin?: st
 
 async function createWithDelegateFallback(Task: any, fileset: any, opts: any): Promise<any | null> {
   if (!Task?.createFromOptions) return null;
+  let lastErr: unknown = null;
   for (const delegate of ['GPU', 'CPU'] as const) {
     try {
       return await Task.createFromOptions(fileset, {
         ...opts,
         baseOptions: { ...opts.baseOptions, delegate },
       });
-    } catch {
-      /* keyingi delegate */
+    } catch (err) {
+      lastErr = err;
     }
   }
+  console.error('[proctor-worker] GPU va CPU delegate ikkalasi ham ishlamadi:', lastErr);
   return null;
 }
 
