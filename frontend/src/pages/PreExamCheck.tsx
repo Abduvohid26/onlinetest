@@ -124,8 +124,22 @@ export function PreExamCheck({
   const [challengeRetryKey, setChallengeRetryKey] = useState(0);
   /** Pre-exam yuz pozitsiyasi gate (kameraga yaqin + markaz + to'g'ri qaragan). */
   const [positionStatus, setPositionStatus] = useState<FacePositionStatus>('WAITING');
-  /** Nigoh nazorati ishlashi uchun ko'z qorachig'i o'qilishi shart. */
+  /** Nigoh nazorati ishlashi uchun ko'z qorachig'i o'qilishi shart. Bu — TIRIK
+   *  holat (har kadrda yangilanadi) va faqat ko'rsatish uchun. */
   const [eyeStatus, setEyeStatus] = useState<EyeStatus>('NO_LANDMARKS');
+  /**
+   * Ko'z kamida bir marta muvaffaqiyatli o'qildimi — KIRISH DARVOZASI shunga
+   * qaraydi, tirik holatga emas.
+   *
+   * Nega latch: ko'z darvozasining maqsadi — bazaviy qiymatni o'lchay
+   * olganimizni tasdiqlash, bu bir martalik ish (uzluksiz nazorat imtihon
+   * ichida alohida ishlaydi). Tirik holatga bog'lansa bitta yomon kadr
+   * ("yuz topilmadi") talabani butunlay bloklab qo'yardi.
+   */
+  const [eyeOkEver, setEyeOkEver] = useState(false);
+  /** Xuddi shu latch, effekt ichida o'qish uchun — `eyeOkEver` ni dependency
+   *  qilsak, u o'zgarganda MediaPipe tekshiruvchisi bekorga qayta yaratilardi. */
+  const eyeOkEverRef = useRef(false);
   /** Tasvir tiniqligi va yorug'ligi. */
   const [imageQuality, setImageQuality] = useState<QualityStatus>('OK');
   /** Internet barqarorligi (imtihon davomida har 15s rasm yuboriladi). */
@@ -409,9 +423,21 @@ export function PreExamCheck({
   }, []);
 
   /** Pre-exam yuz pozitsiyasi gate (MediaPipe): yaqin + markaz + to'g'ri qaragan.
-   *  Identity verify'dan OLDIN pozitsiyani ta'minlaymiz. */
+   *  Identity verify'dan OLDIN pozitsiyani ta'minlaymiz.
+   *
+   *  DIQQAT: ilgari shart shunchaki `verified` edi — shaxs tasdiqlangan zahoti
+   *  tekshiruvchi o'chardi va `eyeStatus` o'sha ondagi qiymatida MUZLAB qolardi.
+   *  Tasdiqlash so'rovi ketayotganda talaba bir zum qimirlasa, oxirgi kadr
+   *  "yuz topilmadi" berardi va talaba "Ko'zlar aniqlanmadi" da butunlay
+   *  qotib qolardi — imtihonga kira olmasdi.
+   *
+   *  Endi tekshiruvchi ko'z KAMIDA BIR MARTA o'qilgandan keyingina to'xtaydi.
+   *  Odatdagi holatda latch tasdiqlashdan oldin qo'yiladi, ya'ni to'xtash
+   *  avvalgidek `verified` da bo'ladi va tabassum tekshiruvi bilan yonma-yon
+   *  ishlamaydi (qo'shimcha yuk yo'q). Faqat muammoli holatda tirik qoladi —
+   *  aynan talabaga kamerani to'g'rilash imkoni kerak bo'lganda. */
   useEffect(() => {
-    if (!cameraReady || verified) return;
+    if (!cameraReady || (verified && eyeOkEverRef.current)) return;
     const video = videoRef.current;
     if (!video) return;
     let cancelled = false;
@@ -424,7 +450,12 @@ export function PreExamCheck({
       },
       (ratio) => {
         if (cancelled) return;
-        setEyeStatus(classifyEyeReadability([ratio]));
+        const st = classifyEyeReadability([ratio]);
+        setEyeStatus(st);
+        if (st === 'OK' && !eyeOkEverRef.current) {
+          eyeOkEverRef.current = true;
+          setEyeOkEver(true);
+        }
         // Talabaning TABIIY ko'z ochiqligini yig'amiz. Imtihonda "ko'z toraydi"
         // (pastga qarash) shu bazaviy qiymatga NISBATAN aniqlanadi — mutlaq
         // chegara odamlar orasida ishlamaydi.
@@ -443,9 +474,16 @@ export function PreExamCheck({
       if (ok) {
         checker.start();
       } else {
-        // Model yuklanmadi (CDN bloklangan / eski qurilma) — gate skip, imtihon bloklanmasin.
+        // Model yuklanmadi (CDN bloklangan / eski qurilma) — gate skip, imtihon
+        // bloklanmasin. KO'Z darvozasi ham ochiladi: ilgari faqat pozitsiya
+        // ochilardi va talaba baribir "Ko'zlar aniqlanmadi" da qolib ketardi.
+        // Bazaviy qiymat yig'ilmaydi — imtihonda nigoh nazorati mutlaq
+        // chegaraga qaytadi (`eyeBaselineFrom` null qaytaradi).
         setPositionStatus('OK');
         setPositionOk(true);
+        setEyeStatus('OK');
+        eyeOkEverRef.current = true;
+        setEyeOkEver(true);
       }
     });
     return () => {
@@ -830,7 +868,7 @@ export function PreExamCheck({
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
-  if (eyeStatus !== 'OK') blocked.push(t.preExamBlockedEyes);
+  if (!eyeOkEver) blocked.push(t.preExamBlockedEyes);
   if (imageQuality !== 'OK') blocked.push(t.preExamBlockedQuality);
   if (netStatus !== 'OK') blocked.push(t.preExamBlockedNetwork);
   const canStart = blocked.length === 0;
@@ -1087,12 +1125,17 @@ export function PreExamCheck({
                   {[
                     {
                       title: t.preExamEyesTitle,
-                      ok: eyeStatus === 'OK',
-                      msg: {
-                        OK: t.preExamEyesOk,
-                        EYES_NARROW: t.preExamEyesNarrow,
-                        NO_LANDMARKS: t.preExamEyesNoLandmarks,
-                      }[eyeStatus],
+                      // O'tgan tekshiruv qayta "yiqilmasin": darvoza latch'da,
+                      // ko'rsatkich ham shunga mos bo'lsin (aks holda tugma
+                      // ochiq turib yozuv qizil qolardi — chalkash).
+                      ok: eyeOkEver,
+                      msg: eyeOkEver
+                        ? t.preExamEyesOk
+                        : {
+                            OK: t.preExamEyesOk,
+                            EYES_NARROW: t.preExamEyesNarrow,
+                            NO_LANDMARKS: t.preExamEyesNoLandmarks,
+                          }[eyeStatus],
                       extra: '',
                     },
                     {
