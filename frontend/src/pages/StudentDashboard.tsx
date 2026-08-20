@@ -388,10 +388,23 @@ export function StudentDashboard({
   void tick;
   const now = nowMs();
 
+  /**
+   * Talaba UCHUN haqiqiy oxirgi muddat.
+   *
+   * `end_time` ga qarab bo'lmaydi: qayta topshirish oynasi berilgan talaba
+   * imtihonning umumiy vaqti tugagach ham haqli ravishda kiradi. Ilgari shu
+   * sabab imtihon uning ro'yxatidan butunlay yo'qolib qolardi va u berilgan
+   * imkoniyatdan foydalana olmasdi. Backend `access_until` da ikkalasining
+   * kechrog'ini beradi.
+   */
+  const accessUntilMs = (e: any) => {
+    const raw = e?.access_until || e?.end_time;
+    const ms = raw ? new Date(raw).getTime() : NaN;
+    return Number.isFinite(ms) ? ms : 0;
+  };
+
   // Hali tugamagan imtihonlar yoki yarim qolgan sessiya (in_progress).
-  const visibleExams = exams.filter(
-    (e: any) => now <= new Date(e.end_time).getTime() || e.in_progress,
-  );
+  const visibleExams = exams.filter((e: any) => now <= accessUntilMs(e) || e.in_progress);
 
   const completedResults = results.filter((r: any) => r.status === 'Completed');
   const gradedPcts = completedResults
@@ -615,7 +628,7 @@ export function StudentDashboard({
               ) : (
                 visibleExams.map((e: any, i) => {
                   const startMs = new Date(e.start_time).getTime();
-                  const endMs = new Date(e.end_time).getTime();
+                  const endMs = accessUntilMs(e);
                   const isOngoing = now >= startMs && now <= endMs;
                   const isUpcoming = now < startMs;
                   const untilStart = msUntil(e.start_time, now);
@@ -893,8 +906,15 @@ export function StudentDashboard({
                         </span>
                       </div>
 
-                      {/* Body: score focal */}
-                      <div className="px-5 py-4 flex-1 flex flex-col justify-center">
+                      {/* Body: score focal.
+                          `justify-start` ATAYLAB: kartochkalar `grid` ichida eng
+                          balandiga cho'ziladi (banlangan kartochkada murojaat
+                          maydoni bor). Ilgari bu yerda `justify-center` turardi va
+                          yakunlangan kartochkalarda mazmun o'rtada suzib, tepasida
+                          katta bo'sh joy qolardi. Endi mazmun yuqorida, tugmalar
+                          esa pastda (`mt-auto`) — barcha kartochkalar bir xil
+                          o'qiladi. */}
+                      <div className="px-5 py-4 flex-1 flex flex-col justify-start">
                         {isCompleted && pct != null ? (
                           <>
                             <div className="flex items-baseline justify-between mb-2">
@@ -972,7 +992,7 @@ export function StudentDashboard({
 
                       {/* Footer: actions (only completed with public id) */}
                       {isBannedRes && (
-                        <div className="px-5 pb-4 pt-0 space-y-2 border-t border-gray-100 mt-2">
+                        <div className="px-5 pb-4 pt-3 space-y-2 border-t border-gray-100 mt-auto">
                           {examAppeals.length > 0 && (
                             <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-[12px] text-gray-600">
                               <p className="font-semibold text-gray-700 mb-1">{t.banAppealHistoryTitle}</p>
@@ -1038,7 +1058,7 @@ export function StudentDashboard({
                       )}
 
                       {isCompleted && r.result_public_id && (
-                        <div className="px-5 pb-4 pt-0 flex gap-2">
+                        <div className="px-5 pb-4 pt-0 flex gap-2 mt-auto">
                           <AdminBtn
                             variant="ghost"
                             size="md"
