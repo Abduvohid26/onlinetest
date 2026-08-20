@@ -2,19 +2,24 @@
  * Taqiqlangan ob'ektlar — brauzerda MediaPipe ObjectDetector (EfficientDet/COCO).
  *
  * Nega kerak: server Vision har ~15s va PROCTOR_OPENAI_OBJECTS/API ga bog'liq edi —
- * telefon kadrda aniq ko'rinsa ham "indamay" turardi. Bu detektor ~1s da ishlaydi.
- *
- * Model manbasi: avval o'z domenimiz, so'ng CDN zaxira (`lib/mediapipeAssets.ts`).
- * lite0 → lite2: telefon kadrda kichik ob'ekt bo'lgani uchun lite0 uni ko'p
- * freymda umuman topa olmasdi (detektsiya "miltillardi"). lite2 sezilarli
- * aniqroq; GPU delegate bilan bitta freym ~30-50ms — 300ms interval uchun yetarli.
+ * telefon kadrda aniq ko'rinsa ham "indamay" turardi. Bu detektor ~1s da ishlaydi,
+ * CDN model + mavjud @mediapipe/tasks-vision.
  *
  * COCO sinflari: cell phone, book, laptop.
  */
 
 import { ContinuousSignalTracker } from './continuousSignal';
-import { createWithDelegateFallback, mediapipeAssetSources } from './mediapipeAssets';
-import { ProctorWorkerClient } from './proctorWorkerClient';
+
+const WASM_BASE =
+  (import.meta as any).env?.VITE_MEDIAPIPE_WASM_BASE ||
+  'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm';
+
+// lite0 → lite2: telefon kadrda kichik ob'ekt bo'lgani uchun lite0 uni ko'p
+// freymda umuman topa olmasdi (detektsiya "miltillardi"). lite2 sezilarli
+// aniqroq; GPU delegate bilan bitta freym ~30-50ms — 300ms interval uchun yetarli.
+const OBJECT_MODEL =
+  (import.meta as any).env?.VITE_MEDIAPIPE_OBJECT_MODEL ||
+  'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite';
 
 /** COCO label (kichik harf) → rasmiy violation. */
 const LABEL_TO_VIOLATION: Record<string, string> = {
@@ -91,10 +96,6 @@ export class ForbiddenObjectProctor {
   private detector: DetectorApi | null = null;
   private timer: number | null = null;
   private disposed = false;
-  /** Inference worker'i (bo'lsa). `null` — asosiy oqim yo'li (zaxira). */
-  private workerClient: ProctorWorkerClient | null = null;
-  /** Worker javobi kutilayotganda yangi kadr boshlanmasin. */
-  private busy = false;
   private trackers = new Map<string, ContinuousSignalTracker>();
   private lastFormalAt = new Map<string, number>();
 
@@ -112,63 +113,42 @@ export class ForbiddenObjectProctor {
   ) {}
 
   async init(): Promise<boolean> {
-    // 1-urinish: worker (asosiy oqim ozod bo'lsin). Ko'tarilmasa — pastdagi zaxira.
-    this.workerClient = await ProctorWorkerClient.create(['object'], {
-      objectMinScore: DETECTOR_MIN_SCORE,
-      objectMaxResults: 16,
-    });
-    if (this.workerClient) {
+    try {
+      const vision = await import('@mediapipe/tasks-vision');
+      const { FilesetResolver, ObjectDetector } = vision as any;
+      if (!ObjectDetector?.createFromOptions) {
+        console.warn('[object-proctor] ObjectDetector mavjud emas');
+        return false;
+      }
+      const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
+      this.detector = await ObjectDetector.createFromOptions(fileset, {
+        baseOptions: {
+          modelAssetPath: OBJECT_MODEL,
+          delegate: 'GPU',
+        },
+        scoreThreshold: DETECTOR_MIN_SCORE,
+        runningMode: 'VIDEO',
+        // Kadrda ko'p ob'ekt bo'lsa (stol, monitor, odam) telefon ro'yxatdan
+        // tushib qolmasin — chegara kengaytirildi.
+        maxResults: 16,
+      });
       if (this.disposed) {
         this.dispose();
         return false;
       }
       this.ready = true;
-      console.info('[object-proctor] tayyor (cell phone / book / laptop, worker)');
+      console.info('[object-proctor] tayyor (cell phone / book / laptop)');
       return true;
+    } catch (err) {
+      console.warn('[object-proctor] yuklanmadi:', err);
+      this.ready = false;
+      return false;
     }
-
-    // 2-urinish (zaxira): asosiy oqimda. Avval o'z domenimiz, so'ng CDN.
-    let lastErr: unknown = null;
-    for (const src of mediapipeAssetSources()) {
-      try {
-        const vision = await import('@mediapipe/tasks-vision');
-        const { FilesetResolver, ObjectDetector } = vision as any;
-        if (!ObjectDetector?.createFromOptions) {
-          console.warn('[object-proctor] ObjectDetector mavjud emas');
-          return false;
-        }
-        const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
-        // GPU → CPU zaxirasi: apparat tezlashtirish o'chiq mashinalarda
-        // GPU-only chaqiruv xato beradi va ob'ekt nazorati butunlay o'chadi.
-        this.detector = await createWithDelegateFallback(ObjectDetector, fileset, {
-          baseOptions: { modelAssetPath: src.objectModel },
-          scoreThreshold: DETECTOR_MIN_SCORE,
-          runningMode: 'VIDEO',
-          // Kadrda ko'p ob'ekt bo'lsa (stol, monitor, odam) telefon ro'yxatdan
-          // tushib qolmasin — chegara kengaytirildi.
-          maxResults: 16,
-        });
-        if (!this.detector) throw new Error('object detector: GPU va CPU ikkalasi ham ishlamadi');
-        if (this.disposed) {
-          this.dispose();
-          return false;
-        }
-        this.ready = true;
-        console.info(`[object-proctor] tayyor (cell phone / book / laptop, manba: ${src.origin})`);
-        return true;
-      } catch (err) {
-        lastErr = err;
-        this.detector = null;
-      }
-    }
-    console.error('[object-proctor] yuklanmadi — ob\'ekt nazorati o\'chdi:', lastErr);
-    this.ready = false;
-    return false;
   }
 
   start(): void {
-    if ((!this.detector && !this.workerClient) || this.timer != null) return;
-    this.timer = window.setInterval(() => void this.tick(), DETECT_INTERVAL_MS);
+    if (!this.detector || this.timer != null) return;
+    this.timer = window.setInterval(() => this.tick(), DETECT_INTERVAL_MS);
   }
 
   private trackerFor(type: string): ContinuousSignalTracker {
@@ -180,44 +160,30 @@ export class ForbiddenObjectProctor {
     return t;
   }
 
-  private async tick(): Promise<void> {
-    if (this.disposed || (!this.detector && !this.workerClient)) return;
+  private tick(): void {
+    if (this.disposed || !this.detector) return;
     if (this.opts.isFrozen()) return;
-    if (this.busy) return;
     const video = this.video;
     if (!video || video.readyState < 2 || video.videoWidth < 16) return;
 
-    // Xom nomzodlar: BARCHA categories (faqat [0] emas). Telefon ko'pincha
-    // ikkinchi-uchinchi nomzod bo'lib chiqadi (birinchisi "person" yoki
-    // "remote") — ilgari aynan shu holatda umuman aniqlanmasdi.
-    const raw: Array<{ categoryName: string; score: number }> = [];
-    this.busy = true;
+    const detections: ForbiddenObjectHit[] = [];
     try {
-      if (this.workerClient) {
-        const r = await this.workerClient.detect(video, performance.now(), false);
-        if (!r) return;
-        raw.push(...(r.objects || []));
-      } else {
-        const res = this.detector.detectForVideo(video, performance.now());
-        for (const d of res.detections || []) {
-          for (const cat of d.categories || []) {
-            raw.push({ categoryName: String(cat?.categoryName || ''), score: Number(cat?.score || 0) });
-          }
+      const res = this.detector.detectForVideo(video, performance.now());
+      for (const d of res.detections || []) {
+        // Faqat categories[0] emas, BARCHA nomzodlar. Telefon ko'pincha
+        // ikkinchi-uchinchi nomzod bo'lib chiqadi (birinchisi "person" yoki
+        // "remote") — ilgari aynan shu holatda umuman aniqlanmasdi.
+        for (const cat of d.categories || []) {
+          const name = String(cat?.categoryName || '');
+          const violationType = mapLabel(name);
+          if (!violationType) continue;
+          const score = Number(cat?.score || 0);
+          if (score < (SCORE_THRESHOLD_BY_TYPE[violationType] ?? 0.35)) continue;
+          detections.push({ violationType, label: name, score });
         }
       }
     } catch {
       return;
-    } finally {
-      this.busy = false;
-    }
-
-    const detections: ForbiddenObjectHit[] = [];
-    for (const cat of raw) {
-      const name = cat.categoryName;
-      const violationType = mapLabel(name);
-      if (!violationType) continue;
-      if (cat.score < (SCORE_THRESHOLD_BY_TYPE[violationType] ?? 0.35)) continue;
-      detections.push({ violationType, label: name, score: cat.score });
     }
 
     // Bir xil tur uchun eng yuqori score
@@ -255,8 +221,6 @@ export class ForbiddenObjectProctor {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.workerClient?.dispose();
-    this.workerClient = null;
     try {
       this.detector?.close?.();
     } catch {

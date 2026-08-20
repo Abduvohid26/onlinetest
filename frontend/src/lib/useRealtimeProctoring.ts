@@ -1,12 +1,5 @@
-import { useEffect, useRef } from 'react';
-import {
-  RealtimeProctor,
-  type RealtimeViolation,
-  type FaceStatusLive,
-  type LiveSignalType,
-  type GazeDebugInfo,
-} from './realtimeProctor';
-import type { GazeFeature, GazeModel } from './gazeMapping';
+import { useEffect } from 'react';
+import { RealtimeProctor, type RealtimeViolation, type FaceStatusLive, type LiveSignalType } from './realtimeProctor';
 
 interface UseRealtimeProctoringOpts {
   videoRef: React.RefObject<HTMLVideoElement | null>;
@@ -28,12 +21,6 @@ interface UseRealtimeProctoringOpts {
   eyeBaseline?: number | null;
   disabled?: boolean;
   onReady?: (ok: boolean) => void;
-  /** Sozlash rejimi (VITE_GAZE_DEBUG) — xom nigoh o'lchovlari. */
-  onDebug?: (info: GazeDebugInfo) => void;
-  /** Har kadrdagi nigoh belgilari — o'rganiladigan xarita namunasi uchun. */
-  onGazeFeature?: (f: GazeFeature) => void;
-  /** O'rganilgan xarita. `null` — eski qattiq chegaralar ishlaydi. */
-  gazeModel?: GazeModel | null;
 }
 
 /**
@@ -53,12 +40,7 @@ export function useRealtimeProctoring({
   eyeBaseline = null,
   disabled = false,
   onReady,
-  onDebug,
-  onGazeFeature,
-  gazeModel = null,
 }: UseRealtimeProctoringOpts): void {
-  const proctorRef = useRef<RealtimeProctor | null>(null);
-
   useEffect(() => {
     if (disabled) return;
     const video = videoRef.current;
@@ -73,8 +55,6 @@ export function useRealtimeProctoring({
       onMouthActivity,
       onSmallWarningStage,
       onReady,
-      onDebug,
-      onGazeFeature,
       onStatus: (m) => console.info('[realtime-proctor]', m),
     }, eyeBaseline);
 
@@ -86,19 +66,10 @@ export function useRealtimeProctoring({
       if (ok) proctor.start();
     });
 
-    proctorRef.current = proctor;
-
     return () => {
       cancelled = true;
-      proctorRef.current = null;
       proctor.dispose();
     };
     // streamRevision o'zgarsa (kamera qayta ishga tushsa) engine qayta yaratiladi.
   }, [disabled, streamRevision]);
-
-  // Model alohida yangilanadi — engine qayta yaratilmasin (u og'ir va model
-  // har necha bosishda qayta quriladi).
-  useEffect(() => {
-    proctorRef.current?.setGazeModel(gazeModel);
-  }, [gazeModel]);
 }
