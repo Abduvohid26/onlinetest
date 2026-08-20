@@ -8,13 +8,11 @@ import { compressVideoFrameToJpeg } from '../lib/compressToJpeg';
 import { FacePositionChecker, LivenessChallengeTracker, type FacePositionStatus } from '../lib/facePositionCheck';
 import { type LivenessAction } from '../lib/livenessChallenge';
 import {
-  classifyEyeReadability,
   classifyImageQuality,
   eyeBaselineFrom,
   classifyNetwork,
   computeImageStats,
   grayscaleFromCanvas,
-  type EyeStatus,
   type NetworkStatus,
   type QualityStatus,
 } from '../lib/mediaQualityCheck';
@@ -124,8 +122,6 @@ export function PreExamCheck({
   const [challengeRetryKey, setChallengeRetryKey] = useState(0);
   /** Pre-exam yuz pozitsiyasi gate (kameraga yaqin + markaz + to'g'ri qaragan). */
   const [positionStatus, setPositionStatus] = useState<FacePositionStatus>('WAITING');
-  /** Nigoh nazorati ishlashi uchun ko'z qorachig'i o'qilishi shart. */
-  const [eyeStatus, setEyeStatus] = useState<EyeStatus>('NO_LANDMARKS');
   /** Tasvir tiniqligi va yorug'ligi. */
   const [imageQuality, setImageQuality] = useState<QualityStatus>('OK');
   /** Internet barqarorligi (imtihon davomida har 15s rasm yuboriladi). */
@@ -424,10 +420,16 @@ export function PreExamCheck({
       },
       (ratio) => {
         if (cancelled) return;
-        setEyeStatus(classifyEyeReadability([ratio]));
-        // Talabaning TABIIY ko'z ochiqligini yig'amiz. Imtihonda "ko'z toraydi"
-        // (pastga qarash) shu bazaviy qiymatga NISBATAN aniqlanadi — mutlaq
-        // chegara odamlar orasida ishlamaydi.
+        // DIQQAT: ko'z ko'rinishi imtihonga KIRISHNI BLOKLAMAYDI. Ilgari
+        // "Ko'zlar aniqlanmadi" holati darvoza edi va talaba imtihonga umuman
+        // kira olmay qolardi (signal bir kadr uchun yo'qolsa ham) — shu sabab
+        // tekshiruv olib tashlandi.
+        //
+        // Namuna yig'ish esa QOLADI: talabaning TABIIY ko'z ochiqligi.
+        // Imtihonda "ko'z toraydi" (pastga qarash) shu bazaviy qiymatga
+        // NISBATAN aniqlanadi — mutlaq chegara odamlar orasida ishlamaydi.
+        // Yetarli namuna bo'lmasa baseline saqlanmaydi va nigoh nazorati
+        // mutlaq chegaraga qaytadi (`eyeBaselineFrom` null qaytaradi).
         if (typeof ratio === 'number' && ratio > 0) {
           const arr = eyeSamplesRef.current;
           arr.push(ratio);
@@ -830,7 +832,6 @@ export function PreExamCheck({
   if (!user.profile_image) blocked.push(t.preExamBlockedPhoto);
   if (!verified) blocked.push(t.preExamBlockedIdentity);
   if (!livenessPassed || livenessChecking) blocked.push(t.preExamBlockedLiveness);
-  if (eyeStatus !== 'OK') blocked.push(t.preExamBlockedEyes);
   if (imageQuality !== 'OK') blocked.push(t.preExamBlockedQuality);
   if (netStatus !== 'OK') blocked.push(t.preExamBlockedNetwork);
   const canStart = blocked.length === 0;
@@ -1085,16 +1086,6 @@ export function PreExamCheck({
                     boshlangandan keyin tuzatilmaydi — shu sabab shart. */}
                 <div className="mt-3 pt-3 border-t border-gray-100 space-y-2 text-[12.5px]">
                   {[
-                    {
-                      title: t.preExamEyesTitle,
-                      ok: eyeStatus === 'OK',
-                      msg: {
-                        OK: t.preExamEyesOk,
-                        EYES_NARROW: t.preExamEyesNarrow,
-                        NO_LANDMARKS: t.preExamEyesNoLandmarks,
-                      }[eyeStatus],
-                      extra: '',
-                    },
                     {
                       title: t.preExamQualityTitle,
                       ok: imageQuality === 'OK',
