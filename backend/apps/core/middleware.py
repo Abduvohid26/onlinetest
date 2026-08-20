@@ -87,9 +87,22 @@ class SecurityHeadersMiddleware:
         response.setdefault("X-Content-Type-Options", "nosniff")
         response.setdefault("X-Frame-Options", "DENY")
         # XSS yuzasidan qo‘shimcha himoya (SPA + API)
+        #
+        # DIQQAT — `'wasm-unsafe-eval'` MAJBURIY. `script-src` ko‘rsatilgan
+        # bo‘lsa, Chrome `WebAssembly.instantiate()` ni CSP bilan bloklaydi.
+        # Ishlab turgan serverda aynan shu sabab MediaPipe hech qachon ishga
+        # tushmagan va butun real-time nazorat (yuz, nigoh, bosh burilishi,
+        # pozitsiya, qo‘l, ob’ekt) jimgina o‘chiq turgan — tashqaridan esa
+        # "kamera ishlayapti" bo‘lib ko‘rinardi.
+        #
+        # `worker-src 'self' blob:` — MediaPipe/onnxruntime blob-worker ochadi;
+        # usiz u `default-src 'self'` ga tushib bloklanadi.
+        #
+        # Regressiya testi: `e2e/tests/mediapipe-csp.spec.ts`.
         response.setdefault(
             "Content-Security-Policy",
-            "default-src 'self'; img-src 'self' data: https: blob:; "
+            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; "
+            "worker-src 'self' blob:; img-src 'self' data: https: blob:; "
             "connect-src 'self' https: wss:; media-src 'self' blob:; "
             "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
         )

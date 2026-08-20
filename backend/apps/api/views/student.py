@@ -375,11 +375,13 @@ def student_proctor_diagnostics(request):
     stage = str(d.get("stage") or "")[:40]
     ok = bool(d.get("ok"))
     detail = str(d.get("detail") or "")[:600]
+    env = str(d.get("env") or "")[:400]
     exam_id = str(d.get("exam_id") or "")[:20]
 
     line = (
         f"[PROCTOR-DIAG] student={getattr(u, 'id', '?')} exam={exam_id or '-'} "
         f"stage={stage or '-'} ok={ok} detail={detail or '-'}"
+        + (f" env=[{env}]" if env else "")
     )
     # Yiqilish `error` darajasida — prod log filtrlarida ham ko'rinsin.
     if ok:

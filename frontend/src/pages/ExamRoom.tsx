@@ -655,10 +655,33 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
       sentDiagRef.current.add(key);
       const path = '/api/student/proctor-diagnostics';
       try {
+        // Muhit surati — nosozlik faqat ayrim mashinalarda uchraydi va bu
+        // ma'lumotsiz sababni topib bo'lmaydi (qaysi brauzer, SIMD bormi,
+        // qancha xotira). Shaxsiy ma'lumot yo'q.
+        const nav = navigator as any;
+        let simd = 'unknown';
+        try {
+          // WebAssembly SIMD qo'llab-quvvatlanadimi — MediaPipe shunga qarab
+          // `vision_wasm_internal` yoki `nosimd` variantini tanlaydi.
+          simd = String(
+            WebAssembly.validate(
+              new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]),
+            ),
+          );
+        } catch {
+          simd = 'error';
+        }
+        const env = [
+          `ua=${(navigator.userAgent || '').slice(0, 120)}`,
+          `simd=${simd}`,
+          `cores=${nav.hardwareConcurrency ?? '?'}`,
+          `mem=${nav.deviceMemory ?? '?'}`,
+          `isolated=${typeof crossOriginIsolated !== 'undefined' ? crossOriginIsolated : '?'}`,
+        ].join(' ');
         await fetch(apiUrl(path), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...(await nextGuardHeaders('POST', path)) },
-          body: JSON.stringify({ stage, ok, detail: detail || '', exam_id: exam.id }),
+          body: JSON.stringify({ stage, ok, detail: detail || '', env, exam_id: exam.id }),
         });
       } catch {
         /* diagnostika imtihonga xalaqit bermasin */
