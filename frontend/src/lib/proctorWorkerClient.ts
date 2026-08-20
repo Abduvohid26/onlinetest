@@ -30,25 +30,27 @@ const DETECT_TIMEOUT_MS = 4_000;
 /**
  * Worker yo'lidan foydalanish mumkinmi — SOF funksiya (test qilinadi).
  *
- * Bu qaror nazorat uchun kritik: `false` qaytsa eski (asosiy oqim) yo'li
- * ishlaydi va proctoring baribir davom etadi. Xato `true` esa nazoratni
- * butunlay o'chirib qo'yishi mumkin edi (worker ko'tarilmay, zaxira ham
- * ishga tushmay) — shuning uchun har bir shart alohida tekshiriladi.
+ * DEFAULT: O'CHIQ. Worker ishlab chiqarishda hali sinalmagan va uni yoqib
+ * qo'yish real tizimda nazoratni yo'qotish xavfini tug'diradi. Yoqish:
+ * `VITE_PROCTOR_WORKER=1`. Sinalgach default o'zgartiriladi.
+ *
+ * `false` qaytsa asosiy oqim yo'li ishlaydi va proctoring davom etadi.
  */
 export function canUseProctorWorker(caps: {
-  disabledFlag?: string;
+  /** `VITE_PROCTOR_WORKER`. Worker DEFAULT O'CHIQ — yoqish uchun "1". */
+  enabledFlag?: string;
   hasWorker: boolean;
   hasCreateImageBitmap: boolean;
   hasOffscreenCanvas: boolean;
 }): boolean {
-  if (String(caps.disabledFlag || '') === '0') return false;
+  if (String(caps.enabledFlag || '') !== '1') return false;
   return caps.hasWorker && caps.hasCreateImageBitmap && caps.hasOffscreenCanvas;
 }
 
 function workerEnabled(): boolean {
   const env = (import.meta as any).env || {};
   return canUseProctorWorker({
-    disabledFlag: env.VITE_PROCTOR_WORKER,
+    enabledFlag: env.VITE_PROCTOR_WORKER,
     hasWorker: typeof Worker !== 'undefined',
     hasCreateImageBitmap: typeof createImageBitmap === 'function',
     hasOffscreenCanvas: typeof OffscreenCanvas !== 'undefined',

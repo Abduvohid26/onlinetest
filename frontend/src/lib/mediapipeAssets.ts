@@ -43,8 +43,22 @@ const CDN: MediapipeAssetSet = {
 };
 
 /**
- * Sinab ko'riladigan manbalar, tartib bo'yicha. Har qanday `VITE_MEDIAPIPE_*`
- * env berilgan bo'lsa — admin ataylab tanlagan, zaxira qo'shilmaydi.
+ * Sinab ko'riladigan manbalar, tartib bo'yicha.
+ *
+ * TARTIB: CDN birinchi, lokal zaxira.
+ *
+ * NEGA aynan shunday: bir muddat lokal manba birinchi edi, lekin ishlab
+ * turgan tizimda MediaPipe lokal WASM bilan ishga tushmadi va butun real-time
+ * nazorat o'chib qoldi — CDN bilan esa ishlagan. Isbotlanmagan yo'lni birinchi
+ * qo'yish nazoratni yo'qotish demak, shuning uchun ishlashi ma'lum yo'l
+ * birinchi turadi.
+ *
+ * Lokal manba ZAXIRA sifatida qoladi — CDN bloklangan tarmoqdagi talaba uchun
+ * (asl maqsad shu edi va u hamon kuchda).
+ *
+ * `VITE_MEDIAPIPE_LOCAL_FIRST=1` — tartibni teskari qilib sinash uchun.
+ * Har qanday `VITE_MEDIAPIPE_*` wasm/model env berilsa — admin ataylab
+ * tanlagan, zaxira umuman qo'shilmaydi.
  */
 export function mediapipeAssetSources(): MediapipeAssetSet[] {
   const overridden =
@@ -64,5 +78,5 @@ export function mediapipeAssetSources(): MediapipeAssetSet[] {
       },
     ];
   }
-  return [LOCAL, CDN];
+  return String(env.VITE_MEDIAPIPE_LOCAL_FIRST || '') === '1' ? [LOCAL, CDN] : [CDN, LOCAL];
 }
