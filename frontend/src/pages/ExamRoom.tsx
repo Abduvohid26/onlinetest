@@ -456,6 +456,31 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
   const [banLastReason, setBanLastReason] = useState<string | null>(null);
   const [banReasonCode, setBanReasonCode] = useState<string | null>(null);
   const [warningHistory, setWarningHistory] = useState<WarningHistoryItem[]>([]);
+
+  /**
+   * Ogohlantirishlar ro'yxatiga yozuv qo'shish — YAGONA joy.
+   *
+   * Ilgari uchta chaqiruv joyi bor edi va HAR BIRIDA boshqacha dublikat
+   * tekshiruvi yozilgandi. Retake yo'lidagi shart (`reason === ... && number ===
+   * prev.length`) noto'g'ri edi: bir xil turdagi qoidabuzarlik takrorlansa
+   * (masalan ikki marta "yuzingizni burmang") yangi yozuv umuman qo'shilmasdi,
+   * ustiga raqam `prev.length + 1` bilan berilib boshqa oqim qo'ygan raqamlar
+   * bilan to'qnashardi.
+   *
+   * Endi qoida bitta: raqam bo'yicha dublikat tekshiriladi, tartib saqlanadi.
+   * Raqam berilmasa — ro'yxatdagi eng kattasidan keyingisi olinadi.
+   */
+  const pushWarningHistory = useCallback((reason: string, number?: number) => {
+    const text = String(reason || '').trim();
+    if (!text) return;
+    setWarningHistory((prev) => {
+      const num = typeof number === 'number' && number > 0
+        ? number
+        : prev.reduce((mx, w) => Math.max(mx, w.number), 0) + 1;
+      if (prev.some((w) => w.number === num)) return prev;
+      return [...prev, { number: num, reason: text }].sort((a, b) => a.number - b.number);
+    });
+  }, []);
   // Ogohlantirish modal
   const [violationWarning, setViolationWarning] = useState<ViolationWarning | null>(null);
   // Modal ochiqligida yangi violationlar serverga yuborilmasin
@@ -1764,12 +1789,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
                 }
                 setBanned(false);
                 setUnblockReady(false);
-                if (reason) {
-                  setWarningHistory((prev) => {
-                    if (prev.some((w) => w.reason === reason && w.number === prev.length)) return prev;
-                    return [...prev, { number: prev.length + 1, reason }];
-                  });
-                }
+                pushWarningHistory(reason);
                 setExamRetakeNotice({
                   remaining,
                   used: typeof md.retakes_used === 'number' ? md.retakes_used : 0,
@@ -2282,10 +2302,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
             : typeof data.officialWarnings === 'number' && data.officialWarnings > 0
               ? data.officialWarnings
               : maxOfficialWarnings;
-        setWarningHistory((prev) => {
-          if (prev.some((w) => w.number === warnNum)) return prev;
-          return [...prev, { number: warnNum, reason: reasonText }].sort((a, b) => a.number - b.number);
-        });
+        pushWarningHistory(reasonText, warnNum);
         if (typeof data.violationsCount === 'number') {
           setBanViolationsCount(data.violationsCount);
         } else {
@@ -2324,12 +2341,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           releaseCameraAndMic();
           return;
         }
-        if (reasonText) {
-          setWarningHistory((prev) => {
-            if (prev.some((w) => w.reason === reasonText && w.number === prev.length)) return prev;
-            return [...prev, { number: prev.length + 1, reason: reasonText }];
-          });
-        }
+        pushWarningHistory(reasonText);
         setExamRetakeNotice({
           remaining,
           used,
@@ -2347,10 +2359,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
           ? data.warningNumber
           : Math.max(1, official);
       const reasonText = data.violationReason || t.violationReasonFallback;
-      setWarningHistory((prev) => {
-        if (prev.some((w) => w.number === shownNumber)) return prev;
-        return [...prev, { number: shownNumber, reason: reasonText }].sort((a, b) => a.number - b.number);
-      });
+      pushWarningHistory(reasonText, shownNumber);
       setStrikeLevel(official > 0 ? official : shownNumber);
       fullscreenSuppressRef.current = true;
       warningModalShowingRef.current = true;
@@ -2985,7 +2994,15 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
               </p>
               <p className="text-[14px] font-semibold text-gray-900 leading-relaxed">{reasonText}</p>
             </div>
-            <ViolationHistoryList history={warningHistory} label={t.banWarningHistoryLabel} />
+            {/* Ikki xil hisob ATAYLAB ajratilgan. Ilgari ular yonma-yon turardi va
+                talaba "2 marta sarflandi" ni ogohlantirishlar soni deb o'qirdi —
+                aslida u QAYTA TOPSHIRISH hisobi. Ogohlantirishlar esa har yangi
+                urinishda noldan boshlanadi (backend `proctor_official_warnings=0`
+                qiladi), shuning uchun sarlavha "shu urinishdagi" deb aniqlashtirildi. */}
+            <ViolationHistoryList
+              history={warningHistory}
+              label={t.technicalRetakeWarningsLabel}
+            />
             <p className="text-gray-800 mb-2 leading-relaxed text-sm font-semibold">
               {t.technicalRetakeUsedRemaining
                 .replace('{used}', String(examRetakeNotice.used))

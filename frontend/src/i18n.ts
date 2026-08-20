@@ -282,7 +282,8 @@ export const translations = {
     technicalRetakeBody:
       "Bu urinishdan chetlatildingiz. Imtihon vaqti tugamaguncha bosh sahifadagi “Qayta boshlash” tugmasi orqali istalgan vaqtda qaytadan kirishingiz mumkin. Qaytmasangiz yoki vaqt tugasa, shu urinish natijasi yoziladi.",
     technicalRetakeUsedRemaining:
-      "{used} marta sarflandi · Yana {remaining} ta imkoniyat qoldi",
+      "Qayta topshirish: {used} ta sarflandi · yana {remaining} ta qoldi",
+    technicalRetakeWarningsLabel: "Shu urinishdagi ogohlantirishlar",
     technicalRetakeBackBtn: "Bosh sahifaga qaytish",
     technicalRetakeRestartBtn: "Qayta boshlash",
     technicalRetakeRestartNow: "Hozir qayta boshlash",
@@ -1161,7 +1162,8 @@ export const translations = {
     technicalRetakeBody:
       "Вы отстранены от этой попытки. Пока экзамен открыт, вы можете начать заново в любое время кнопкой «Начать заново» на главной. Если не вернётесь или время выйдет — засчитается результат этой попытки.",
     technicalRetakeUsedRemaining:
-      "Использовано {used} · Осталось {remaining} попыток",
+      "Пересдача: использовано {used} · осталось {remaining}",
+    technicalRetakeWarningsLabel: 'Предупреждения этой попытки',
     technicalRetakeBackBtn: "На главную",
     technicalRetakeRestartBtn: "Начать заново",
     technicalRetakeRestartNow: "Начать сейчас",
@@ -2036,7 +2038,8 @@ export const translations = {
     technicalRetakeBody:
       "You've been removed from this attempt. While the exam is open you can restart anytime with the “Restart” button on your dashboard. If you don't return or time runs out, this attempt's result is recorded.",
     technicalRetakeUsedRemaining:
-      "{used} used · {remaining} attempt(s) left",
+      "Retakes: {used} used · {remaining} left",
+    technicalRetakeWarningsLabel: 'Warnings in this attempt',
     technicalRetakeBackBtn: "Back to dashboard",
     technicalRetakeRestartBtn: "Restart",
     technicalRetakeRestartNow: "Restart now",

@@ -87,21 +87,47 @@ class ExamRetakeTests(TestCase):
         )
         self.assertIsNone(payload2)
 
-    def test_violation_last_retake_bans(self):
-        self.se.technical_retakes_used = 2
-        self.se.save(update_fields=["technical_retakes_used"])
-        payload = try_apply_exam_retake(
-            self.se,
-            self.exam,
-            reason_text="Final strike",
-            violations_count=5,
-            violation_type="HAND_GESTURE_SUSPECTED",
-        )
-        self.assertIsNotNone(payload)
-        self.assertTrue(payload["banned"])
-        self.assertFalse(payload.get("examRetake"))
-        self.se.refresh_from_db()
-        self.assertEqual(self.se.technical_retakes_used, 3)
-        self.assertEqual(self.se.status, "Banned")
-        self.assertEqual(self.se.ban_reason, "RETAKE_EXHAUSTED")
+    def test_violation_all_allowed_retakes_are_granted(self):
+        """`allowed=3` — UCHALASI ham beriladi, ban faqat 4-qoidabuzarlikda.
+
+        REGRESSIYA: ilgari hisoblagich oshirilgach `remaining <= 0` bo'lsa darhol
+        ban qilinardi. Natijada oxirgi ruxsat etilgan qayta topshirish HECH QACHON
+        berilmasdi — talaba 3 emas, 2 ta olardi va ekranda "yana 1 ta imkoniyat
+        qoldi" deb yozilgan holda banlanardi.
+
+        Yonidagi identity yo'li allaqachon to'g'ri ishlaydi (`allowed=1` → 1 ta
+        beriladi, 2-chisida None) — bu test technical yo'li ham shunday
+        bo'lishini qo'riqlaydi.
+        """
+        self.assertEqual(violation_retakes_remaining(self.se, self.exam), 3)
+
+        for expected_used in (1, 2, 3):
+            self.se.status = "In Progress"
+            self.se.save(update_fields=["status"])
+            payload = try_apply_exam_retake(
+                self.se,
+                self.exam,
+                reason_text=f"Strike {expected_used}",
+                violations_count=expected_used,
+                violation_type="HAND_GESTURE_SUSPECTED",
+            )
+            self.assertIsNotNone(payload, f"{expected_used}-qayta topshirish berilishi kerak")
+            self.assertTrue(payload["examRetake"], f"{expected_used}: retake bo'lishi kerak")
+            self.assertFalse(payload.get("banned"), f"{expected_used}: ban BO'LMASLIGI kerak")
+            self.se.refresh_from_db()
+            self.assertEqual(self.se.technical_retakes_used, expected_used)
+            self.assertEqual(self.se.status, "Pending")
+
+        # Byudjet tugadi — endi retake yo'q, chaqiruvchi ban qiladi.
         self.assertEqual(violation_retakes_remaining(self.se, self.exam), 0)
+        self.se.status = "In Progress"
+        self.se.save(update_fields=["status"])
+        self.assertIsNone(
+            try_apply_exam_retake(
+                self.se,
+                self.exam,
+                reason_text="Bir dona ortiqcha",
+                violations_count=9,
+                violation_type="HAND_GESTURE_SUSPECTED",
+            )
+        )

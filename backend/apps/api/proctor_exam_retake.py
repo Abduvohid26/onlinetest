@@ -3,10 +3,6 @@ from __future__ import annotations
 
 from apps.core.models import Exam, StudentExam
 
-from apps.api.proctor_ban_reason import (
-    BAN_REASON_RETAKE_EXHAUSTED,
-    apply_exam_ban,
-)
 
 IDENTITY_VIOLATION_TYPE = "IDENTITY_SUBSTITUTION"
 
@@ -106,48 +102,23 @@ def _retake_response(
     }
 
 
-def _ban_after_retake_response(
-    *,
-    reason_text: str,
-    violations_count: int,
-    retakes_used: int,
-    identity_retake: bool,
-    ban_reason: str = BAN_REASON_RETAKE_EXHAUSTED,
-    official_warnings: int = 3,
-) -> dict:
-    """Oxirgi qayta topshirish sarflanganda — ban javobi."""
-    return {
-        "banned": True,
-        "banReason": ban_reason,
-        "examRetake": False,
-        "technicalRetake": False,
-        "identityRetake": identity_retake,
-        "retakesRemaining": 0,
-        "technicalRetakesRemaining": 0,
-        "retakesUsed": retakes_used,
-        "technicalRetakesUsed": retakes_used,
-        "violationsCount": violations_count,
-        "warningNumber": official_warnings,
-        "violationReason": reason_text,
-        "isFinalWarning": False,
-        "warningSuppressed": False,
-        "officialWarnings": official_warnings,
-        "retakeExhausted": True,
-    }
-
-
 def exam_retakes_exhausted(se: StudentExam, exam: Exam) -> bool:
     """Berilgan qayta topshirishni resume qilib bo'lmaydimi (start bloklanadi).
 
-    MUHIM: hisoblagich (technical/identity_retakes_used) retake BERILGANDA oshiriladi,
-    va `..._remaining()` max(0, ...) bilan cheklangan (hech qachon manfiy emas). Shu sabab
-    "remaining == 0" ni "tugagan" deb hisoblab bo'lmaydi — yangi berilgan (lekin hali
-    resume qilinmagan) identity retake uchun ham remaining == 0 bo'ladi; aks holda talaba
-    berilgan retake'ni hech qachon resume qila olmasdi. To'g'ri mezon: `used > budget`,
-    ya'ni admin ruxsatni keyin kamaytirgan va talaba allaqachon ko'proq retake ishlatib
-    qo'ygan. Oddiy oqimda `used <= budget` (grant paytida remaining > 0 tekshiriladi), shu
-    sabab Pending sessiya doim resume qilinadi; keyingi qoidabuzarlik try_apply_exam_retake
-    ichida (remaining <= 0) ban qiladi.
+    MUHIM — bu `try_apply_exam_retake` dagi tekshiruv bilan BIR XIL EMAS va shunday
+    bo'lishi ham kerak. Ikkalasi turli savolga javob beradi:
+
+      `try_apply_exam_retake`  → "yangi retake BERISH mumkinmi?"  (remaining > 0)
+      `exam_retakes_exhausted` → "berilganini RESUME qilish mumkinmi?" (used > budget)
+
+    Hisoblagich retake BERILGANDA oshiriladi, `..._remaining()` esa max(0, ...) bilan
+    cheklangan. Shu sabab endigina berilgan oxirgi retake uchun `remaining == 0` bo'ladi —
+    agar bu yerda ham `remaining <= 0` ishlatilsa, talaba haqli ravishda berilgan
+    retake'ni hech qachon resume qila olmasdi.
+
+    `used > budget` faqat admin ruxsat sonini KEYIN kamaytirgan holatda rost bo'ladi.
+    Oddiy oqimda Pending sessiya doim resume qilinadi; byudjet tugagach keyingi
+    qoidabuzarlikda `try_apply_exam_retake` None qaytaradi va chaqiruvchi ban qiladi.
     """
     v_used = max(0, int(getattr(se, "technical_retakes_used", 0) or 0))
     id_used = max(0, int(getattr(se, "identity_retakes_used", 0) or 0))
@@ -186,21 +157,21 @@ def try_apply_exam_retake(
         )
 
     if violation_retakes_remaining(se, exam) <= 0:
+        # Byudjet tugagan — retake yo'q. Chaqiruvchi ban qiladi.
         return None
 
+    # DIQQAT: ilgari bu yerda hisoblagich oshirilgach `remaining <= 0` bo'lsa
+    # DARHOL ban qilinardi. Natijada OXIRGI ruxsat etilgan qayta topshirish hech
+    # qachon berilmasdi: `allowed=3` bo'lsa talaba 3 emas, 2 ta olardi va
+    # 3-qoidabuzarlikda "yana 1 ta imkoniyat qoldi" deb yozilgan holda banlanardi.
+    #
+    # To'g'ri mezon yuqorida: byudjet BOR bo'lsa retake beriladi. Byudjet
+    # tugagach keyingi qoidabuzarlikda `return None` ishlaydi va ban bo'ladi.
+    # Yuqoridagi identity yo'li allaqachon aynan shunday ishlaydi (`allowed=1` →
+    # 1 ta beriladi, 2-chisida None) — technical yo'li unga moslashtirildi.
     se.technical_retakes_used = int(getattr(se, "technical_retakes_used", 0) or 0) + 1
     remaining = violation_retakes_remaining(se, exam)
     used = se.technical_retakes_used
-    if remaining <= 0:
-        apply_exam_ban(se, BAN_REASON_RETAKE_EXHAUSTED, extra_fields=["technical_retakes_used"])
-        se.save(update_fields=["status", "ban_reason", "technical_retakes_used"])
-        return _ban_after_retake_response(
-            reason_text=reason_text,
-            violations_count=violations_count,
-            retakes_used=used,
-            identity_retake=False,
-            ban_reason=BAN_REASON_RETAKE_EXHAUSTED,
-        )
     update_fields = reset_fields_for_exam_retake(se)
     update_fields.append("technical_retakes_used")
     se.save(update_fields=list(dict.fromkeys(update_fields)))

@@ -54,7 +54,12 @@ def apply_official_warning_or_ban(
     exam_id: int,
     reason_text: str,
     violations_count: int,
-    max_warnings_before_ban: int = 3,
+    # DIQQAT: standart qiymat `None`. Ilgari bu yerda qattiq `3` turardi va
+    # `PROCTOR_MAX_WARNINGS_BEFORE_BAN` boshqa qiymatga sozlangan bo'lsa,
+    # argumentni uzatishni unutgan chaqiruvchi jimgina 3 ni ishlatib yuborardi —
+    # ya'ni ban chegarasi joyiga qarab har xil bo'lib qolishi mumkin edi.
+    # Endi berilmasa yagona manbadan (`proctor_config`) o'qiladi.
+    max_warnings_before_ban: int | None = None,
     auto_ban: bool = True,
     global_account_ban: bool = False,
     exam: Exam | None = None,
@@ -64,6 +69,11 @@ def apply_official_warning_or_ban(
     yetganda ban qiladi (yoki `auto_ban=False` bo'lsa inson tekshiruviga yuboradi).
     `se`ni saqlaydi. `student_violations()`ning oddiy (non-hardened,
     non-instant-ban) javob shakliga mos dict qaytaradi."""
+    if max_warnings_before_ban is None:
+        from apps.api.proctor_config import max_warnings_before_ban as _cfg_max
+
+        max_warnings_before_ban = _cfg_max()
+
     se.proctor_official_warnings = int(se.proctor_official_warnings or 0) + 1
     se.proctor_last_warning_at = dj_tz.now()
 
