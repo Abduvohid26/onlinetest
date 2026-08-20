@@ -9,7 +9,7 @@
  */
 
 import { ContinuousSignalTracker } from './continuousSignal';
-import { createWithDelegateFallback } from './mediapipeDelegate';
+import { createWithDelegateFallback, formatDelegateErrors } from './mediapipeDelegate';
 import { mediapipeAssetSources } from './mediapipeAssets';
 
 const WASM_BASE =
@@ -98,6 +98,8 @@ export class ForbiddenObjectProctor {
   private detector: DetectorApi | null = null;
   private timer: number | null = null;
   private disposed = false;
+  /** Oxirgi init xatosi — server logiga yuborish uchun (prod'da console yo'q). */
+  private initError = '';
   private trackers = new Map<string, ContinuousSignalTracker>();
   private lastFormalAt = new Map<string, number>();
 
@@ -125,7 +127,7 @@ export class ForbiddenObjectProctor {
       const src = mediapipeAssetSources()[0];
       const fileset = await FilesetResolver.forVisionTasks(src.wasmBase);
       // GPU → CPU zaxirasi (realtimeProctor bilan bir xil sabab).
-      this.detector = await createWithDelegateFallback(ObjectDetector, fileset, {
+      const objRes = await createWithDelegateFallback(ObjectDetector, fileset, {
         baseOptions: {
           modelAssetPath: src.objectModel,
         },
@@ -135,8 +137,9 @@ export class ForbiddenObjectProctor {
         // tushib qolmasin — chegara kengaytirildi.
         maxResults: 16,
       });
+      this.detector = objRes.task;
       if (!this.detector) {
-        throw new Error('object detector: GPU va CPU delegate ikkalasi ham ishlamadi');
+        throw new Error(`object detector: ${formatDelegateErrors(objRes.errors) || 'noma\'lum'}`);
       }
       if (this.disposed) {
         this.dispose();
@@ -146,10 +149,17 @@ export class ForbiddenObjectProctor {
       console.info('[object-proctor] tayyor (cell phone / book / laptop)');
       return true;
     } catch (err) {
-      console.warn('[object-proctor] yuklanmadi:', err);
+      // Sabab server logiga yuboriladi — prod build console.* ni olib tashlaydi.
+      this.initError = String((err as Error)?.message || err || '').slice(0, 400);
+      console.error('[object-proctor] yuklanmadi:', err);
       this.ready = false;
       return false;
     }
+  }
+
+  /** Init nima uchun yiqilgani (bo'sh = xato yo'q). */
+  lastError(): string {
+    return this.initError;
   }
 
   start(): void {

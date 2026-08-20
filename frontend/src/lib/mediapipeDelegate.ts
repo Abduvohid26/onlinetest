@@ -17,24 +17,42 @@
  *
  * `null` = ikkalasi ham ishlamadi (chaqiruvchi zaxira yo'liga o'tadi).
  */
+export interface DelegateResult {
+  task: any | null;
+  /** Ikkalasi ham yiqilsa — HAR BIR delegate uchun xato matni. Server logiga
+   *  yuboriladi; umumiy "ishlamadi" xabari sababni yashirib qo'yardi. */
+  errors?: Record<string, string>;
+}
+
 export async function createWithDelegateFallback(
   Task: any,
   fileset: any,
   opts: any,
-): Promise<any | null> {
-  if (!Task?.createFromOptions) return null;
-  let lastErr: unknown = null;
+): Promise<DelegateResult> {
+  if (!Task?.createFromOptions) {
+    return { task: null, errors: { module: 'Task sinfi mavjud emas' } };
+  }
+  const errors: Record<string, string> = {};
   for (const delegate of ['GPU', 'CPU'] as const) {
     try {
-      return await Task.createFromOptions(fileset, {
+      const task = await Task.createFromOptions(fileset, {
         ...opts,
         baseOptions: { ...opts.baseOptions, delegate },
       });
+      return { task };
     } catch (err) {
-      lastErr = err;
+      errors[delegate] = String((err as Error)?.message || err).slice(0, 200);
     }
   }
   // console.error — prod build faqat shuni saqlaydi (vite.config.ts pure_funcs).
-  console.error('[mediapipe] GPU va CPU delegate ikkalasi ham ishlamadi:', lastErr);
-  return null;
+  console.error('[mediapipe] GPU va CPU delegate ikkalasi ham ishlamadi:', errors);
+  return { task: null, errors };
+}
+
+/** Xatolarni bitta qatorga — server logiga yuborish uchun. */
+export function formatDelegateErrors(errors?: Record<string, string>): string {
+  if (!errors) return '';
+  return Object.entries(errors)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' | ');
 }

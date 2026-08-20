@@ -128,12 +128,12 @@ async function createFaceLandmarker(numFaces = 1): Promise<any | null> {
     } catch {
       continue; // WASM olinmadi — keyingi manba
     }
-    const lm = await createWithDelegateFallback(FaceLandmarker, fileset, {
+    const res = await createWithDelegateFallback(FaceLandmarker, fileset, {
       baseOptions: { modelAssetPath: src.faceModel },
       runningMode: 'VIDEO' as const,
       numFaces,
     });
-    if (lm) return lm;
+    if (res.task) return res.task;
   }
   return null;
 }

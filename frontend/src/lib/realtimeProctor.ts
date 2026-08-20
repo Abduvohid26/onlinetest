@@ -14,7 +14,7 @@
  * lazy-load qilinadi — `lib/mediapipeAssets.ts` ga qarang.
  */
 
-import { createWithDelegateFallback } from './mediapipeDelegate';
+import { createWithDelegateFallback, formatDelegateErrors } from './mediapipeDelegate';
 import { mediapipeAssetSources } from './mediapipeAssets';
 
 export type RealtimeViolation =
@@ -362,7 +362,7 @@ export class RealtimeProctor {
         // GPU → CPU zaxirasi SHART: GPU-only chaqiruv apparat tezlashtirish
         // o'chiq mashinada model olishdan OLDIN yiqiladi va butun real-time
         // nazorat jimgina o'chib qolardi.
-        this.faceLandmarker = await createWithDelegateFallback(FaceLandmarker, fileset, {
+        const faceRes = await createWithDelegateFallback(FaceLandmarker, fileset, {
           baseOptions: { modelAssetPath: src.faceModel },
           runningMode: 'VIDEO',
           // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
@@ -371,17 +371,22 @@ export class RealtimeProctor {
           outputFaceBlendshapes: true,
           outputFacialTransformationMatrixes: false,
         });
+        this.faceLandmarker = faceRes.task;
         if (!this.faceLandmarker) {
-          throw new Error('face landmarker: GPU va CPU delegate ikkalasi ham ishlamadi');
+          // Asl sabab SHU YERDA — umumiy xabar uni yashirib qo'yardi.
+          throw new Error(
+            `face landmarker (${src.origin}): ${formatDelegateErrors(faceRes.errors) || 'noma\'lum'}`,
+          );
         }
 
         // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
-        this.handLandmarker = await createWithDelegateFallback(HandLandmarker, fileset, {
+        const handRes = await createWithDelegateFallback(HandLandmarker, fileset, {
           baseOptions: { modelAssetPath: src.handModel },
           runningMode: 'VIDEO',
           // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
           numHands: 1,
         });
+        this.handLandmarker = handRes.task;
 
         if (this.disposed) {
           this.dispose();

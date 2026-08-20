@@ -2345,7 +2345,7 @@ export function ExamRoom({ exam: initialExam, studentExamId: initialStudentExamI
     objectProctorRef.current = proctor;
 
     void proctor.init().then((ok) => {
-      void reportProctorDiag('object-proctor', ok);
+      void reportProctorDiag('object-proctor', ok, ok ? undefined : proctor.lastError());
       if (cancelled || !ok) return;
       proctor.start();
     });
