@@ -9,6 +9,7 @@
  */
 
 import { ContinuousSignalTracker } from './continuousSignal';
+import { createWithDelegateFallback } from './mediapipeDelegate';
 
 const WASM_BASE =
   (import.meta as any).env?.VITE_MEDIAPIPE_WASM_BASE ||
@@ -121,10 +122,10 @@ export class ForbiddenObjectProctor {
         return false;
       }
       const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-      this.detector = await ObjectDetector.createFromOptions(fileset, {
+      // GPU → CPU zaxirasi (realtimeProctor bilan bir xil sabab).
+      this.detector = await createWithDelegateFallback(ObjectDetector, fileset, {
         baseOptions: {
           modelAssetPath: OBJECT_MODEL,
-          delegate: 'GPU',
         },
         scoreThreshold: DETECTOR_MIN_SCORE,
         runningMode: 'VIDEO',
@@ -132,6 +133,9 @@ export class ForbiddenObjectProctor {
         // tushib qolmasin — chegara kengaytirildi.
         maxResults: 16,
       });
+      if (!this.detector) {
+        throw new Error('object detector: GPU va CPU delegate ikkalasi ham ishlamadi');
+      }
       if (this.disposed) {
         this.dispose();
         return false;

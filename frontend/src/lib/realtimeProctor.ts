@@ -13,6 +13,8 @@
  *   VITE_MEDIAPIPE_WASM_BASE, VITE_MEDIAPIPE_FACE_MODEL, VITE_MEDIAPIPE_HAND_MODEL
  */
 
+import { createWithDelegateFallback } from './mediapipeDelegate';
+
 export type RealtimeViolation =
   | 'FACE_NOT_VISIBLE'
   | 'MULTIPLE_FACES'
@@ -360,8 +362,13 @@ export class RealtimeProctor {
       const { FilesetResolver, FaceLandmarker, HandLandmarker } = vision;
       const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
 
-      this.faceLandmarker = await FaceLandmarker.createFromOptions(fileset, {
-        baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'GPU' },
+      // GPU → CPU zaxirasi SHART: GPU-only chaqiruv apparat tezlashtirish
+      // o'chiq mashinada model olishdan OLDIN yiqiladi va butun real-time
+      // nazorat jimgina o'chib qolardi (`facePositionCheck.ts` da bu zaxira
+      // bor edi — shuning uchun imtihon oldi tekshiruvi ishlar, imtihon
+      // ichidagi nazorat esa ishlamasdi).
+      this.faceLandmarker = await createWithDelegateFallback(FaceLandmarker, fileset, {
+        baseOptions: { modelAssetPath: FACE_MODEL },
         runningMode: 'VIDEO',
         // Performance: 2 ta yuz yetarli (ko'p yuz = >=2 ni aniqlash uchun). 3 ta yuz
         // izlash har kadrda ortiqcha yuk edi.
@@ -369,18 +376,17 @@ export class RealtimeProctor {
         outputFaceBlendshapes: true,
         outputFacialTransformationMatrixes: false,
       });
+      if (!this.faceLandmarker) {
+        throw new Error('face landmarker: GPU va CPU delegate ikkalasi ham ishlamadi');
+      }
 
       // Qo'l/imo-ishora — yuklanmasa ham face detection ishlayveradi.
-      try {
-        this.handLandmarker = await HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
-          runningMode: 'VIDEO',
-          // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
-          numHands: 1,
-        });
-      } catch {
-        this.handLandmarker = null;
-      }
+      this.handLandmarker = await createWithDelegateFallback(HandLandmarker, fileset, {
+        baseOptions: { modelAssetPath: HAND_MODEL },
+        runningMode: 'VIDEO',
+        // Performance: bitta qo'l yetarli (qo'l bor/yo'qligini bilish uchun).
+        numHands: 1,
+      });
 
       if (this.disposed) {
         this.dispose();
