@@ -1,0 +1,48 @@
+# Yangi domen uchun namuna: appi.online-imtixon.uz
+#
+#   sudo cp deploy/nginx/appi-subdomain.conf.example \
+#           /etc/nginx/sites-available/appi.online-imtixon.uz
+#   sudo ln -s /etc/nginx/sites-available/appi.online-imtixon.uz /etc/nginx/sites-enabled/
+#   sudo nginx -t && sudo systemctl reload nginx
+#   sudo certbot --nginx -d appi.online-imtixon.uz
+#
+# APP_PORT: `.env` dagi qiymat bilan BIR XIL bo'lishi shart (standart 8080).
+server {
+    listen 80;
+    server_name appi.online-imtixon.uz;
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=()" always;
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # DIQQAT — `'wasm-unsafe-eval'` VA `worker-src 'self' blob:` MAJBURIY.
+    #
+    # `script-src` ko'rsatilgan bo'lsa, Chrome ularsiz `WebAssembly.instantiate()`
+    # ni butunlay bloklaydi. MediaPipe esa to'liq WebAssembly ustida ishlaydi —
+    # natijada yuz, nigoh, bosh burilishi, pozitsiya, qo'l va brauzerdagi ob'ekt
+    # aniqlash JIMGINA o'chadi, tashqaridan esa kamera ishlayotgandek ko'rinadi.
+    #
+    # Bu xato ishlab chiqarishda allaqachon uchragan va topish uzoq vaqt olgan.
+    # Regressiya testi: e2e/tests/mediapipe-csp.spec.ts
+    # ─────────────────────────────────────────────────────────────────────────
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' wss: https:; frame-ancestors 'self'; base-uri 'self'; object-src 'none'" always;
+
+    # Imtihon kadrlari va kontingent yuklash uchun.
+    client_max_body_size 55m;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;   # ← APP_PORT bilan bir xil bo'lsin
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Proktoring kadr tahlili (Celery/AI) sekin bo'lishi mumkin.
+        proxy_read_timeout 120s;
+    }
+}

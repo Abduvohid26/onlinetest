@@ -38,13 +38,22 @@ docker compose exec -T db pg_dump -U onlinetest onlinetest | gzip > "$WORK/db.sq
 echo "    $(du -h "$WORK/db.sql.gz" | cut -f1)"
 
 # ── 2) .env ────────────────────────────────────────────────────────────────
-say "2/6 .env (parollar va API kalitlar)"
-if [[ -f "$ROOT/.env" ]]; then
-  cp "$ROOT/.env" "$WORK/env"
-  echo "    OK"
-else
-  warn ".env topilmadi — yangi serverda qo'lda yaratasiz"
-fi
+# DIQQAT: bittadan ko'p .env bor. `docker-compose.yml` `env_file: backend/.env`
+# ni ishlatadi — u yerda OPENAI_API_KEY, ALLOWED_HOSTS, CORS va boshqalar.
+# Faqat ildizdagi `.env` ko'chirilsa, ilova kalitsiz ko'tariladi va AI
+# funksiyalari jimgina o'chadi.
+say "2/6 .env fayllari"
+mkdir -p "$WORK/envs"
+FOUND_ENV=0
+for rel in .env backend/.env frontend/.env frontend/.env.production; do
+  if [[ -f "$ROOT/$rel" ]]; then
+    dest="$WORK/envs/${rel//\//__}"
+    cp "$ROOT/$rel" "$dest"
+    echo "    $rel"
+    FOUND_ENV=1
+  fi
+done
+[[ "$FOUND_ENV" == "1" ]] || warn "birorta .env topilmadi — yangi serverda qo'lda yaratasiz"
 
 # ── 3) data/ ───────────────────────────────────────────────────────────────
 # Bind mount (`./data:/app/data:ro`), git'da yo'q — ko'chirilmasa yo'qoladi.

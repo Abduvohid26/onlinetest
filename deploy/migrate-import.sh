@@ -36,13 +36,22 @@ fi
 cd "$ROOT"
 
 # ── 2) .env ────────────────────────────────────────────────────────────────
-say "2/6 .env"
-if [[ -f "$WORK/env" ]]; then
-  # Mavjudini hech qachon jimgina bosib ketmaymiz.
-  [[ -f "$ROOT/.env" ]] && cp "$ROOT/.env" "$ROOT/.env.bak-$(date +%s)" && warn "eskisi .env.bak-* ga saqlandi"
-  cp "$WORK/env" "$ROOT/.env"
-  chmod 600 "$ROOT/.env"
-  echo "    OK"
+say "2/6 .env fayllari"
+if [[ -d "$WORK/envs" ]] && compgen -G "$WORK/envs/*" >/dev/null; then
+  for f in "$WORK"/envs/*; do
+    rel="$(basename "$f")"; rel="${rel//__/\/}"
+    # Mavjudini hech qachon jimgina bosib ketmaymiz.
+    [[ -f "$ROOT/$rel" ]] && cp "$ROOT/$rel" "$ROOT/$rel.bak-$(date +%s)" && warn "$rel → .bak-* ga saqlandi"
+    mkdir -p "$(dirname "$ROOT/$rel")"
+    cp "$f" "$ROOT/$rel"
+    chmod 600 "$ROOT/$rel"
+    echo "    $rel"
+  done
+elif [[ -f "$WORK/env" ]]; then
+  # Eski formatdagi arxiv (faqat ildiz .env).
+  [[ -f "$ROOT/.env" ]] && cp "$ROOT/.env" "$ROOT/.env.bak-$(date +%s)"
+  cp "$WORK/env" "$ROOT/.env"; chmod 600 "$ROOT/.env"
+  warn "arxivda faqat ildiz .env bor — backend/.env ni QO'LDA ko'chiring"
 else
   warn ".env arxivda yo'q — .env.example dan yarating"
 fi
