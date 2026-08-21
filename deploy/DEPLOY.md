@@ -205,6 +205,52 @@ bash deploy/remote-update.sh --reset-admin       # XAVFLI: barcha user + imtihon
 - **Deploy hook** `timingSafeEqual` bilan solishtiradi; nginx orqali maxfiy sarlavha.
 - **WebSocket** ulanishda JWT majburiy (`?token=` query param); `join-exam` xabari assignment va rol tekshiradi — noto'g'ri bo'lsa `close(4001)` bilan yopiladi.
 
+## Boshqa serverga ko‘chirish
+
+Ikkita skript. Kod git’dan klon qilinadi — arxivda faqat git’da **bo‘lmagan**
+narsalar bo‘ladi: baza, `.env`, `data/`, nginx konfiguratsiyasi, TLS.
+
+**Eski serverda:**
+```bash
+sudo bash deploy/migrate-export.sh
+# → /root/onlinetest-migrate/onlinetest-migrate-<sana>.tar.gz
+scp /root/onlinetest-migrate/onlinetest-migrate-*.tar.gz root@YANGI_IP:/root/
+```
+
+**Yangi serverda:**
+```bash
+apt update && apt install -y docker.io docker-compose-plugin git nginx certbot python3-certbot-nginx
+git clone https://github.com/Abduvohid26/onlinetest.git /home/onlinetest
+sudo bash /home/onlinetest/deploy/migrate-import.sh /root/onlinetest-migrate-*.tar.gz
+```
+
+Import bazada jadval borligini tekshiradi va tasodifan ustiga yozmaydi
+(ataylab kerak bo‘lsa `FORCE_DB=1`). Mavjud `.env` ham `.env.bak-*` ga saqlanadi.
+
+**Baza `pg_dump` orqali ko‘chiriladi, `pg-data` volume nusxalanmaydi** — yangi
+serverda PostgreSQL versiyasi boshqacha bo‘lsa xom volume ochilmaydi.
+
+### CSP — ko‘chirishda eng ko‘p unutiladigan narsa
+
+nginx CSP’sida `script-src` bo‘lsa, unda **`'wasm-unsafe-eval'`** ham bo‘lishi
+shart, va `worker-src 'self' blob:` kerak:
+
+```
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; ..." always;
+```
+
+Usiz Chrome `WebAssembly.instantiate()` ni bloklaydi va MediaPipe umuman ishga
+tushmaydi — ya’ni yuz, nigoh, bosh burilishi, pozitsiya, qo‘l va brauzerdagi
+ob’ekt aniqlash **jimgina o‘chadi**, tashqaridan esa kamera ishlayotgandek
+ko‘rinadi. Ikkala skript ham buni tekshiradi va yo‘q bo‘lsa ogohlantiradi.
+Regressiya testi: `e2e/tests/mediapipe-csp.spec.ts`.
+
+### Ko‘chirish paytidagi ma’lumot
+
+Dump olingandan keyin eski serverda yozilgan hamma narsa yo‘qoladi. Imtihon
+bo‘lmagan vaqtda qiling, yoki DNS’ni o‘tkazishdan **oldin** eski serverni
+to‘xtatib, oxirgi dump’ni oling.
+
 ## Ma’lumotlarning doimiyligi (muhim)
 
 Ma’lumotlar **PostgreSQL** (`DATABASE_URL`) da saqlanadi (SQLite ishlatilmaydi).
