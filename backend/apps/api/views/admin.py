@@ -528,6 +528,11 @@ def admin_stats(request):
             "totalExams": Exam.objects.count(),
             "totalViolations": ViolationLog.objects.count(),
             "bannedUsers": AppUser.objects.filter(status="Banned").count(),
+            "totalKafedralar": Kafedra.objects.count(),
+            "totalDirections": Direction.objects.count(),
+            "totalLevels": Level.objects.count(),
+            "totalGroups": Group.objects.count(),
+            "totalStudents": AppUser.objects.filter(role="student").count(),
         }
     )
 

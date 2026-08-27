@@ -6,7 +6,7 @@ import { readJsonSafe, checkAdminAuthResponse } from '../../lib/http';
 import { AdminSectionLabel } from './ui';
 import type { AdminStats } from './types';
 
-type AdminPage = 'levels' | 'groups' | 'students' | 'banned' | 'staff' | 'exam_create' | 'exam_list';
+type AdminPage = 'levels' | 'kafedralar' | 'directions' | 'groups' | 'students' | 'banned' | 'staff' | 'exam_create' | 'exam_list';
 
 const STAT_CARDS = (t: TranslationBundle, s: AdminStats) => [
   {
@@ -55,6 +55,14 @@ const STAT_CARDS = (t: TranslationBundle, s: AdminStats) => [
   },
 ];
 
+const CONTINGENT_CARDS = (t: TranslationBundle, s: AdminStats) => [
+  { label: t.totalKafedralar, value: s.totalKafedralar, page: 'kafedralar' as AdminPage },
+  { label: t.totalDirections, value: s.totalDirections, page: 'directions' as AdminPage },
+  { label: t.totalLevels, value: s.totalLevels, page: 'levels' as AdminPage },
+  { label: t.totalGroups, value: s.totalGroups, page: 'groups' as AdminPage },
+  { label: t.totalStudents, value: s.totalStudents, page: 'students' as AdminPage },
+];
+
 const QUICK_ACTIONS = (t: TranslationBundle) => [
   {
     label: t.sidebarLevelsSub,
@@ -98,13 +106,6 @@ const QUICK_ACTIONS = (t: TranslationBundle) => [
   },
 ];
 
-const GUIDE_STEPS = (t: TranslationBundle) => [
-  { title: t.adminGuideStep1Title, body: t.adminGuideStep1Body, page: 'levels' as AdminPage },
-  { title: t.adminGuideStep2Title, body: t.adminGuideStep2Body, page: 'exam_create' as AdminPage },
-  { title: t.adminGuideStep3Title, body: t.adminGuideStep3Body, page: 'exam_create' as AdminPage },
-  { title: t.adminGuideStep4Title, body: t.adminGuideStep4Body, page: 'exam_list' as AdminPage },
-];
-
 interface Props {
   token: string;
   lang: Language;
@@ -113,7 +114,17 @@ interface Props {
 
 export function OverviewPage({ token, lang, onNavigate }: Props) {
   const t = translations[lang];
-  const [stats, setStats] = useState<AdminStats>({ totalUsers: 0, totalExams: 0, totalViolations: 0, bannedUsers: 0 });
+  const [stats, setStats] = useState<AdminStats>({
+    totalUsers: 0,
+    totalExams: 0,
+    totalViolations: 0,
+    bannedUsers: 0,
+    totalKafedralar: 0,
+    totalDirections: 0,
+    totalLevels: 0,
+    totalGroups: 0,
+    totalStudents: 0,
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -128,8 +139,8 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
   }, [token]);
 
   const cards = STAT_CARDS(t, stats);
+  const contingent = CONTINGENT_CARDS(t, stats);
   const quickActions = QUICK_ACTIONS(t);
-  const guideSteps = GUIDE_STEPS(t);
 
   return (
     <div className="space-y-7">
@@ -172,6 +183,27 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
       </section>
 
       <section>
+        <AdminSectionLabel>{t.overviewContingentSection}</AdminSectionLabel>
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+          {contingent.map(({ label, value, page }) => (
+            <button
+              key={label}
+              type="button"
+              onClick={() => onNavigate(page)}
+              className="text-left p-4 rounded-lg border border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50/50 transition-colors"
+            >
+              {loading ? (
+                <div className="h-7 w-14 bg-gray-100 animate-pulse rounded-md" />
+              ) : (
+                <p className="text-[24px] font-semibold leading-none tabular-nums text-gray-900">{value}</p>
+              )}
+              <p className="text-[13px] text-gray-500 mt-1.5 leading-tight">{label}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section>
         <AdminSectionLabel>{t.quickActions}</AdminSectionLabel>
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
           {quickActions.map(({ label, page, desc, icon }) => (
@@ -193,39 +225,6 @@ export function OverviewPage({ token, lang, onNavigate }: Props) {
         </div>
       </section>
 
-      <section className="rounded-xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-white p-5">
-        <div className="flex items-start gap-3">
-          <div className="w-9 h-9 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex flex-wrap items-center gap-2 mb-2">
-              <p className="text-[15px] font-bold text-gray-900">{t.adminGuideTitle}</p>
-              <span className="text-[11px] font-semibold uppercase tracking-wide bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">
-                iMentor
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {guideSteps.map(({ title, body, page }) => (
-                <button
-                  key={title}
-                  type="button"
-                  onClick={() => onNavigate(page)}
-                  className="text-left p-4 rounded-lg bg-white border border-gray-200 hover:border-indigo-200 hover:shadow-sm transition-all"
-                >
-                  <p className="text-[13.5px] font-semibold text-gray-900 mb-2">{title}</p>
-                  <p className="text-[12.5px] text-gray-600 leading-relaxed">{body}</p>
-                </button>
-              ))}
-            </div>
-            <p className="text-[12px] text-indigo-800/90 mt-4 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-100">
-              {t.adminGuideTip}
-            </p>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

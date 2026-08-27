@@ -57,4 +57,9 @@ export type AdminStats = {
   totalExams: number;
   totalViolations: number;
   bannedUsers: number;
+  totalKafedralar: number;
+  totalDirections: number;
+  totalLevels: number;
+  totalGroups: number;
+  totalStudents: number;
 };
